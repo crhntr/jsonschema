@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/refs/embedded",
+  "$defs": {
+    "inner": {
+      "$id": "https://example.com/refs/embedded/inner",
+      "type": "object",
+      "properties": {
+        "label": { "type": "string" }
+      }
+    }
+  },
+  "type": "object",
+  "properties": {
+    "child": { "$ref": "https://example.com/refs/embedded/inner" }
+  }
+}

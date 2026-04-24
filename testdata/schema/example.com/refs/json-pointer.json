@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/refs/json-pointer",
+  "$defs": {
+    "positiveInt": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "type": "object",
+  "properties": {
+    "count": { "$ref": "#/$defs/positiveInt" }
+  }
+}

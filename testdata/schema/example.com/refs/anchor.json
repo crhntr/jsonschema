@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/refs/anchor",
+  "$defs": {
+    "name": {
+      "$anchor": "personName",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "type": "object",
+  "properties": {
+    "name": { "$ref": "#personName" }
+  }
+}

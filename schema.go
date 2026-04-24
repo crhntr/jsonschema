@@ -9,11 +9,67 @@ import (
 	"github.com/go-json-experiment/json/jsontext"
 )
 
+// Schema is the parsed form of a JSON Schema document or subschema.
+type Schema = Meta
+
+// Parse unmarshals a JSON Schema document and retains a reference to buf so
+// callers can recover the original bytes via (*Schema).Source. The returned
+// schema is unresolved — call (*Resolver).Resolve or the package-level
+// Resolve to dereference $ref / $dynamicRef.
+func Parse(buf []byte) (*Schema, error) {
+	var s Schema
+	if err := json.Unmarshal(buf, &s); err != nil {
+		return nil, err
+	}
+	s.source = buf
+	return &s, nil
+}
+
 type Meta struct {
 	isBool, isObject bool
 	bool             bool
 	object           MetaObject
+
+	// resolution metadata. zero on freshly-unmarshaled values; populated by Resolve.
+	resolved       *Meta
+	dynamic        bool
+	baseURI        string
+	resource       *Meta
+	anchors        map[string]*Meta
+	dynamicAnchors map[string]*Meta
+	source         []byte
 }
+
+// Resolved returns the lexical-scope target of $ref or $dynamicRef, or nil if
+// this subschema has no reference or the schema has not been resolved.
+func (m *Meta) Resolved() *Meta { return m.resolved }
+
+// IsDynamic reports whether this subschema's $dynamicRef is "bookended" per
+// JSON Schema 2020-12 §8.2.3.2 — i.e., the initial lexical target's resource
+// contains a matching $dynamicAnchor, so a validator must walk the dynamic
+// scope at validation time.
+func (m *Meta) IsDynamic() bool { return m.dynamic }
+
+// BaseURI returns the lexical-scope base URI in effect at this subschema.
+func (m *Meta) BaseURI() string { return m.baseURI }
+
+// Resource returns the root of the JSON Schema resource (the nearest
+// enclosing schema that defines $id, or the document root) containing this
+// subschema. Returns nil before resolution.
+func (m *Meta) Resource() *Meta { return m.resource }
+
+// Anchor looks up a $anchor by name within this resource. Only meaningful
+// when called on a resource root (m == m.Resource()).
+func (m *Meta) Anchor(name string) *Meta { return m.anchors[name] }
+
+// DynamicAnchor looks up a $dynamicAnchor by name within this resource.
+func (m *Meta) DynamicAnchor(name string) *Meta { return m.dynamicAnchors[name] }
+
+// Source returns the original JSON document bytes this Meta was parsed from.
+// Only populated on resource roots (top-level document or embedded $id
+// resources within the same document share the same slice). Returns nil
+// otherwise.
+func (m *Meta) Source() []byte { return m.source }
 
 func (m *Meta) unsetIs() {
 	m.isBool = false
@@ -33,7 +89,7 @@ type MetaObject struct {
 
 	Comment string `json:"$comment,omitempty"`
 
-	Defs map[string]Meta `json:"$defs,omitempty"`
+	Defs map[string]*Meta `json:"$defs,omitempty"`
 
 	If   *Meta `json:"if,omitempty"`
 	Then *Meta `json:"then,omitempty"`
@@ -44,7 +100,7 @@ type MetaObject struct {
 	OneOf []Meta `json:"oneOf,omitempty"`
 	Not   *Meta  `json:"not,omitempty"`
 
-	Properties           map[string]Meta `json:"properties,omitempty"`
+	Properties           map[string]*Meta `json:"properties,omitempty"`
 	AdditionalProperties *Meta           `json:"additionalProperties,omitempty"`
 	PropertyNames        *Meta           `json:"propertyNames,omitempty"`
 

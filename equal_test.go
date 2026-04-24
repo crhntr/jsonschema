@@ -3,6 +3,8 @@ package jsonschema_test
 import (
 	"testing"
 
+	"github.com/go-json-experiment/json/jsontext"
+
 	"github.com/crhntr/jsonschema"
 )
 
@@ -89,4 +91,70 @@ func TestEqual(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEqual_errors(t *testing.T) {
+	for _, tt := range []struct {
+		Name string
+		A, B string
+	}{
+		{"duplicate key in A", `{"a":1,"a":2}`, `{"a":1}`},
+		{"duplicate key in B", `{"a":1}`, `{"a":1,"a":2}`},
+		{"duplicate key nested", `{"x":{"a":1,"a":2}}`, `{"x":{"a":1}}`},
+		{"malformed A object", `{`, `{}`},
+		{"malformed B object", `{}`, `{`},
+		{"malformed A value", `{"a":}`, `{"a":1}`},
+		{"garbage both", `xxx`, `xxx`},
+	} {
+		t.Run(tt.Name, func(t *testing.T) {
+			if _, err := jsonschema.Equal([]byte(tt.A), []byte(tt.B)); err == nil {
+				t.Fatal("expected error, got nil")
+			}
+		})
+	}
+}
+
+func FuzzEqualReflexive(f *testing.F) {
+	for _, s := range []string{
+		`null`, `true`, `false`, `0`, `1.5`, `"hello"`, `[]`, `{}`,
+		`{"a":1}`, `[1,2,3]`, `{"nested":{"x":[1,2]}}`,
+	} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if !jsontext.Value(data).IsValid() {
+			return
+		}
+		eq, err := jsonschema.Equal(data, data)
+		if err != nil {
+			return
+		}
+		if !eq {
+			t.Errorf("Equal(x,x)=false for %q", data)
+		}
+	})
+}
+
+func FuzzEqualSymmetric(f *testing.F) {
+	seeds := [][2]string{
+		{`1`, `1.0`},
+		{`{"a":1,"b":2}`, `{"b":2,"a":1}`},
+		{`[1,2]`, `[1,2,3]`},
+		{`null`, `0`},
+		{`"a"`, `"b"`},
+	}
+	for _, s := range seeds {
+		f.Add([]byte(s[0]), []byte(s[1]))
+	}
+	f.Fuzz(func(t *testing.T, a, b []byte) {
+		ab, errA := jsonschema.Equal(a, b)
+		ba, errB := jsonschema.Equal(b, a)
+		if (errA == nil) != (errB == nil) {
+			t.Errorf("asymmetric error: Equal(a,b)=%v, Equal(b,a)=%v", errA, errB)
+			return
+		}
+		if errA == nil && ab != ba {
+			t.Errorf("asymmetric result: Equal(%q,%q)=%v, Equal(%q,%q)=%v", a, b, ab, b, a, ba)
+		}
+	})
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -14,16 +15,17 @@ import (
 )
 
 func main() {
+	ctx := context.Background()
 	wd, err := os.Getwd()
 	if err != nil {
 		log.Fatalln(err)
 	}
-	if code := run(wd, os.Args, os.Stdout, os.Stderr); code != 0 {
+	if code := run(ctx, wd, os.Args, os.Stdout, os.Stderr); code != 0 {
 		os.Exit(code)
 	}
 }
 
-func run(wd string, args []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) int {
 	const (
 		exitOK = iota
 		exitError
@@ -40,9 +42,19 @@ func run(wd string, args []string, stdout, stderr io.Writer) int {
 			return exitError
 		}
 		return exitOK
+	case "generate":
+		if err := generate(wd, flagSet.Args()[1:], stdout, stderr); err != nil {
+			_, _ = io.WriteString(stderr, err.Error()+"\n")
+			return exitError
+		}
+		return exitOK
 	default:
 		return exitOK
 	}
+}
+
+func schemaFileFlag(flagSet *flag.FlagSet, schemaPath *string) {
+	flagSet.StringVar(schemaPath, "schema-file", "", "path to JSON Schema file")
 }
 
 func validate(wd string, args []string, stdout, stderr io.Writer) error {
@@ -50,7 +62,7 @@ func validate(wd string, args []string, stdout, stderr io.Writer) error {
 		schemaPath string
 	)
 	flagSet := flag.NewFlagSet("validate", flag.ContinueOnError)
-	flagSet.StringVar(&schemaPath, "schema-file", "", "path to JSON Schema file")
+	schemaFileFlag(flagSet, &schemaPath)
 	if err := flagSet.Parse(args); err != nil {
 		return err
 	}
@@ -74,6 +86,18 @@ func validate(wd string, args []string, stdout, stderr io.Writer) error {
 		if err := m.Evaluate(arg, buf); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func generate(wd string, args []string, stdout, stderr io.Writer) error {
+	var (
+		schemaPath string
+	)
+	flagSet := flag.NewFlagSet("generate", flag.ContinueOnError)
+	schemaFileFlag(flagSet, &schemaPath)
+	if err := flagSet.Parse(args); err != nil {
+		return err
 	}
 	return nil
 }

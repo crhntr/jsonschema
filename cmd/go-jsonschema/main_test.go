@@ -18,7 +18,7 @@ func Test(t *testing.T) {
 	}, func(state *script.State, args ...string) (script.WaitFunc, error) {
 		return func(state *script.State) (string, string, error) {
 			var stdout, stderr bytes.Buffer
-			code := run(state.Getwd(), args, &stdout, &stderr)
+			code := run(state.Context(), state.Getwd(), args, &stdout, &stderr)
 			if code != 0 {
 				return stdout.String(), stderr.String(), ExitCode(code)
 			}
@@ -26,7 +26,12 @@ func Test(t *testing.T) {
 		}, nil
 	})
 
-	scripttest.Test(t, t.Context(), e, nil, "testdata/*.txt")
+	t.Run("validate", func(t *testing.T) {
+		scripttest.Test(t, t.Context(), e, nil, "testdata/validate/*.txt")
+	})
+	t.Run("generate", func(t *testing.T) {
+		scripttest.Test(t, t.Context(), e, nil, "testdata/generate/*.txt")
+	})
 }
 
 type ExitCode int

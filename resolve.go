@@ -12,7 +12,6 @@ import (
 	"sync"
 )
 
-
 // Resolver fetches and links JSON Schema 2020-12 documents.
 //
 // The zero value is usable; Client defaults to http.DefaultClient. The
@@ -102,25 +101,32 @@ func (r *Resolver) LoadFS(fsys fs.FS, patterns ...string) error {
 				continue
 			}
 			seen[name] = true
-			body, err := fs.ReadFile(fsys, name)
-			if err != nil {
-				return fmt.Errorf("jsonschema: read %s: %w", name, err)
-			}
-			doc, err := Parse(body)
-			if err != nil {
-				return fmt.Errorf("jsonschema: parse %s: %w", name, err)
-			}
-			obj, ok := doc.TypeObject()
-			if !ok {
-				return fmt.Errorf("jsonschema: %s: top-level boolean schema has no $id", name)
-			}
-			if obj.ID == "" {
-				return fmt.Errorf("jsonschema: %s: missing $id", name)
-			}
-			if _, err := r.Load(obj.ID, body); err != nil {
-				return fmt.Errorf("jsonschema: load %s: %w", name, err)
+			if err := r.loadFSFile(fsys, name); err != nil {
+				return err
 			}
 		}
+	}
+	return nil
+}
+
+func (r *Resolver) loadFSFile(fsys fs.FS, name string) error {
+	body, err := fs.ReadFile(fsys, name)
+	if err != nil {
+		return fmt.Errorf("jsonschema: read %s: %w", name, err)
+	}
+	doc, err := Parse(body)
+	if err != nil {
+		return fmt.Errorf("jsonschema: parse %s: %w", name, err)
+	}
+	obj, ok := doc.TypeObject()
+	if !ok {
+		return fmt.Errorf("jsonschema: %s: top-level boolean schema has no $id", name)
+	}
+	if obj.ID == "" {
+		return fmt.Errorf("jsonschema: %s: missing $id", name)
+	}
+	if _, err := r.Load(obj.ID, body); err != nil {
+		return fmt.Errorf("jsonschema: load %s: %w", name, err)
 	}
 	return nil
 }
@@ -129,17 +135,9 @@ func (r *Resolver) LoadFS(fsys fs.FS, patterns ...string) error {
 // resource and anchor inside it. Recursively fetches any $ref / $dynamicRef
 // targets it discovers. Resources are deduplicated by absolute URI.
 func (r *Resolver) loadResource(ctx context.Context, absURI string) error {
-	r.mu.Lock()
-	if existing, ok := r.cache[absURI]; ok && existing != nil {
-		r.mu.Unlock()
+	if r.reserveCacheSlot(absURI) {
 		return nil
 	}
-	if r.cache == nil {
-		r.cache = map[string]*Schema{}
-	}
-	// reserve the slot so recursive calls don't refetch.
-	r.cache[absURI] = nil
-	r.mu.Unlock()
 
 	buf, err := r.fetch(ctx, absURI)
 	if err != nil {
@@ -157,6 +155,21 @@ func (r *Resolver) loadResource(ctx context.Context, absURI string) error {
 	return nil
 }
 
+// reserveCacheSlot returns true if absURI is already loaded; otherwise it
+// reserves a nil placeholder so recursive callers don't refetch.
+func (r *Resolver) reserveCacheSlot(absURI string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cache == nil {
+		r.cache = map[string]*Schema{}
+	}
+	if existing, ok := r.cache[absURI]; ok && existing != nil {
+		return true
+	}
+	r.cache[absURI] = nil
+	return false
+}
+
 // ingest parses body, walks the tree to register the resource(s) and
 // anchors it contains, and returns the document plus the deduplicated set
 // of external URIs referenced by $ref / $dynamicRef.
@@ -165,14 +178,10 @@ func (r *Resolver) ingest(absURI string, body []byte) (*Schema, []string, error)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve: parse %q: %w", absURI, err)
 	}
-
 	external, err := r.indexDocument(doc, absURI)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve: index %q: %w", absURI, err)
 	}
-
-	// indexDocument always caches under absURI; if the doc had its own
-	// $id, indexSubtree also caches under that. Nothing more to do.
 	return doc, external, nil
 }
 
@@ -201,67 +210,63 @@ func closeAndIgnoreError(c io.Closer) { _ = c.Close() }
 
 // indexDocument walks doc, sets baseURI / resource on every Meta, registers
 // resource roots ($id) and anchors ($anchor / $dynamicAnchor), and returns
-// the set of *external* absolute URIs that need to be fetched (i.e. $refs
-// pointing outside this document, deduplicated).
+// the deduplicated set of external URIs the document references.
 func (r *Resolver) indexDocument(doc *Meta, fetchURI string) ([]string, error) {
-	seenExternal := map[string]struct{}{}
-	var external []string
+	r.initResource(doc, fetchURI)
+	r.cacheResource(fetchURI, doc)
 
-	// We pre-register the doc as a resource keyed by fetchURI; if it has
-	// its own $id, indexSubtree will register the $id-keyed resource too.
-	doc.baseURI = fetchURI
-	doc.resource = doc
-	doc.anchors = map[string]*Meta{}
-	doc.dynamicAnchors = map[string]*Meta{}
+	idx := indexState{
+		seen: map[string]struct{}{},
+	}
+	if err := r.indexSubtree(doc, fetchURI, doc, &idx); err != nil {
+		return nil, err
+	}
+	return idx.external, nil
+}
 
+// initResource initializes the resource-root metadata on m. Pre-condition
+// for indexing: every resource root has empty anchor maps and a known
+// baseURI before its subtree is walked.
+func (r *Resolver) initResource(m *Meta, base string) {
+	m.baseURI = base
+	m.resource = m
+	m.anchors = map[string]*Meta{}
+	m.dynamicAnchors = map[string]*Meta{}
+}
+
+func (r *Resolver) cacheResource(absURI string, m *Meta) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.cache == nil {
 		r.cache = map[string]*Schema{}
 	}
-	r.cache[fetchURI] = doc
-	r.mu.Unlock()
-
-	if err := r.indexSubtree(doc, fetchURI, doc, seenExternal, &external); err != nil {
-		return nil, err
-	}
-	return external, nil
+	r.cache[absURI] = m
 }
 
-// indexSubtree recurses through every subschema. base is the lexical base URI
-// in effect; resource is the current resource root.
-func (r *Resolver) indexSubtree(m *Meta, base string, resource *Meta, seenExternal map[string]struct{}, external *[]string) error {
+// indexState carries the per-document accumulators threaded through the
+// indexing recursion.
+type indexState struct {
+	seen     map[string]struct{}
+	external []string
+}
+
+func (r *Resolver) indexSubtree(m *Meta, base string, resource *Meta, idx *indexState) error {
 	if m == nil {
 		return nil
 	}
 	obj, ok := m.TypeObject()
 	if !ok {
-		// boolean schema: still tag it.
 		m.baseURI = base
 		m.resource = resource
 		return nil
 	}
 
-	// $id introduces a new resource. Resolve relative to current base.
 	if obj.ID != "" {
-		newBase, err := resolveRelative(base, obj.ID)
+		newBase, newResource, err := r.openEmbeddedResource(m, base, resource, obj.ID)
 		if err != nil {
-			return fmt.Errorf("$id %q: %w", obj.ID, err)
+			return err
 		}
-		newBase = stripFragment(newBase)
-		// embedded resource: this Meta becomes the new resource root.
-		if m != resource || base != newBase {
-			m.anchors = map[string]*Meta{}
-			m.dynamicAnchors = map[string]*Meta{}
-			resource = m
-			r.mu.Lock()
-			r.cache[newBase] = m
-			// share underlying source with enclosing document if known.
-			if m.source == nil && resource.source != nil {
-				m.source = resource.source
-			}
-			r.mu.Unlock()
-		}
-		base = newBase
+		base, resource = newBase, newResource
 	}
 
 	m.baseURI = base
@@ -274,51 +279,42 @@ func (r *Resolver) indexSubtree(m *Meta, base string, resource *Meta, seenExtern
 		resource.dynamicAnchors[obj.DynamicAnchor] = m
 	}
 
-	if obj.Ref != "" {
-		if err := r.recordExternal(base, obj.Ref, seenExternal, external); err != nil {
-			return err
+	for _, ref := range []string{obj.Ref, obj.DynamicRef} {
+		if ref == "" {
+			continue
 		}
-	}
-	if obj.DynamicRef != "" {
-		if err := r.recordExternal(base, obj.DynamicRef, seenExternal, external); err != nil {
+		if err := r.recordExternal(base, ref, idx); err != nil {
 			return err
 		}
 	}
 
-	for _, c := range obj.Defs {
-		if err := r.indexSubtree(c, base, resource, seenExternal, external); err != nil {
-			return err
-		}
-	}
-	for _, c := range obj.Properties {
-		if err := r.indexSubtree(c, base, resource, seenExternal, external); err != nil {
-			return err
-		}
-	}
-	for i := range obj.AllOf {
-		if err := r.indexSubtree(&obj.AllOf[i], base, resource, seenExternal, external); err != nil {
-			return err
-		}
-	}
-	for i := range obj.AnyOf {
-		if err := r.indexSubtree(&obj.AnyOf[i], base, resource, seenExternal, external); err != nil {
-			return err
-		}
-	}
-	for i := range obj.OneOf {
-		if err := r.indexSubtree(&obj.OneOf[i], base, resource, seenExternal, external); err != nil {
-			return err
-		}
-	}
-	for _, child := range []*Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.AdditionalProperties, obj.PropertyNames} {
-		if err := r.indexSubtree(child, base, resource, seenExternal, external); err != nil {
-			return err
-		}
-	}
-	return nil
+	return walkSubschemas(m, func(child *Meta) error {
+		return r.indexSubtree(child, base, resource, idx)
+	})
 }
 
-func (r *Resolver) recordExternal(base, ref string, seen map[string]struct{}, out *[]string) error {
+// openEmbeddedResource handles a subschema with $id. If the resolved $id
+// differs from the enclosing base, the subschema becomes a new resource
+// root cached under that URI.
+func (r *Resolver) openEmbeddedResource(m *Meta, base string, resource *Meta, id string) (string, *Meta, error) {
+	newBase, err := resolveRelative(base, id)
+	if err != nil {
+		return "", nil, fmt.Errorf("$id %q: %w", id, err)
+	}
+	newBase = stripFragment(newBase)
+	if m == resource && base == newBase {
+		return newBase, resource, nil
+	}
+	m.anchors = map[string]*Meta{}
+	m.dynamicAnchors = map[string]*Meta{}
+	if m.source == nil && resource.source != nil {
+		m.source = resource.source
+	}
+	r.cacheResource(newBase, m)
+	return newBase, m, nil
+}
+
+func (r *Resolver) recordExternal(base, ref string, idx *indexState) error {
 	target, err := resolveRelative(base, ref)
 	if err != nil {
 		return fmt.Errorf("ref %q: %w", ref, err)
@@ -333,11 +329,11 @@ func (r *Resolver) recordExternal(base, ref string, seen map[string]struct{}, ou
 	if cached {
 		return nil
 	}
-	if _, dup := seen[target]; dup {
+	if _, dup := idx.seen[target]; dup {
 		return nil
 	}
-	seen[target] = struct{}{}
-	*out = append(*out, target)
+	idx.seen[target] = struct{}{}
+	idx.external = append(idx.external, target)
 	return nil
 }
 
@@ -392,33 +388,48 @@ func (r *Resolver) linkSubtree(m *Meta) error {
 		m.dynamic = bookended
 	}
 
+	return walkSubschemas(m, r.linkSubtree)
+}
+
+// walkSubschemas calls visit on every direct child subschema of m: $defs,
+// properties, allOf/anyOf/oneOf entries, and the singleton if/then/else/
+// not/items/additionalProperties/propertyNames slots. Nil children are
+// skipped. Recursion is the visitor's responsibility.
+func walkSubschemas(m *Meta, visit func(*Meta) error) error {
+	obj, ok := m.TypeObject()
+	if !ok {
+		return nil
+	}
 	for _, c := range obj.Defs {
-		if err := r.linkSubtree(c); err != nil {
+		if err := visit(c); err != nil {
 			return err
 		}
 	}
 	for _, c := range obj.Properties {
-		if err := r.linkSubtree(c); err != nil {
+		if err := visit(c); err != nil {
 			return err
 		}
 	}
 	for i := range obj.AllOf {
-		if err := r.linkSubtree(&obj.AllOf[i]); err != nil {
+		if err := visit(&obj.AllOf[i]); err != nil {
 			return err
 		}
 	}
 	for i := range obj.AnyOf {
-		if err := r.linkSubtree(&obj.AnyOf[i]); err != nil {
+		if err := visit(&obj.AnyOf[i]); err != nil {
 			return err
 		}
 	}
 	for i := range obj.OneOf {
-		if err := r.linkSubtree(&obj.OneOf[i]); err != nil {
+		if err := visit(&obj.OneOf[i]); err != nil {
 			return err
 		}
 	}
-	for _, child := range []*Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.AdditionalProperties, obj.PropertyNames} {
-		if err := r.linkSubtree(child); err != nil {
+	for _, c := range []*Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.AdditionalProperties, obj.PropertyNames} {
+		if c == nil {
+			continue
+		}
+		if err := visit(c); err != nil {
 			return err
 		}
 	}
@@ -428,6 +439,9 @@ func (r *Resolver) linkSubtree(m *Meta) error {
 // resolveReference resolves ref against base, returning the target *Meta.
 // When dynamic is true, also reports whether the reference is bookended by a
 // matching $dynamicAnchor in the initial target's resource (per §8.2.3.2).
+// Bookending tells a future validator to walk the runtime dynamic scope
+// (outermost to innermost) for the first matching $dynamicAnchor instead
+// of using the lexical fallback returned here.
 func (r *Resolver) resolveReference(base, ref string, dynamic bool) (*Meta, bool, error) {
 	abs, err := resolveRelative(base, ref)
 	if err != nil {
@@ -454,10 +468,6 @@ func (r *Resolver) resolveReference(base, ref string, dynamic bool) (*Meta, bool
 	}
 
 	if dynamic && isPlainName {
-		// Bookending: if the *initial target's resource* declares the
-		// same $dynamicAnchor name, the reference is dynamic. The
-		// validator will at runtime walk the dynamic scope (outermost
-		// to innermost) for the first resource with the same anchor.
 		if _, ok := target.resource.dynamicAnchors[frag]; ok {
 			return target, true, nil
 		}
@@ -465,13 +475,12 @@ func (r *Resolver) resolveReference(base, ref string, dynamic bool) (*Meta, bool
 	return target, false, nil
 }
 
-// resolveFragment resolves frag within resource. Returns target, whether the
-// fragment was a plain name (vs JSON Pointer or empty), and any error.
+// resolveFragment resolves frag within resource. Returns target, whether
+// the fragment was a plain name (vs JSON Pointer or empty), and any error.
 func resolveFragment(resource *Meta, frag string) (*Meta, bool, error) {
 	if frag == "" {
 		return resource, false, nil
 	}
-	// JSON Pointer fragments start with "/" (or are empty after the "#").
 	if strings.HasPrefix(frag, "/") {
 		target, err := walkJSONPointer(resource, frag)
 		if err != nil {
@@ -479,7 +488,6 @@ func resolveFragment(resource *Meta, frag string) (*Meta, bool, error) {
 		}
 		return target, false, nil
 	}
-	// Plain name: $anchor or $dynamicAnchor lookup.
 	decoded, err := url.PathUnescape(frag)
 	if err != nil {
 		return nil, false, fmt.Errorf("fragment %q: %w", frag, err)
@@ -493,10 +501,21 @@ func resolveFragment(resource *Meta, frag string) (*Meta, bool, error) {
 	return nil, true, fmt.Errorf("anchor %q not found in resource %q", decoded, resource.baseURI)
 }
 
-// walkJSONPointer follows an RFC 6901 JSON Pointer through a Meta tree. The
-// pointer is interpreted as a path through the JSON-shaped representation of
-// the schema, so e.g. "/$defs/foo/properties/bar" descends through Meta
-// fields that correspond to those JSON keys.
+// singleChildAccessors maps JSON Pointer single-token names to the
+// MetaObject field they descend into.
+var singleChildAccessors = map[string]func(MetaObject) *Meta{
+	"if":                   func(o MetaObject) *Meta { return o.If },
+	"then":                 func(o MetaObject) *Meta { return o.Then },
+	"else":                 func(o MetaObject) *Meta { return o.Else },
+	"not":                  func(o MetaObject) *Meta { return o.Not },
+	"items":                func(o MetaObject) *Meta { return o.Items },
+	"additionalProperties": func(o MetaObject) *Meta { return o.AdditionalProperties },
+	"propertyNames":        func(o MetaObject) *Meta { return o.PropertyNames },
+}
+
+// walkJSONPointer follows an RFC 6901 JSON Pointer through a Meta tree.
+// The pointer descends through Meta fields whose JSON encoding matches
+// each token (e.g. "/$defs/foo/properties/bar").
 func walkJSONPointer(m *Meta, ptr string) (*Meta, error) {
 	if ptr == "" {
 		return m, nil
@@ -504,113 +523,83 @@ func walkJSONPointer(m *Meta, ptr string) (*Meta, error) {
 	if !strings.HasPrefix(ptr, "/") {
 		return nil, fmt.Errorf("invalid JSON Pointer %q", ptr)
 	}
+	tokens := tokenizeJSONPointer(ptr)
+	cur := m
+	for i := 0; i < len(tokens); {
+		next, advance, err := stepJSONPointer(cur, tokens, i)
+		if err != nil {
+			return nil, fmt.Errorf("JSON Pointer %q: %w", ptr, err)
+		}
+		cur = next
+		i += advance
+	}
+	return cur, nil
+}
+
+func tokenizeJSONPointer(ptr string) []string {
 	raw := strings.Split(ptr[1:], "/")
 	tokens := make([]string, len(raw))
 	for i, t := range raw {
 		tokens[i] = unescapeJSONPointerToken(t)
 	}
-	cur := m
-	i := 0
-	for i < len(tokens) {
-		obj, ok := cur.TypeObject()
-		if !ok {
-			return nil, fmt.Errorf("JSON Pointer %q: cannot descend into boolean schema", ptr)
-		}
-		tok := tokens[i]
-		switch tok {
-		case "$defs", "$vocabulary":
-			if i+1 >= len(tokens) {
-				return nil, fmt.Errorf("JSON Pointer %q: trailing key required after %s", ptr, tok)
-			}
-			next, ok := obj.Defs[tokens[i+1]]
-			if !ok || next == nil {
-				return nil, fmt.Errorf("JSON Pointer %q: %s/%s missing", ptr, tok, tokens[i+1])
-			}
-			cur = next
-			i += 2
-		case "properties", "patternProperties":
-			if i+1 >= len(tokens) {
-				return nil, fmt.Errorf("JSON Pointer %q: trailing key required after %s", ptr, tok)
-			}
-			next, ok := obj.Properties[tokens[i+1]]
-			if !ok || next == nil {
-				return nil, fmt.Errorf("JSON Pointer %q: %s/%s missing", ptr, tok, tokens[i+1])
-			}
-			cur = next
-			i += 2
-		case "allOf", "anyOf", "oneOf":
-			if i+1 >= len(tokens) {
-				return nil, fmt.Errorf("JSON Pointer %q: trailing index required after %s", ptr, tok)
-			}
-			idx, err := strconv.Atoi(tokens[i+1])
-			if err != nil {
-				return nil, fmt.Errorf("JSON Pointer %q: %s index %q: %w", ptr, tok, tokens[i+1], err)
-			}
-			var arr []Meta
-			switch tok {
-			case "allOf":
-				arr = obj.AllOf
-			case "anyOf":
-				arr = obj.AnyOf
-			case "oneOf":
-				arr = obj.OneOf
-			}
-			if idx < 0 || idx >= len(arr) {
-				return nil, fmt.Errorf("JSON Pointer %q: %s index %d out of range", ptr, tok, idx)
-			}
-			cur = &arr[idx]
-			i += 2
-		case "if":
-			if obj.If == nil {
-				return nil, fmt.Errorf("JSON Pointer %q: if not present", ptr)
-			}
-			cur = obj.If
-			i++
-		case "then":
-			if obj.Then == nil {
-				return nil, fmt.Errorf("JSON Pointer %q: then not present", ptr)
-			}
-			cur = obj.Then
-			i++
-		case "else":
-			if obj.Else == nil {
-				return nil, fmt.Errorf("JSON Pointer %q: else not present", ptr)
-			}
-			cur = obj.Else
-			i++
-		case "not":
-			if obj.Not == nil {
-				return nil, fmt.Errorf("JSON Pointer %q: not not present", ptr)
-			}
-			cur = obj.Not
-			i++
-		case "items":
-			if obj.Items == nil {
-				return nil, fmt.Errorf("JSON Pointer %q: items not present", ptr)
-			}
-			cur = obj.Items
-			i++
-		case "additionalProperties":
-			if obj.AdditionalProperties == nil {
-				return nil, fmt.Errorf("JSON Pointer %q: additionalProperties not present", ptr)
-			}
-			cur = obj.AdditionalProperties
-			i++
-		case "propertyNames":
-			if obj.PropertyNames == nil {
-				return nil, fmt.Errorf("JSON Pointer %q: propertyNames not present", ptr)
-			}
-			cur = obj.PropertyNames
-			i++
-		default:
-			return nil, fmt.Errorf("JSON Pointer %q: token %q not traversable", ptr, tok)
-		}
+	return tokens
+}
+
+func stepJSONPointer(m *Meta, tokens []string, i int) (*Meta, int, error) {
+	obj, ok := m.TypeObject()
+	if !ok {
+		return nil, 0, fmt.Errorf("cannot descend into boolean schema")
 	}
-	return cur, nil
+	tok := tokens[i]
+	switch tok {
+	case "$defs", "$vocabulary":
+		return mapPointerStep(tok, obj.Defs, tokens, i)
+	case "properties", "patternProperties":
+		return mapPointerStep(tok, obj.Properties, tokens, i)
+	case "allOf":
+		return arrayPointerStep(tok, obj.AllOf, tokens, i)
+	case "anyOf":
+		return arrayPointerStep(tok, obj.AnyOf, tokens, i)
+	case "oneOf":
+		return arrayPointerStep(tok, obj.OneOf, tokens, i)
+	}
+	if accessor, ok := singleChildAccessors[tok]; ok {
+		child := accessor(obj)
+		if child == nil {
+			return nil, 0, fmt.Errorf("%s not present", tok)
+		}
+		return child, 1, nil
+	}
+	return nil, 0, fmt.Errorf("token %q not traversable", tok)
+}
+
+func mapPointerStep(name string, m map[string]*Meta, tokens []string, i int) (*Meta, int, error) {
+	if i+1 >= len(tokens) {
+		return nil, 0, fmt.Errorf("trailing key required after %s", name)
+	}
+	key := tokens[i+1]
+	next, ok := m[key]
+	if !ok || next == nil {
+		return nil, 0, fmt.Errorf("%s/%s missing", name, key)
+	}
+	return next, 2, nil
+}
+
+func arrayPointerStep(name string, arr []Meta, tokens []string, i int) (*Meta, int, error) {
+	if i+1 >= len(tokens) {
+		return nil, 0, fmt.Errorf("trailing index required after %s", name)
+	}
+	idx, err := strconv.Atoi(tokens[i+1])
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s index %q: %w", name, tokens[i+1], err)
+	}
+	if idx < 0 || idx >= len(arr) {
+		return nil, 0, fmt.Errorf("%s index %d out of range", name, idx)
+	}
+	return &arr[idx], 2, nil
 }
 
 func unescapeJSONPointerToken(s string) string {
-	// RFC 6901: ~1 -> /, ~0 -> ~ (in that order).
 	s = strings.ReplaceAll(s, "~1", "/")
 	s = strings.ReplaceAll(s, "~0", "~")
 	if dec, err := url.PathUnescape(s); err == nil {
@@ -619,8 +608,6 @@ func unescapeJSONPointerToken(s string) string {
 	return s
 }
 
-// resolveRelative resolves ref against base. base is expected to be an
-// absolute URI; ref may be relative or absolute.
 func resolveRelative(base, ref string) (string, error) {
 	bu, err := url.Parse(base)
 	if err != nil {
@@ -653,7 +640,3 @@ func absoluteResourceURI(rawURL string) (string, error) {
 	u.Fragment = ""
 	return u.String(), nil
 }
-
-// keep the unused import 'strconv' eligible; jsonPointerStep doesn't yet
-// index into arrays, but the fixture tests in this file may.
-var _ = strconv.Atoi

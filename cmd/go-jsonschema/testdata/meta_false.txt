@@ -1,0 +1,6 @@
+! go-jsonschema validate --schema-file simple.schema.json something.json
+
+-- simple.schema.json --
+false
+-- something.json --
+{}

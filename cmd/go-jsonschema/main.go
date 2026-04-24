@@ -1,0 +1,79 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+
+	"github.com/go-json-experiment/json"
+
+	"github.com/crhntr/jsonschema"
+)
+
+func main() {
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalln(err)
+	}
+	if code := run(wd, os.Args, os.Stdout, os.Stderr); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func run(wd string, args []string, stdout, stderr io.Writer) int {
+	const (
+		exitOK = iota
+		exitError
+	)
+	flagSet := flag.NewFlagSet("go-jsonschema", flag.ContinueOnError)
+	if err := flagSet.Parse(args); err != nil {
+		_, _ = io.WriteString(stderr, err.Error())
+		return exitError
+	}
+	switch flagSet.Arg(0) {
+	case "validate":
+		if err := validate(wd, flagSet.Args()[1:], stdout, stderr); err != nil {
+			_, _ = io.WriteString(stderr, err.Error()+"\n")
+			return exitError
+		}
+		return exitOK
+	default:
+		return exitOK
+	}
+}
+
+func validate(wd string, args []string, stdout, stderr io.Writer) error {
+	var (
+		schemaPath string
+	)
+	flagSet := flag.NewFlagSet("validate", flag.ContinueOnError)
+	flagSet.StringVar(&schemaPath, "schema-file", "", "path to JSON Schema file")
+	if err := flagSet.Parse(args); err != nil {
+		return err
+	}
+	if schemaPath == "" {
+		return fmt.Errorf("schema-file flag is required")
+	}
+	schemaJSON, err := os.ReadFile(filepath.Clean(filepath.Join(wd, schemaPath)))
+	if err != nil {
+		return err
+	}
+	var m jsonschema.Meta
+	if err := json.Unmarshal(schemaJSON, &m); err != nil {
+		return err
+	}
+
+	for _, arg := range flagSet.Args() {
+		buf, err := os.ReadFile(filepath.Clean(filepath.Join(wd, arg)))
+		if err != nil {
+			return err
+		}
+		if err := m.Evaluate(arg, buf); err != nil {
+			return err
+		}
+	}
+	return nil
+}

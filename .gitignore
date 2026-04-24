@@ -1,3 +1,2 @@
-spec/drafts/*/*.html
-spec/drafts/*/*.json
-docs/tmp
+docs/*/*.json
+docs/*/*.html

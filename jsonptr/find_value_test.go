@@ -143,6 +143,83 @@ func TestFindValueMarshalerAtRoot(t *testing.T) {
 	}
 }
 
+// pointerStamp implements json.Marshaler with a *pointer* receiver so we
+// can verify hasCustomJSON's addressable-pointer branch.
+type pointerStamp struct{ secret string }
+
+func (p *pointerStamp) MarshalJSON() ([]byte, error) {
+	return []byte(`{"label":"P:` + p.secret + `","kind":"pstamp"}`), nil
+}
+
+func TestFindValuePointerReceiverMarshaler(t *testing.T) {
+	type letter struct {
+		Mark pointerStamp `json:"mark"`
+	}
+	// Pass a pointer to the outer so the embedded field is addressable —
+	// pointer-receiver marshalers are only detected on addressable values.
+	in := &letter{Mark: pointerStamp{secret: "yo"}}
+
+	raw, live, err := jsonptr.FindValue("/mark/label", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `"P:yo"` {
+		t.Errorf("raw = %s, want \"P:yo\"", raw)
+	}
+	if live != "P:yo" {
+		t.Errorf("live = %v, want P:yo", live)
+	}
+}
+
+// streamStamp implements jsontext.MarshalerTo (v2 streaming marshal)
+// instead of json.Marshaler.
+type streamStamp struct{ secret string }
+
+func (s streamStamp) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return enc.WriteValue([]byte(`{"label":"V2:` + s.secret + `","kind":"v2"}`))
+}
+
+func TestFindValueV2Marshaler(t *testing.T) {
+	type letter struct {
+		Mark streamStamp `json:"mark"`
+	}
+	in := letter{Mark: streamStamp{secret: "ok"}}
+
+	raw, live, err := jsonptr.FindValue("/mark/label", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `"V2:ok"` {
+		t.Errorf("raw = %s, want \"V2:ok\"", raw)
+	}
+	if live != "V2:ok" {
+		t.Errorf("live = %v, want V2:ok", live)
+	}
+}
+
+// streamStampPointer implements jsontext.MarshalerTo with a pointer
+// receiver — exercises the addressable-pointer + v2 branch.
+type streamStampPointer struct{ secret string }
+
+func (s *streamStampPointer) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return enc.WriteValue([]byte(`{"label":"PV2:` + s.secret + `"}`))
+}
+
+func TestFindValueV2PointerReceiver(t *testing.T) {
+	type letter struct {
+		Mark streamStampPointer `json:"mark"`
+	}
+	in := &letter{Mark: streamStampPointer{secret: "z"}}
+
+	raw, _, err := jsonptr.FindValue("/mark/label", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `"PV2:z"` {
+		t.Errorf("raw = %s, want \"PV2:z\"", raw)
+	}
+}
+
 func TestFindValueMissingField(t *testing.T) {
 	p := &person{Name: "x"}
 	_, _, err := jsonptr.FindValue("/nope", p)

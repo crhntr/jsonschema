@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -61,19 +62,82 @@ func Resolve(ctx context.Context, client *http.Client, rawURL string) (*Schema, 
 	return r.Resolve(ctx, rawURL)
 }
 
+// Load ingests a pre-fetched JSON Schema document at absURI into the
+// resolver's cache. The document is parsed and indexed (embedded $id
+// resources, $anchor / $dynamicAnchor) but no HTTP requests are made;
+// external $refs discovered during indexing are left for a subsequent
+// call to Resolve to fetch (or are matched against schemas already
+// cached via prior Load / LoadFS calls).
+//
+// absURI must be absolute. If the document declares its own $id the
+// resolver also caches it under that $id.
+func (r *Resolver) Load(absURI string, body []byte) (*Schema, error) {
+	abs, err := absoluteResourceURI(absURI)
+	if err != nil {
+		return nil, err
+	}
+	doc, _, err := r.ingest(abs, body)
+	return doc, err
+}
+
+// LoadFS reads each fs.Glob match for the given patterns from fsys, parses
+// it as a JSON Schema, and registers it in the cache under the schema's
+// own $id. Files lacking $id are an error. Modeled after
+// (*template.Template).ParseFS.
+func (r *Resolver) LoadFS(fsys fs.FS, patterns ...string) error {
+	if len(patterns) == 0 {
+		return fmt.Errorf("jsonschema: LoadFS requires at least one pattern")
+	}
+	seen := map[string]bool{}
+	for _, pat := range patterns {
+		matches, err := fs.Glob(fsys, pat)
+		if err != nil {
+			return fmt.Errorf("jsonschema: glob %q: %w", pat, err)
+		}
+		if len(matches) == 0 {
+			return fmt.Errorf("jsonschema: pattern %q matched no files", pat)
+		}
+		for _, name := range matches {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			body, err := fs.ReadFile(fsys, name)
+			if err != nil {
+				return fmt.Errorf("jsonschema: read %s: %w", name, err)
+			}
+			doc, err := Parse(body)
+			if err != nil {
+				return fmt.Errorf("jsonschema: parse %s: %w", name, err)
+			}
+			obj, ok := doc.TypeObject()
+			if !ok {
+				return fmt.Errorf("jsonschema: %s: top-level boolean schema has no $id", name)
+			}
+			if obj.ID == "" {
+				return fmt.Errorf("jsonschema: %s: missing $id", name)
+			}
+			if _, err := r.Load(obj.ID, body); err != nil {
+				return fmt.Errorf("jsonschema: load %s: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
 // loadResource fetches absURI (if not cached), parses it, and indexes every
-// resource and anchor inside it. Recursively enqueues any $ref / $dynamicRef
+// resource and anchor inside it. Recursively fetches any $ref / $dynamicRef
 // targets it discovers. Resources are deduplicated by absolute URI.
 func (r *Resolver) loadResource(ctx context.Context, absURI string) error {
 	r.mu.Lock()
-	if _, ok := r.cache[absURI]; ok {
+	if existing, ok := r.cache[absURI]; ok && existing != nil {
 		r.mu.Unlock()
 		return nil
 	}
 	if r.cache == nil {
 		r.cache = map[string]*Schema{}
 	}
-	// reserve the slot so concurrent / recursive calls don't refetch.
+	// reserve the slot so recursive calls don't refetch.
 	r.cache[absURI] = nil
 	r.mu.Unlock()
 
@@ -81,41 +145,35 @@ func (r *Resolver) loadResource(ctx context.Context, absURI string) error {
 	if err != nil {
 		return err
 	}
-	doc, err := Parse(buf)
+	_, external, err := r.ingest(absURI, buf)
 	if err != nil {
-		return fmt.Errorf("resolve: parse %q: %w", absURI, err)
+		return err
 	}
-	doc.source = buf
-
-	// Index every subschema inside this document. The document URI is the
-	// initial base; if the doc declares its own $id, the indexer will set
-	// the doc itself as a resource root under that $id.
-	external, err := r.indexDocument(doc, absURI)
-	if err != nil {
-		return fmt.Errorf("resolve: index %q: %w", absURI, err)
-	}
-
-	// Make sure the entrypoint URI is reachable in the cache even if the
-	// document's $id differs (rare; spec allows fetching by either).
-	r.mu.Lock()
-	if _, ok := r.cache[absURI]; !ok || r.cache[absURI] == nil {
-		// no $id: doc itself is a resource keyed by absURI.
-		if doc.resource == nil {
-			doc.resource = doc
-			doc.baseURI = absURI
-			doc.anchors = map[string]*Meta{}
-			doc.dynamicAnchors = map[string]*Meta{}
-		}
-		r.cache[absURI] = doc
-	}
-	r.mu.Unlock()
-
 	for _, ext := range external {
 		if err := r.loadResource(ctx, ext); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// ingest parses body, walks the tree to register the resource(s) and
+// anchors it contains, and returns the document plus the deduplicated set
+// of external URIs referenced by $ref / $dynamicRef.
+func (r *Resolver) ingest(absURI string, body []byte) (*Schema, []string, error) {
+	doc, err := Parse(body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve: parse %q: %w", absURI, err)
+	}
+
+	external, err := r.indexDocument(doc, absURI)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve: index %q: %w", absURI, err)
+	}
+
+	// indexDocument always caches under absURI; if the doc had its own
+	// $id, indexSubtree also caches under that. Nothing more to do.
+	return doc, external, nil
 }
 
 func (r *Resolver) fetch(ctx context.Context, absURI string) ([]byte, error) {
@@ -157,6 +215,9 @@ func (r *Resolver) indexDocument(doc *Meta, fetchURI string) ([]string, error) {
 	doc.dynamicAnchors = map[string]*Meta{}
 
 	r.mu.Lock()
+	if r.cache == nil {
+		r.cache = map[string]*Schema{}
+	}
 	r.cache[fetchURI] = doc
 	r.mu.Unlock()
 

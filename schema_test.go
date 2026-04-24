@@ -11,11 +11,11 @@ import (
 )
 
 func TestMeta(t *testing.T) {
-	matches, err := filepath.Glob("docs/2020-12/*.json")
+	matches, err := filepath.Glob("testdata/schema/json-schema.org/draft/2020-12/meta/*.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, match := range matches {
+	for _, match := range append(matches, "testdata/schema/json-schema.org/draft/2020-12/schema.json") {
 		t.Run(filepath.Base(match), func(t *testing.T) {
 			buf, err := os.ReadFile(match)
 			if err != nil {

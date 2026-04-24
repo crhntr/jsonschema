@@ -12,12 +12,13 @@ import (
 // Find returns the JSON value located at p within data. The returned value
 // preserves the original byte representation (whitespace, number form,
 // member order). Non-existent members, missing indices, and pointers that
-// descend into a scalar all return errors.
-func Find(data []byte, p Pointer) (jsontext.Value, error) {
+// descend into a scalar all return errors. Caller-supplied options are
+// forwarded to jsontext.NewDecoder.
+func Find(data []byte, p Pointer, opts ...jsontext.Options) (jsontext.Value, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	dec := jsontext.NewDecoder(bytes.NewReader(data))
+	dec := jsontext.NewDecoder(bytes.NewReader(data), opts...)
 	if err := descend(dec, p.Tokens(), p); err != nil {
 		return nil, err
 	}

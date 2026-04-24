@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
 
 	"github.com/crhntr/jsonschema/jsonptr"
@@ -389,6 +390,37 @@ func TestFindValueReturnsJSONTextValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	var _ jsontext.Value = raw // compile-time check
+}
+
+func TestFindValueAcceptsOptions(t *testing.T) {
+	// Deterministic affects map ordering when marshaling. Verify the
+	// option reaches the underlying json.Marshal call by feeding a map
+	// and comparing the bytes against an unordered call.
+	in := map[string]int{"b": 2, "a": 1, "c": 3}
+	det, _, err := jsonptr.FindValue("", in, json.Deterministic(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(det) != `{"a":1,"b":2,"c":3}` {
+		t.Errorf("Deterministic order = %s, want sorted keys", det)
+	}
+}
+
+func TestFindAcceptsOptions(t *testing.T) {
+	// Reading past a duplicate name (looking for /b) trips the default
+	// strict duplicate-name check; passing AllowDuplicateNames lets the
+	// decoder continue past the duplicate.
+	doc := []byte(`{"a":1,"a":2,"b":3}`)
+	if _, err := jsonptr.Find(doc, "/b"); err == nil {
+		t.Error("expected duplicate-name error without option")
+	}
+	v, err := jsonptr.Find(doc, "/b", jsontext.AllowDuplicateNames(true))
+	if err != nil {
+		t.Fatalf("AllowDuplicateNames: %v", err)
+	}
+	if string(v) != "3" {
+		t.Errorf("got %s, want 3", v)
+	}
 }
 
 // equalAny compares Go values for test purposes. Numeric kinds (int,

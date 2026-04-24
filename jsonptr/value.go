@@ -14,6 +14,9 @@ import (
 
 // FindValue navigates to p within in by walking the Go value via reflection
 // and returns both the JSON form at that location and the live Go value.
+// Any json.Options are forwarded to every Marshal / decoder call the
+// implementation makes — both when producing the returned bytes and when
+// decoding through a json.Marshaler boundary.
 //
 // Reflection rules:
 //   - Pointers and interfaces are dereferenced.
@@ -31,7 +34,7 @@ import (
 //
 // The first return is the JSON encoding at the location (for the in-Go
 // path, produced by json.Marshal of the live value).
-func FindValue(p Pointer, in any) (jsontext.Value, any, error) {
+func FindValue(p Pointer, in any, opts ...json.Options) (jsontext.Value, any, error) {
 	if err := p.Validate(); err != nil {
 		return nil, nil, err
 	}
@@ -43,7 +46,7 @@ func FindValue(p Pointer, in any) (jsontext.Value, any, error) {
 			return nil, nil, fmt.Errorf("jsonptr %q: nil at token %q", p, tok)
 		}
 		if hasCustomJSON(cur) {
-			return finishViaJSON(cur, tokens[i:], p)
+			return finishViaJSON(cur, tokens[i:], p, opts)
 		}
 		next, err := stepValue(cur, tok)
 		if err != nil {
@@ -56,7 +59,7 @@ func FindValue(p Pointer, in any) (jsontext.Value, any, error) {
 	if cur.IsValid() {
 		live = cur.Interface()
 	}
-	raw, err := json.Marshal(live)
+	raw, err := json.Marshal(live, opts...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jsonptr %q: marshal final: %w", p, err)
 	}
@@ -162,8 +165,8 @@ func jsonFieldName(f reflect.StructField) string {
 // the resulting bytes. The returned Go value is freshly decoded; JSON
 // numbers come back as *big.Rat so callers do not lose precision and can
 // convert to int / float64 on their own terms.
-func finishViaJSON(v reflect.Value, remaining []string, p Pointer) (jsontext.Value, any, error) {
-	raw, err := json.Marshal(v.Interface())
+func finishViaJSON(v reflect.Value, remaining []string, p Pointer, opts []json.Options) (jsontext.Value, any, error) {
+	raw, err := json.Marshal(v.Interface(), opts...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jsonptr %q: marshal: %w", p, err)
 	}
@@ -173,12 +176,12 @@ func finishViaJSON(v reflect.Value, remaining []string, p Pointer) (jsontext.Val
 		for _, tok := range remaining {
 			sub = sub.Append(tok)
 		}
-		target, err = Find(raw, sub)
+		target, err = Find(raw, sub, opts...)
 		if err != nil {
 			return nil, nil, err
 		}
 	}
-	live, err := decodeAny(target)
+	live, err := decodeAny(target, opts)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jsonptr %q: decode: %w", p, err)
 	}
@@ -188,9 +191,13 @@ func finishViaJSON(v reflect.Value, remaining []string, p Pointer) (jsontext.Val
 // decodeAny decodes a JSON value into a Go any tree, preserving number
 // precision by representing every JSON number as *big.Rat. Objects become
 // map[string]any, arrays become []any, and strings/bools/null map to their
-// natural Go counterparts.
-func decodeAny(data []byte) (any, error) {
-	dec := jsontext.NewDecoder(bytes.NewReader(data))
+// natural Go counterparts. Caller-supplied options are forwarded to the
+// underlying jsontext.NewDecoder.
+//
+// json.Options and jsontext.Options are aliases for the same underlying
+// jsonopts.Options, so the variadic types are interchangeable.
+func decodeAny(data []byte, opts []json.Options) (any, error) {
+	dec := jsontext.NewDecoder(bytes.NewReader(data), opts...)
 	return readAny(dec)
 }
 

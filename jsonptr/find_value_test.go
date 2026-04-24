@@ -1,6 +1,7 @@
 package jsonptr_test
 
 import (
+	"math/big"
 	"strings"
 	"testing"
 
@@ -205,6 +206,106 @@ func (s *streamStampPointer) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return enc.WriteValue([]byte(`{"label":"PV2:` + s.secret + `"}`))
 }
 
+// numberStamp emits a JSON number that float64 cannot represent
+// faithfully, so we can verify FindValue returns *big.Rat with full
+// precision after the Marshaler boundary.
+type numberStamp struct{}
+
+func (numberStamp) MarshalJSON() ([]byte, error) {
+	return []byte(`{"n":12345678901234567890.0987654321}`), nil
+}
+
+func TestFindValueNumberPrecisionViaMarshaler(t *testing.T) {
+	type box struct {
+		S numberStamp `json:"s"`
+	}
+	raw, live, err := jsonptr.FindValue("/s/n", box{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "12345678901234567890.0987654321"
+	if string(raw) != want {
+		t.Errorf("raw = %s, want %s", raw, want)
+	}
+	r, ok := live.(*big.Rat)
+	if !ok {
+		t.Fatalf("live = %T, want *big.Rat", live)
+	}
+	expected, _ := new(big.Rat).SetString(want)
+	if r.Cmp(expected) != 0 {
+		t.Errorf("live rat = %s, want %s", r.RatString(), expected.RatString())
+	}
+}
+
+// kindStamp emits a JSON object containing every token kind so the
+// readAny decoder is fully exercised after the Marshaler boundary.
+type kindStamp struct{}
+
+func (kindStamp) MarshalJSON() ([]byte, error) {
+	return []byte(`{"obj":{"k":"v"},"arr":[1,2,3],"t":true,"f":false,"n":null,"s":"hi","num":42}`), nil
+}
+
+func TestFindValueDecodeAllKinds(t *testing.T) {
+	type box struct {
+		K kindStamp `json:"k"`
+	}
+	in := box{}
+
+	cases := []struct {
+		ptr  jsonptr.Pointer
+		want any
+	}{
+		{"/k/obj", map[string]any{"k": "v"}},
+		{"/k/arr", []any{big.NewRat(1, 1), big.NewRat(2, 1), big.NewRat(3, 1)}},
+		{"/k/t", true},
+		{"/k/f", false},
+		{"/k/n", nil},
+		{"/k/s", "hi"},
+		{"/k/num", big.NewRat(42, 1)},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.ptr), func(t *testing.T) {
+			_, live, err := jsonptr.FindValue(tc.ptr, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !deepEqualAny(live, tc.want) {
+				t.Errorf("live = %v (%T), want %v (%T)", live, live, tc.want, tc.want)
+			}
+		})
+	}
+}
+
+// deepEqualAny compares values that may contain nested *big.Rat (compared
+// via Cmp) or maps / slices of any.
+func deepEqualAny(a, b any) bool {
+	switch av := a.(type) {
+	case []any:
+		bv, ok := b.([]any)
+		if !ok || len(av) != len(bv) {
+			return false
+		}
+		for i := range av {
+			if !deepEqualAny(av[i], bv[i]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		bv, ok := b.(map[string]any)
+		if !ok || len(av) != len(bv) {
+			return false
+		}
+		for k, v := range av {
+			if !deepEqualAny(v, bv[k]) {
+				return false
+			}
+		}
+		return true
+	}
+	return equalAny(a, b)
+}
+
 func TestFindValueV2PointerReceiver(t *testing.T) {
 	type letter struct {
 		Mark streamStampPointer `json:"mark"`
@@ -290,24 +391,29 @@ func TestFindValueReturnsJSONTextValue(t *testing.T) {
 	var _ jsontext.Value = raw // compile-time check
 }
 
-// equalAny compares Go values for test purposes, treating numeric kinds
-// loosely so that map[string]any decoding (float64) matches typed ints.
+// equalAny compares Go values for test purposes. Numeric kinds (int,
+// int64, float64, *big.Rat) are converted to *big.Rat so a typed int from
+// the live-Go path compares equal to a *big.Rat returned through a
+// json.Marshaler boundary.
 func equalAny(a, b any) bool {
-	switch av := a.(type) {
-	case int:
-		switch bv := b.(type) {
-		case int:
-			return av == bv
-		case float64:
-			return float64(av) == bv
-		}
-	case float64:
-		switch bv := b.(type) {
-		case int:
-			return av == float64(bv)
-		case float64:
-			return av == bv
-		}
+	ar, aOK := toRat(a)
+	br, bOK := toRat(b)
+	if aOK && bOK {
+		return ar.Cmp(br) == 0
 	}
 	return a == b
+}
+
+func toRat(v any) (*big.Rat, bool) {
+	switch x := v.(type) {
+	case *big.Rat:
+		return x, true
+	case int:
+		return new(big.Rat).SetInt64(int64(x)), true
+	case int64:
+		return new(big.Rat).SetInt64(x), true
+	case float64:
+		return new(big.Rat).SetFloat64(x), true
+	}
+	return nil, false
 }

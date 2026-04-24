@@ -1,7 +1,9 @@
 package jsonptr
 
 import (
+	"bytes"
 	"fmt"
+	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
@@ -23,7 +25,9 @@ import (
 //     jsontext.MarshalerTo, the remaining tokens are resolved by marshaling
 //     the value and calling Find on the bytes. Identity is lost across
 //     this boundary; the second return value is then a freshly decoded
-//     value (typically map[string]any / []any / scalar).
+//     value: map[string]any for objects, []any for arrays, *big.Rat for
+//     every JSON number (callers convert to int / float64 themselves),
+//     and the natural Go counterpart for strings, booleans, and null.
 //
 // The first return is the JSON encoding at the location (for the in-Go
 // path, produced by json.Marshal of the live value).
@@ -155,30 +159,94 @@ func jsonFieldName(f reflect.StructField) string {
 }
 
 // finishViaJSON marshals v and resolves the remaining tokens via Find on
-// the resulting bytes. The returned Go value is freshly decoded.
+// the resulting bytes. The returned Go value is freshly decoded; JSON
+// numbers come back as *big.Rat so callers do not lose precision and can
+// convert to int / float64 on their own terms.
 func finishViaJSON(v reflect.Value, remaining []string, p Pointer) (jsontext.Value, any, error) {
 	raw, err := json.Marshal(v.Interface())
 	if err != nil {
 		return nil, nil, fmt.Errorf("jsonptr %q: marshal: %w", p, err)
 	}
-	if len(remaining) == 0 {
-		var live any
-		if err := json.Unmarshal(raw, &live); err != nil {
-			return nil, nil, fmt.Errorf("jsonptr %q: unmarshal: %w", p, err)
+	target := jsontext.Value(raw)
+	if len(remaining) > 0 {
+		var sub Pointer
+		for _, tok := range remaining {
+			sub = sub.Append(tok)
 		}
-		return raw, live, nil
+		target, err = Find(raw, sub)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
-	var sub Pointer
-	for _, tok := range remaining {
-		sub = sub.Append(tok)
-	}
-	found, err := Find(raw, sub)
+	live, err := decodeAny(target)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("jsonptr %q: decode: %w", p, err)
 	}
-	var live any
-	if err := json.Unmarshal(found, &live); err != nil {
-		return nil, nil, fmt.Errorf("jsonptr %q: unmarshal: %w", p, err)
+	return target, live, nil
+}
+
+// decodeAny decodes a JSON value into a Go any tree, preserving number
+// precision by representing every JSON number as *big.Rat. Objects become
+// map[string]any, arrays become []any, and strings/bools/null map to their
+// natural Go counterparts.
+func decodeAny(data []byte) (any, error) {
+	dec := jsontext.NewDecoder(bytes.NewReader(data))
+	return readAny(dec)
+}
+
+func readAny(dec *jsontext.Decoder) (any, error) {
+	tok, err := dec.ReadToken()
+	if err != nil {
+		return nil, err
 	}
-	return found, live, nil
+	switch tok.Kind() {
+	case jsontext.KindNull:
+		return nil, nil
+	case jsontext.KindFalse:
+		return false, nil
+	case jsontext.KindTrue:
+		return true, nil
+	case jsontext.KindString:
+		return tok.String(), nil
+	case jsontext.KindNumber:
+		r, ok := new(big.Rat).SetString(tok.String())
+		if !ok {
+			return nil, fmt.Errorf("invalid number %q", tok.String())
+		}
+		return r, nil
+	case jsontext.KindBeginArray:
+		var arr []any
+		for dec.PeekKind() != jsontext.KindEndArray {
+			v, err := readAny(dec)
+			if err != nil {
+				return nil, err
+			}
+			arr = append(arr, v)
+		}
+		if _, err := dec.ReadToken(); err != nil {
+			return nil, err
+		}
+		return arr, nil
+	case jsontext.KindBeginObject:
+		m := map[string]any{}
+		for dec.PeekKind() != jsontext.KindEndObject {
+			key, err := dec.ReadToken()
+			if err != nil {
+				return nil, err
+			}
+			// Capture the key string before any subsequent decoder call
+			// voids the token.
+			keyStr := key.String()
+			v, err := readAny(dec)
+			if err != nil {
+				return nil, err
+			}
+			m[keyStr] = v
+		}
+		if _, err := dec.ReadToken(); err != nil {
+			return nil, err
+		}
+		return m, nil
+	}
+	return nil, fmt.Errorf("unexpected token kind %s", tok.Kind())
 }

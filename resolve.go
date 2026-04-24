@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/crhntr/jsonschema/jsonptr"
 )
 
 // Resolver fetches and links JSON Schema 2020-12 documents.
@@ -517,13 +519,11 @@ var singleChildAccessors = map[string]func(MetaObject) *Meta{
 // The pointer descends through Meta fields whose JSON encoding matches
 // each token (e.g. "/$defs/foo/properties/bar").
 func walkJSONPointer(m *Meta, ptr string) (*Meta, error) {
-	if ptr == "" {
-		return m, nil
+	p := jsonptr.Pointer(ptr)
+	if err := p.Validate(); err != nil {
+		return nil, err
 	}
-	if !strings.HasPrefix(ptr, "/") {
-		return nil, fmt.Errorf("invalid JSON Pointer %q", ptr)
-	}
-	tokens := tokenizeJSONPointer(ptr)
+	tokens := p.Tokens()
 	cur := m
 	for i := 0; i < len(tokens); {
 		next, advance, err := stepJSONPointer(cur, tokens, i)
@@ -534,15 +534,6 @@ func walkJSONPointer(m *Meta, ptr string) (*Meta, error) {
 		i += advance
 	}
 	return cur, nil
-}
-
-func tokenizeJSONPointer(ptr string) []string {
-	raw := strings.Split(ptr[1:], "/")
-	tokens := make([]string, len(raw))
-	for i, t := range raw {
-		tokens[i] = unescapeJSONPointerToken(t)
-	}
-	return tokens
 }
 
 func stepJSONPointer(m *Meta, tokens []string, i int) (*Meta, int, error) {
@@ -597,15 +588,6 @@ func arrayPointerStep(name string, arr []Meta, tokens []string, i int) (*Meta, i
 		return nil, 0, fmt.Errorf("%s index %d out of range", name, idx)
 	}
 	return &arr[idx], 2, nil
-}
-
-func unescapeJSONPointerToken(s string) string {
-	s = strings.ReplaceAll(s, "~1", "/")
-	s = strings.ReplaceAll(s, "~0", "~")
-	if dec, err := url.PathUnescape(s); err == nil {
-		s = dec
-	}
-	return s
 }
 
 func resolveRelative(base, ref string) (string, error) {

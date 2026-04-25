@@ -1,4 +1,4 @@
-go-jsonschema validate --schema-file simple.schema.json not_empty.json
+go-jsonschema validate --schema simple.schema.json not_empty.json
 
 -- simple.schema.json --
 {}

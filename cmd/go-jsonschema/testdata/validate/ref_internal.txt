@@ -1,4 +1,4 @@
-go-jsonschema validate --schema-file schema.json instance.json
+go-jsonschema validate --schema schema.json instance.json
 
 -- schema.json --
 {

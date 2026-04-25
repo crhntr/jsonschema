@@ -1,11 +1,6 @@
 go-jsonschema validate --schema schema.json instance.json
 
 -- schema.json --
-{
-  "oneOf": [
-    { "type": "string" },
-    { "type": "integer" }
-  ]
-}
+{"type": "string", "x-vendor-thing": "ignored"}
 -- instance.json --
-"hello"
+"hi"

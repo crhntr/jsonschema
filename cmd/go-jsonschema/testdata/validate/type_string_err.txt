@@ -1,4 +1,4 @@
-! go-jsonschema validate --schema-file schema.json bad.json
+! go-jsonschema validate --schema schema.json bad.json
 stderr 'type string does not match'
 
 -- schema.json --

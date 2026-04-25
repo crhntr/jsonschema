@@ -1,4 +1,4 @@
-! go-jsonschema validate --schema-url https://example.com/refs/embedded.json instance.json
+! go-jsonschema validate --schema https://example.com/refs/embedded.json instance.json
 stderr 'string'
 
 -- instance.json --

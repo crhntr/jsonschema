@@ -1,10 +1,10 @@
-! go-jsonschema validate --schema-file object.schema.json empty.json
+! go-jsonschema validate --schema object.schema.json empty.json
 stderr 'empty.json:1:0: invalid JSON'
 
-! go-jsonschema validate --schema-file true.schema.json empty.json
+! go-jsonschema validate --schema true.schema.json empty.json
 stderr 'empty.json:1:0: invalid JSON'
 
-! go-jsonschema validate --schema-file false.schema.json empty.json
+! go-jsonschema validate --schema false.schema.json empty.json
 stderr 'empty.json:1:0: invalid JSON'
 
 -- object.schema.json --

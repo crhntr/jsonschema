@@ -1,0 +1,7 @@
+! go-jsonschema validate --schema schema.json --strict instance.json
+stderr 'unknown keywords'
+
+-- schema.json --
+{"type": "string", "x-vendor-thing": "ignored"}
+-- instance.json --
+"hi"

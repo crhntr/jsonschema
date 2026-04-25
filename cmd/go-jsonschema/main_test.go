@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"rsc.io/script"
@@ -33,6 +34,8 @@ func Test(t *testing.T) {
 	}
 
 	e := script.NewEngine()
+	e.Cmds = script.DefaultCmds()
+	e.Conds = script.DefaultConds()
 
 	e.Cmds["go-jsonschema"] = script.Command(script.CmdUsage{
 		Summary: "go-jsonschema",
@@ -40,7 +43,7 @@ func Test(t *testing.T) {
 	}, func(state *script.State, args ...string) (script.WaitFunc, error) {
 		return func(state *script.State) (string, string, error) {
 			var stdout, stderr bytes.Buffer
-			code := run(state.Context(), state.Getwd(), args, &stdout, &stderr, client)
+			code := run(state.Context(), state.Getwd(), args, &stdout, &stderr, strings.NewReader(""), client)
 			if code != 0 {
 				return stdout.String(), stderr.String(), ExitCode(code)
 			}
@@ -77,4 +80,39 @@ type ExitCode int
 
 func (ec ExitCode) Error() string {
 	return fmt.Sprintf("exit %d", ec)
+}
+
+// TestValidateStdin exercises the "-" instance argument that reads
+// from stdin. The script test harness has no stdin command so we
+// drive run() directly here.
+func TestValidateStdin(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "schema.json"), []byte(`{"type":"string"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(t.Context(), dir, []string{"validate", "--schema", "schema.json", "-"},
+		&stdout, &stderr, strings.NewReader(`"hello"`), http.DefaultClient)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "<stdin>: ok") {
+		t.Errorf("stdout = %q, want '<stdin>: ok'", stdout.String())
+	}
+}
+
+func TestValidateStdinInvalid(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "schema.json"), []byte(`{"type":"string"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(t.Context(), dir, []string{"validate", "--schema", "schema.json", "-"},
+		&stdout, &stderr, strings.NewReader(`42`), http.DefaultClient)
+	if code == 0 {
+		t.Fatalf("exit=%d, want non-zero (instance is invalid)", code)
+	}
+	if !strings.Contains(stderr.String(), "type string does not match") {
+		t.Errorf("stderr = %q, want type-mismatch message", stderr.String())
+	}
 }

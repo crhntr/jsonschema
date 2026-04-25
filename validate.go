@@ -14,18 +14,53 @@ import (
 	"github.com/go-json-experiment/json/v1"
 )
 
+// evalScope is the dynamic scope of validation: the chain of resource
+// roots whose schemas are currently being evaluated against the
+// instance. It is used to resolve $dynamicRef per JSON Schema 2020-12
+// §8.2.3.2 — when a $dynamicRef is bookended, the validator walks the
+// scope outermost-to-innermost looking for a matching $dynamicAnchor.
+type evalScope []*Meta
+
+func (s evalScope) push(resource *Meta) evalScope {
+	if resource == nil || (len(s) > 0 && s[len(s)-1] == resource) {
+		return s
+	}
+	return append(s, resource)
+}
+
+func (s evalScope) findDynamicAnchor(name string) *Meta {
+	for _, res := range s {
+		if a := res.dynamicAnchors[name]; a != nil {
+			return a
+		}
+	}
+	return nil
+}
+
 func (m *Meta) Evaluate(name string, in []byte) error {
+	return m.evaluate(name, in, nil)
+}
+
+func (m *Meta) evaluate(name string, in []byte, scope evalScope) error {
 	if !json.Valid(in) {
 		return NewErrorWithPosition(name, in, 0, errors.New("invalid JSON"))
 	}
 	dec := jsontext.NewDecoder(bytes.NewReader(in))
+	scope = scope.push(m.resource)
 
 	if o, ok := m.TypeObject(); ok {
-		if err := o.validate(name, in, dec); err != nil {
+		if err := o.validate(name, in, dec, scope); err != nil {
 			return err
 		}
 		if m.resolved != nil {
-			return m.resolved.Evaluate(name+"/$ref", in)
+			target := m.resolved
+			if m.dynamic && o.DynamicRef != "" {
+				anchorName := strings.TrimPrefix(o.DynamicRef, "#")
+				if t := scope.findDynamicAnchor(anchorName); t != nil {
+					target = t
+				}
+			}
+			return target.evaluate(name+"/$ref", in, scope)
 		}
 		return nil
 	}
@@ -52,7 +87,7 @@ func validateMetaTypeBool(name string, in []byte, dec *jsontext.Decoder, b bool)
 	return NewErrorWithPosition(name, in, dec.InputOffset(), errors.New("nothing allowed here"))
 }
 
-func (o *MetaObject) validate(name string, in []byte, dec *jsontext.Decoder) error {
+func (o *MetaObject) validate(name string, in []byte, dec *jsontext.Decoder, scope evalScope) error {
 	off := dec.InputOffset()
 	val, err := dec.ReadValue()
 	if err != nil {
@@ -61,10 +96,10 @@ func (o *MetaObject) validate(name string, in []byte, dec *jsontext.Decoder) err
 		}
 		return NewErrorWithPosition(name, in, dec.InputOffset(), err)
 	}
-	return o.validateValue(name, in, off, val)
+	return o.validateValue(name, in, off, val, scope)
 }
 
-func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsontext.Value) error {
+func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsontext.Value, scope evalScope) error {
 	kind := jsontext.NewDecoder(bytes.NewReader(val)).PeekKind()
 	if o.Type != nil {
 		if err := o.validateType(name, in, off, kind, val); err != nil {
@@ -95,21 +130,21 @@ func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsonte
 			return NewErrorWithPosition(name, in, off, err)
 		}
 	case jsontext.KindBeginObject:
-		if err := o.validateObject(name, in, off, val); err != nil {
+		if err := o.validateObject(name, in, off, val, scope); err != nil {
 			return err
 		}
 	case jsontext.KindBeginArray:
-		if err := o.validateArray(name, in, off, val); err != nil {
+		if err := o.validateArray(name, in, off, val, scope); err != nil {
 			return err
 		}
 	}
-	if err := o.validateComposition(name, in, off, val); err != nil {
+	if err := o.validateComposition(name, in, off, val, scope); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (o *MetaObject) validateComposition(name string, in []byte, off int64, val jsontext.Value) error {
+func (o *MetaObject) validateComposition(name string, in []byte, off int64, val jsontext.Value, scope evalScope) error {
 	for i := range o.AllOf {
 		if err := o.AllOf[i].Evaluate(fmt.Sprintf("%s/allOf/%d", name, i), val); err != nil {
 			return err
@@ -145,7 +180,7 @@ func (o *MetaObject) validateComposition(name string, in []byte, off int64, val 
 		}
 	}
 	if o.If != nil {
-		ifErr := o.If.Evaluate(name+"/if", val)
+		ifErr := o.If.evaluate(name+"/if", val, scope)
 		if ifErr == nil && o.Then != nil {
 			if err := o.Then.Evaluate(name+"/then", val); err != nil {
 				return err
@@ -160,7 +195,7 @@ func (o *MetaObject) validateComposition(name string, in []byte, off int64, val 
 	return nil
 }
 
-func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsontext.Value) error {
+func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsontext.Value, scope evalScope) error {
 	dec := jsontext.NewDecoder(bytes.NewReader(val))
 	if _, err := dec.ReadToken(); err != nil {
 		return NewErrorWithPosition(name, in, off, err)
@@ -272,7 +307,7 @@ func compilePatternProperties(pp map[string]*Meta) ([]patternRegex, error) {
 	return out, nil
 }
 
-func (o *MetaObject) validateArray(name string, in []byte, off int64, val jsontext.Value) error {
+func (o *MetaObject) validateArray(name string, in []byte, off int64, val jsontext.Value, scope evalScope) error {
 	dec := jsontext.NewDecoder(bytes.NewReader(val))
 	if _, err := dec.ReadToken(); err != nil {
 		return NewErrorWithPosition(name, in, off, err)

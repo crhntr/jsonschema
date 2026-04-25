@@ -173,6 +173,11 @@ type MetaObject struct {
 	DependentRequired     map[string][]string `json:"dependentRequired,omitempty"`
 	DependentSchemas      map[string]*Meta    `json:"dependentSchemas,omitempty"`
 
+	// Dependencies is the pre-2020-12 keyword. Each value may be an
+	// array of property names (treated like dependentRequired) or a
+	// schema (treated like dependentSchemas).
+	Dependencies map[string]*Dependency `json:"dependencies,omitempty"`
+
 	// meta-data.json
 	Title       string   `json:"title,omitempty"`
 	Description string   `json:"description,omitempty"`
@@ -248,6 +253,35 @@ func (m *Meta) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		return json.UnmarshalDecode(dec, &m.object)
 	default:
 		return errors.New("expected meta to be either a boolean or object")
+	}
+}
+
+// Dependency represents a single entry of the legacy dependencies
+// keyword: either a list of required properties or a subschema.
+type Dependency struct {
+	required []string
+	schema   *Meta
+}
+
+func (d *Dependency) Required() ([]string, bool) { return d.required, d.required != nil }
+func (d *Dependency) Schema() *Meta              { return d.schema }
+
+func (d *Dependency) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	switch dec.PeekKind() {
+	case jsontext.KindBeginArray:
+		var req []string
+		if err := json.UnmarshalDecode(dec, &req); err != nil {
+			return err
+		}
+		d.required = req
+		return nil
+	default:
+		var m Meta
+		if err := json.UnmarshalDecode(dec, &m); err != nil {
+			return err
+		}
+		d.schema = &m
+		return nil
 	}
 }
 

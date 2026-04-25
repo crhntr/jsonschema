@@ -64,12 +64,22 @@ func (p Pointer) Head() (token string, rest Pointer, ok bool) {
 
 // Validate reports an error if p is not a syntactically valid RFC 6901
 // pointer. The empty pointer and any string starting with "/" are valid.
+// Inside a token, "~" must be followed by "0" or "1".
 func (p Pointer) Validate() error {
 	if p == "" {
 		return nil
 	}
-	if !strings.HasPrefix(string(p), "/") {
+	s := string(p)
+	if !strings.HasPrefix(s, "/") {
 		return fmt.Errorf("jsonptr: %q does not begin with %q", p, "/")
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] == '~' {
+			if i+1 >= len(s) || (s[i+1] != '0' && s[i+1] != '1') {
+				return fmt.Errorf("jsonptr: invalid escape at offset %d in %q", i, p)
+			}
+			i++
+		}
 	}
 	return nil
 }

@@ -403,6 +403,27 @@ func (o *MetaObject) validateObjectBody(name string, in []byte, off int64, val j
 		}
 		ann.merge(depAnn)
 	}
+	for prop, dep := range o.Dependencies {
+		if _, present := keys[prop]; !present {
+			continue
+		}
+		if req, ok := dep.Required(); ok {
+			for _, d := range req {
+				if _, ok := keys[d]; !ok {
+					return ann, NewErrorWithPosition(name, in, off,
+						fmt.Errorf("dependency: property %q requires %q", prop, d))
+				}
+			}
+			continue
+		}
+		if sub := dep.Schema(); sub != nil {
+			depAnn, err := sub.evaluate(jsonptr.NewBuilder(name).Token("dependencies").Token(prop).String(), val, scope)
+			if err != nil {
+				return ann, err
+			}
+			ann.merge(depAnn)
+		}
+	}
 	return ann, nil
 }
 
@@ -688,26 +709,49 @@ func validateFormat(format, s string) error {
 			return fmt.Errorf("not a valid duration: %q", s)
 		}
 	case "email", "idn-email":
-		if _, err := mail.ParseAddress(s); err != nil {
+		// Reject display-name forms ("Name <addr>") by disallowing < >.
+		if strings.ContainsAny(s, "<>") {
 			return fmt.Errorf("not a valid email: %q", s)
+		}
+		addr, err := mail.ParseAddress(s)
+		if err != nil || addr.Name != "" {
+			return fmt.Errorf("not a valid email: %q", s)
+		}
+		at := strings.LastIndexByte(s, '@')
+		if at < 0 {
+			return fmt.Errorf("not a valid email: %q", s)
+		}
+		domain := s[at+1:]
+		if strings.HasPrefix(domain, "[") && strings.HasSuffix(domain, "]") {
+			ip := domain[1 : len(domain)-1]
+			if format == "email" {
+				ip = strings.TrimPrefix(ip, "IPv6:")
+			}
+			if net.ParseIP(ip) == nil {
+				return fmt.Errorf("not a valid email IP literal: %q", s)
+			}
+		} else if !isHostname(domain) {
+			return fmt.Errorf("not a valid email domain: %q", s)
 		}
 	case "hostname", "idn-hostname":
 		if !isHostname(s) {
 			return fmt.Errorf("not a valid hostname: %q", s)
 		}
 	case "uri":
-		u, err := url.Parse(s)
-		if err != nil || !u.IsAbs() {
+		if !isURI(s, true) {
 			return fmt.Errorf("not a valid uri: %q", s)
 		}
-	case "uri-reference", "iri-reference":
-		if _, err := url.Parse(s); err != nil {
+	case "uri-reference":
+		if !isURI(s, false) {
 			return fmt.Errorf("not a valid uri-reference: %q", s)
 		}
 	case "iri":
-		u, err := url.Parse(s)
-		if err != nil || !u.IsAbs() {
+		if !isIRI(s, true) {
 			return fmt.Errorf("not a valid iri: %q", s)
+		}
+	case "iri-reference":
+		if !isIRI(s, false) {
+			return fmt.Errorf("not a valid iri-reference: %q", s)
 		}
 	case "uuid":
 		if !isUUID(s) {
@@ -736,7 +780,6 @@ func validateFormat(format, s string) error {
 var (
 	uuidRE     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	hostnameRE = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
-	durationRE = regexp.MustCompile(`^P(?:(?:\d+W)|(?:(?:\d+Y)?(?:\d+M)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+S)?)?))$`)
 )
 
 func isUUID(s string) bool { return uuidRE.MatchString(s) }
@@ -749,20 +792,110 @@ func isHostname(s string) bool {
 }
 
 func isISO8601Duration(s string) bool {
-	if s == "P" || s == "" {
+	if !strings.HasPrefix(s, "P") || len(s) < 2 {
 		return false
 	}
-	if !durationRE.MatchString(s) {
-		return false
-	}
-	// Reject "PT" / "P" (no components).
-	if s == "PT" {
-		return false
-	}
-	// Must have at least one component after P.
 	rest := s[1:]
-	if rest == "" || rest == "T" {
+	// Week form: nW alone.
+	if strings.HasSuffix(rest, "W") {
+		digits := rest[:len(rest)-1]
+		return digits != "" && allASCIIDigits(digits)
+	}
+	var datePart, timePart string
+	if i := strings.Index(rest, "T"); i >= 0 {
+		datePart = rest[:i]
+		timePart = rest[i+1:]
+		if timePart == "" {
+			return false
+		}
+	} else {
+		datePart = rest
+	}
+	if datePart == "" && timePart == "" {
 		return false
+	}
+	if datePart != "" && !isDurationDate(datePart) {
+		return false
+	}
+	if timePart != "" && !isDurationTime(timePart) {
+		return false
+	}
+	return true
+}
+
+// isDurationDate validates a duration date-spec per RFC 3339 App A:
+// year-only, month-only, day-only, year+month, month+day, or
+// year+month+day. year+day without month is invalid.
+func isDurationDate(s string) bool {
+	return parseDurationFields(s, "YMD", true)
+}
+
+// isDurationTime validates a duration time-spec: hour, minute, second,
+// hour+minute, minute+second, or hour+minute+second.
+func isDurationTime(s string) bool {
+	return parseDurationFields(s, "HMS", true)
+}
+
+// parseDurationFields walks s consuming `digits letter` segments where
+// each letter is one of the markers in order. Skipping the middle
+// marker is forbidden when both flanking ones are present
+// (RFC 3339 App A constraint).
+func parseDurationFields(s, markers string, gapForbidden bool) bool {
+	if s == "" {
+		return false
+	}
+	pos := 0
+	seen := [3]bool{}
+	for pos < len(s) {
+		// digits
+		start := pos
+		for pos < len(s) && s[pos] >= '0' && s[pos] <= '9' {
+			pos++
+		}
+		if pos == start || pos == len(s) {
+			return false
+		}
+		marker := s[pos]
+		idx := strings.IndexByte(markers, marker)
+		if idx < 0 {
+			return false
+		}
+		// Must appear in increasing order, no duplicates.
+		for j := 0; j <= idx; j++ {
+			if j == idx {
+				if seen[j] {
+					return false
+				}
+				seen[j] = true
+			} else if seen[j] {
+				continue
+			}
+		}
+		// Reject out-of-order: any later index already seen.
+		for j := idx + 1; j < 3; j++ {
+			if seen[j] {
+				return false
+			}
+		}
+		pos++
+	}
+	if gapForbidden && seen[0] && seen[2] && !seen[1] {
+		return false
+	}
+	if !seen[0] && !seen[1] && !seen[2] {
+		return false
+	}
+	return true
+}
+
+func allASCIIDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
 	}
 	return true
 }
@@ -788,6 +921,103 @@ func isRelativeJSONPointer(s string) bool {
 		return true
 	}
 	return jsonptr.Pointer(rest).Validate() == nil
+}
+
+// isURI checks the RFC 3986 URI character set. requireAbs requires a
+// scheme. ASCII-only.
+func isURI(s string, requireAbs bool) bool {
+	if !isASCII(s) {
+		return false
+	}
+	for _, c := range s {
+		if !isURIChar(byte(c)) {
+			return false
+		}
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	if requireAbs {
+		if u.Scheme == "" {
+			return false
+		}
+		if !isSchemeName(u.Scheme) {
+			return false
+		}
+	}
+	return true
+}
+
+// isIRI permits non-ASCII characters per RFC 3987.
+func isIRI(s string, requireAbs bool) bool {
+	for _, c := range s {
+		if c == ' ' || c == '<' || c == '>' || c == '"' || c == '`' || c == '{' || c == '}' || c == '|' || c == '\\' || c == '^' || c < 0x21 {
+			return false
+		}
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	if requireAbs {
+		if u.Scheme == "" {
+			return false
+		}
+		if !isSchemeName(u.Scheme) {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > 0x7E || s[i] < 0x20 {
+			return false
+		}
+	}
+	return true
+}
+
+// isURIChar reports whether c is in the RFC 3986 unreserved /
+// reserved / pct-encoded character set.
+func isURIChar(c byte) bool {
+	if c >= 'A' && c <= 'Z' {
+		return true
+	}
+	if c >= 'a' && c <= 'z' {
+		return true
+	}
+	if c >= '0' && c <= '9' {
+		return true
+	}
+	switch c {
+	case '-', '.', '_', '~',
+		':', '/', '?', '#', '[', ']', '@',
+		'!', '$', '&', '\'', '(', ')', '*', '+', ',', ';', '=',
+		'%':
+		return true
+	}
+	return false
+}
+
+func isSchemeName(s string) bool {
+	if s == "" {
+		return false
+	}
+	if !((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z')) {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '+' || c == '-' || c == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func isURITemplate(s string) bool {

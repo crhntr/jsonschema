@@ -1,0 +1,39 @@
+go-jsonschema generate --schema schema.json --out ./model --package model --type Counts
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "additionalProperties": {"type": "integer"}
+}
+-- go.mod --
+module example.com/countspkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+func TestCounts_RoundTrip(t *testing.T) {
+	in := []byte(`{"alice":3,"bob":7}`)
+	var c Counts
+	if err := json.Unmarshal(in, &c); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if c["alice"] != 3 || c["bob"] != 7 {
+		t.Errorf("got %#v, want {alice:3, bob:7}", c)
+	}
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	// jsonv2 sorts map keys.
+	if string(out) != `{"alice":3,"bob":7}` {
+		t.Errorf("Marshal = %s, want %s", out, `{"alice":3,"bob":7}`)
+	}
+}

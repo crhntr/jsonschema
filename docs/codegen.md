@@ -2,10 +2,11 @@
 
 Status: design — Phases 1 (vocabulary parsing), 2 (type resolver),
 3 (struct IR + emit), 4 (required vs optional), 5 (marshaler
-emission), and 6 (scalar root with length / range / enum / pattern
-constraints) implemented in `internal/generate/`. End-to-end CLI is
-wired and covered by scripttest fixtures under
-`cmd/go-jsonschema/testdata/generate/`. Phases 7–15 pending.
+emission), 6 (scalar root with length / range / enum / pattern
+constraints), and 7 (slice + map roots) implemented in
+`internal/generate/`. End-to-end CLI is wired and covered by
+scripttest fixtures under `cmd/go-jsonschema/testdata/generate/`.
+Phases 8–15 pending.
 
 ## Context
 

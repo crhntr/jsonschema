@@ -48,6 +48,37 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 		return t, nil
 	}
 
+	// Array root: type=array with items schema. Emit
+	// `type Name []ElemType`.
+	if isArrayRoot(obj) {
+		elemObj, ok := obj.Items.TypeObject()
+		if !ok {
+			return Type{}, fmt.Errorf("array root: items must be an object schema")
+		}
+		elem, err := derivePrimitive(&elemObj)
+		if err != nil {
+			return Type{}, fmt.Errorf("array root items: %w", err)
+		}
+		t.Underlying = &ast.ArrayType{Elt: elem}
+		return t, nil
+	}
+
+	// Map root: type=object with additionalProperties schema and no
+	// declared properties. Emit `type Name map[K]V`.
+	if isMapRoot(obj) {
+		valObj, ok := obj.AdditionalProperties.TypeObject()
+		if !ok {
+			return Type{}, fmt.Errorf("map root: additionalProperties must be an object schema")
+		}
+		val, err := derivePrimitive(&valObj)
+		if err != nil {
+			return Type{}, fmt.Errorf("map root value: %w", err)
+		}
+		key := mapKeyTypeFor(annotations)
+		t.Underlying = &ast.MapType{Key: key, Value: val}
+		return t, nil
+	}
+
 	jsonNames := make([]string, 0, len(obj.Properties))
 	for k := range obj.Properties {
 		jsonNames = append(jsonNames, k)
@@ -162,6 +193,47 @@ func jsontextInt(v []byte) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// isArrayRoot reports whether obj describes a homogeneous array.
+func isArrayRoot(obj *jsonschema.SchemaObject) bool {
+	if obj.Items == nil {
+		return false
+	}
+	if obj.Type == nil {
+		return false
+	}
+	s, ok := obj.Type.TypeString()
+	return ok && s == "array"
+}
+
+// isMapRoot reports whether obj describes a string-keyed map (an
+// object schema with an additionalProperties subschema and no
+// declared properties).
+func isMapRoot(obj *jsonschema.SchemaObject) bool {
+	if obj.AdditionalProperties == nil || len(obj.Properties) > 0 {
+		return false
+	}
+	if obj.Type != nil {
+		s, ok := obj.Type.TypeString()
+		if ok && s != "object" {
+			return false
+		}
+	}
+	if _, ok := obj.AdditionalProperties.TypeObject(); !ok {
+		return false
+	}
+	return true
+}
+
+// mapKeyTypeFor returns the AST identifier for the map key type
+// declared on the schema's go-codegen vocabulary, defaulting to
+// `string`.
+func mapKeyTypeFor(a Annotations) ast.Expr {
+	if a.MapKeyType != "" {
+		return ident(a.MapKeyType)
+	}
+	return ident("string")
 }
 
 // rejectsAdditionalProperties reports whether obj declares

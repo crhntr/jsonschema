@@ -29,6 +29,10 @@ type Resolver struct {
 	cache map[string]*Schema // key = absolute resource URI (no fragment)
 }
 
+func NewResolver(client *http.Client) *Resolver {
+	return &Resolver{Client: client}
+}
+
 // Resolve fetches the schema at rawURL, transitively fetches every referenced
 // schema, and links every $ref / $dynamicRef to its lexical-scope target. The
 // returned Schema is the resource root for rawURL (or the document root when

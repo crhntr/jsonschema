@@ -1,0 +1,8 @@
+go-jsonschema validate --schema-url https://example.com/refs/embedded.json instance.json
+
+-- instance.json --
+{
+	"child": {
+		"label": "My Baby"
+	}
+}

@@ -1,0 +1,7 @@
+! go-jsonschema validate --schema-file s.json --schema-url https://example.com/x.json data.json
+stderr 'mutually exclusive'
+
+-- s.json --
+{}
+-- data.json --
+{}

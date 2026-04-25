@@ -219,10 +219,10 @@ func (r *Resolver) fetch(ctx context.Context, absURI string) ([]byte, error) {
 
 func closeAndIgnoreError(c io.Closer) { _ = c.Close() }
 
-// indexDocument walks doc, sets baseURI / resource on every Meta, registers
+// indexDocument walks doc, sets baseURI / resource on every Schema, registers
 // resource roots ($id) and anchors ($anchor / $dynamicAnchor), and returns
 // the deduplicated set of external URIs the document references.
-func (r *Resolver) indexDocument(doc *Meta, fetchURI string) ([]string, error) {
+func (r *Resolver) indexDocument(doc *Schema, fetchURI string) ([]string, error) {
 	r.initResource(doc, fetchURI)
 	r.cacheResource(fetchURI, doc)
 
@@ -238,14 +238,14 @@ func (r *Resolver) indexDocument(doc *Meta, fetchURI string) ([]string, error) {
 // initResource initializes the resource-root metadata on m. Pre-condition
 // for indexing: every resource root has empty anchor maps and a known
 // baseURI before its subtree is walked.
-func (r *Resolver) initResource(m *Meta, base string) {
+func (r *Resolver) initResource(m *Schema, base string) {
 	m.baseURI = base
 	m.resource = m
-	m.anchors = map[string]*Meta{}
-	m.dynamicAnchors = map[string]*Meta{}
+	m.anchors = map[string]*Schema{}
+	m.dynamicAnchors = map[string]*Schema{}
 }
 
-func (r *Resolver) cacheResource(absURI string, m *Meta) {
+func (r *Resolver) cacheResource(absURI string, m *Schema) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.cache == nil {
@@ -261,7 +261,7 @@ type indexState struct {
 	external []string
 }
 
-func (r *Resolver) indexSubtree(m *Meta, base string, resource *Meta, idx *indexState) error {
+func (r *Resolver) indexSubtree(m *Schema, base string, resource *Schema, idx *indexState) error {
 	if m == nil {
 		return nil
 	}
@@ -310,7 +310,7 @@ func (r *Resolver) indexSubtree(m *Meta, base string, resource *Meta, idx *index
 // openEmbeddedResource handles a subschema with $id. If the resolved $id
 // differs from the enclosing base, the subschema becomes a new resource
 // root cached under that URI.
-func (r *Resolver) openEmbeddedResource(m *Meta, base string, resource *Meta, id string) (string, *Meta, error) {
+func (r *Resolver) openEmbeddedResource(m *Schema, base string, resource *Schema, id string) (string, *Schema, error) {
 	newBase, err := resolveRelative(base, id)
 	if err != nil {
 		return "", nil, fmt.Errorf("$id %q: %w", id, err)
@@ -319,8 +319,8 @@ func (r *Resolver) openEmbeddedResource(m *Meta, base string, resource *Meta, id
 	if m == resource && base == newBase {
 		return newBase, resource, nil
 	}
-	m.anchors = map[string]*Meta{}
-	m.dynamicAnchors = map[string]*Meta{}
+	m.anchors = map[string]*Schema{}
+	m.dynamicAnchors = map[string]*Schema{}
 	if m.source == nil && resource.source != nil {
 		m.source = resource.source
 	}
@@ -371,7 +371,7 @@ func (r *Resolver) fetchMissingExternals(ctx context.Context) error {
 
 func (r *Resolver) findMissingExternals() []string {
 	r.mu.Lock()
-	resources := make([]*Meta, 0, len(r.cache))
+	resources := make([]*Schema, 0, len(r.cache))
 	cached := make(map[string]bool, len(r.cache))
 	for k, m := range r.cache {
 		cached[k] = m != nil
@@ -383,8 +383,8 @@ func (r *Resolver) findMissingExternals() []string {
 
 	seen := map[string]struct{}{}
 	var missing []string
-	var walk func(*Meta)
-	walk = func(c *Meta) {
+	var walk func(*Schema)
+	walk = func(c *Schema) {
 		if c == nil {
 			return
 		}
@@ -461,8 +461,8 @@ func (r *Resolver) applyVocabularies() {
 	const validationVocab = "https://json-schema.org/draft/2020-12/vocab/validation"
 
 	r.mu.Lock()
-	resources := make([]*Meta, 0, len(r.cache))
-	seen := map[*Meta]struct{}{}
+	resources := make([]*Schema, 0, len(r.cache))
+	seen := map[*Schema]struct{}{}
 	for _, m := range r.cache {
 		if m == nil {
 			continue
@@ -507,7 +507,7 @@ func (r *Resolver) applyVocabularies() {
 // markSkipValidation sets skipValidation on m and every nested
 // subschema in its tree (subschemas inherit the outer resource's
 // vocabulary set unless they declare their own $schema).
-func (r *Resolver) markSkipValidation(m *Meta) {
+func (r *Resolver) markSkipValidation(m *Schema) {
 	if m == nil {
 		return
 	}
@@ -529,8 +529,8 @@ func (r *Resolver) markSkipValidation(m *Meta) {
 // gets its resolved pointer set; bookended $dynamicRefs get marked dynamic.
 func (r *Resolver) linkAll() error {
 	r.mu.Lock()
-	resources := make([]*Meta, 0, len(r.cache))
-	seen := map[*Meta]struct{}{}
+	resources := make([]*Schema, 0, len(r.cache))
+	seen := map[*Schema]struct{}{}
 	for _, m := range r.cache {
 		if m == nil {
 			continue
@@ -551,7 +551,7 @@ func (r *Resolver) linkAll() error {
 	return nil
 }
 
-func (r *Resolver) linkSubtree(m *Meta) error {
+func (r *Resolver) linkSubtree(m *Schema) error {
 	if m == nil {
 		return nil
 	}
@@ -584,13 +584,13 @@ func (r *Resolver) linkSubtree(m *Meta) error {
 	return nil
 }
 
-// resolveReference resolves ref against base, returning the target *Meta.
+// resolveReference resolves ref against base, returning the target *Schema.
 // When dynamic is true, also reports whether the reference is bookended by a
 // matching $dynamicAnchor in the initial target's resource (per §8.2.3.2).
 // Bookending tells a future validator to walk the runtime dynamic scope
 // (outermost to innermost) for the first matching $dynamicAnchor instead
 // of using the lexical fallback returned here.
-func (r *Resolver) resolveReference(base, ref string, dynamic bool) (*Meta, bool, error) {
+func (r *Resolver) resolveReference(base, ref string, dynamic bool) (*Schema, bool, error) {
 	abs, err := resolveRelative(base, ref)
 	if err != nil {
 		return nil, false, err
@@ -625,7 +625,7 @@ func (r *Resolver) resolveReference(base, ref string, dynamic bool) (*Meta, bool
 
 // resolveFragment resolves frag within resource. Returns target, whether
 // the fragment was a plain name (vs JSON Pointer or empty), and any error.
-func resolveFragment(resource *Meta, frag string) (*Meta, bool, error) {
+func resolveFragment(resource *Schema, frag string) (*Schema, bool, error) {
 	if frag == "" {
 		return resource, false, nil
 	}
@@ -650,14 +650,14 @@ func resolveFragment(resource *Meta, frag string) (*Meta, bool, error) {
 }
 
 // FindJSONPtrValue implements jsonptr.Walker. It delegates to
-// jsonptr.FindValue on the underlying MetaObject — the reflection walker
-// already knows how to descend through MetaObject's json-tagged fields
-// (and into nested *Meta children, which themselves implement Walker).
+// jsonptr.FindValue on the underlying SchemaObject — the reflection walker
+// already knows how to descend through SchemaObject's json-tagged fields
+// (and into nested *Schema children, which themselves implement Walker).
 // Identity is preserved end-to-end without a custom traversal table.
 //
 // Boolean schemas have nothing to descend into; the root pointer
 // resolves to the bool value, anything deeper is an error.
-func (m *Meta) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (jsonptr.Pointer, any, error) {
+func (m *Schema) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (jsonptr.Pointer, any, error) {
 	if obj, ok := m.TypeObject(); ok {
 		_, live, err := jsonptr.FindValue(ptr, obj, opts...)
 		if err != nil {
@@ -672,12 +672,12 @@ func (m *Meta) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (json
 	return ptr, nil, fmt.Errorf("cannot descend into boolean schema at %q", ptr)
 }
 
-// walkJSONPointer follows an RFC 6901 JSON Pointer through a Meta tree.
+// walkJSONPointer follows an RFC 6901 JSON Pointer through a Schema tree.
 // Used by the resolver during link phase. Most fragments terminate at
-// a *Meta, but JSON Schema allows refs into unknown keywords (whose
-// values are captured in MetaObject.Extra as raw bytes); those are
-// lazily parsed into a fresh Meta.
-func walkJSONPointer(m *Meta, ptr string) (*Meta, error) {
+// a *Schema, but JSON Schema allows refs into unknown keywords (whose
+// values are captured in SchemaObject.Extra as raw bytes); those are
+// lazily parsed into a fresh Schema.
+func walkJSONPointer(m *Schema, ptr string) (*Schema, error) {
 	p := jsonptr.Pointer(ptr)
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -686,7 +686,7 @@ func walkJSONPointer(m *Meta, ptr string) (*Meta, error) {
 	if err != nil {
 		return nil, fmt.Errorf("JSON Pointer %q: %w", ptr, err)
 	}
-	if target, ok := live.(*Meta); ok {
+	if target, ok := live.(*Schema); ok {
 		return target, nil
 	}
 	if raw, ok := live.(jsontext.Value); ok {

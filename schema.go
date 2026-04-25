@@ -10,9 +10,6 @@ import (
 	"github.com/go-json-experiment/json/jsontext"
 )
 
-// Schema is the parsed form of a JSON Schema document or subschema.
-type Schema = Meta
-
 // Parse unmarshals a JSON Schema document and retains a reference to buf so
 // callers can recover the original bytes via (*Schema).Source. The returned
 // schema is unresolved — call (*Resolver).Resolve or the package-level
@@ -26,18 +23,18 @@ func Parse(buf []byte) (*Schema, error) {
 	return &s, nil
 }
 
-type Meta struct {
+type Schema struct {
 	isBool, isObject bool
 	bool             bool
-	object           MetaObject
+	object           SchemaObject
 
 	// resolution metadata. zero on freshly-unmarshaled values; populated by Resolve.
-	resolved       *Meta
+	resolved       *Schema
 	dynamic        bool
 	baseURI        string
-	resource       *Meta
-	anchors        map[string]*Meta
-	dynamicAnchors map[string]*Meta
+	resource       *Schema
+	anchors        map[string]*Schema
+	dynamicAnchors map[string]*Schema
 	source         []byte
 	// skipValidation is set on resource roots when their declared
 	// metaschema's $vocabulary does not include the JSON Schema
@@ -48,35 +45,35 @@ type Meta struct {
 
 // Resolved returns the lexical-scope target of $ref or $dynamicRef, or nil if
 // this subschema has no reference or the schema has not been resolved.
-func (m *Meta) Resolved() *Meta { return m.resolved }
+func (m *Schema) Resolved() *Schema { return m.resolved }
 
 // IsDynamic reports whether this subschema's $dynamicRef is "bookended" per
 // JSON Schema 2020-12 §8.2.3.2 — i.e., the initial lexical target's resource
 // contains a matching $dynamicAnchor, so a validator must walk the dynamic
 // scope at validation time.
-func (m *Meta) IsDynamic() bool { return m.dynamic }
+func (m *Schema) IsDynamic() bool { return m.dynamic }
 
 // BaseURI returns the lexical-scope base URI in effect at this subschema.
-func (m *Meta) BaseURI() string { return m.baseURI }
+func (m *Schema) BaseURI() string { return m.baseURI }
 
 // Resource returns the root of the JSON Schema resource (the nearest
 // enclosing schema that defines $id, or the document root) containing this
 // subschema. Returns nil before resolution.
-func (m *Meta) Resource() *Meta { return m.resource }
+func (m *Schema) Resource() *Schema { return m.resource }
 
 // Anchor looks up a $anchor by name within this resource. Only meaningful
 // when called on a resource root (m == m.Resource()).
-func (m *Meta) Anchor(name string) *Meta { return m.anchors[name] }
+func (m *Schema) Anchor(name string) *Schema { return m.anchors[name] }
 
 // DynamicAnchor looks up a $dynamicAnchor by name within this resource.
-func (m *Meta) DynamicAnchor(name string) *Meta { return m.dynamicAnchors[name] }
+func (m *Schema) DynamicAnchor(name string) *Schema { return m.dynamicAnchors[name] }
 
 // Subschemas yields each direct subschema child of m. Boolean schemas
 // (and nil) yield nothing. Children are visited in this order: $defs,
 // properties, allOf, anyOf, oneOf, then if / then / else / not / items /
 // additionalProperties / propertyNames. Nil singleton slots are skipped.
-func (m *Meta) Subschemas() iter.Seq[*Meta] {
-	return func(yield func(*Meta) bool) {
+func (m *Schema) Subschemas() iter.Seq[*Schema] {
+	return func(yield func(*Schema) bool) {
 		if m == nil {
 			return
 		}
@@ -124,7 +121,7 @@ func (m *Meta) Subschemas() iter.Seq[*Meta] {
 				return
 			}
 		}
-		for _, c := range []*Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.Contains, obj.AdditionalProperties, obj.UnevaluatedProperties, obj.UnevaluatedItems, obj.PropertyNames} {
+		for _, c := range []*Schema{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.Contains, obj.AdditionalProperties, obj.UnevaluatedProperties, obj.UnevaluatedItems, obj.PropertyNames} {
 			if c == nil {
 				continue
 			}
@@ -135,18 +132,18 @@ func (m *Meta) Subschemas() iter.Seq[*Meta] {
 	}
 }
 
-// Source returns the original JSON document bytes this Meta was parsed from.
+// Source returns the original JSON document bytes this Schema was parsed from.
 // Only populated on resource roots (top-level document or embedded $id
 // resources within the same document share the same slice). Returns nil
 // otherwise.
-func (m *Meta) Source() []byte { return m.source }
+func (m *Schema) Source() []byte { return m.source }
 
-func (m *Meta) unsetIs() {
+func (m *Schema) unsetIs() {
 	m.isBool = false
 	m.isObject = false
 }
 
-type MetaObject struct {
+type SchemaObject struct {
 	ID     string `json:"$id,omitempty"`
 	Schema string `json:"$schema,omitempty"`
 
@@ -159,24 +156,24 @@ type MetaObject struct {
 
 	Comment string `json:"$comment,omitempty"`
 
-	Defs map[string]*Meta `json:"$defs,omitempty"`
+	Defs map[string]*Schema `json:"$defs,omitempty"`
 
-	If   *Meta `json:"if,omitempty"`
-	Then *Meta `json:"then,omitempty"`
-	Else *Meta `json:"else,omitempty"`
+	If   *Schema `json:"if,omitempty"`
+	Then *Schema `json:"then,omitempty"`
+	Else *Schema `json:"else,omitempty"`
 
-	AllOf []*Meta `json:"allOf,omitempty"`
-	AnyOf []*Meta `json:"anyOf,omitempty"`
-	OneOf []*Meta `json:"oneOf,omitempty"`
-	Not   *Meta  `json:"not,omitempty"`
+	AllOf []*Schema `json:"allOf,omitempty"`
+	AnyOf []*Schema `json:"anyOf,omitempty"`
+	OneOf []*Schema `json:"oneOf,omitempty"`
+	Not   *Schema   `json:"not,omitempty"`
 
-	Properties            map[string]*Meta    `json:"properties,omitempty"`
-	PatternProperties     map[string]*Meta    `json:"patternProperties,omitempty"`
-	AdditionalProperties  *Meta               `json:"additionalProperties,omitempty"`
-	UnevaluatedProperties *Meta               `json:"unevaluatedProperties,omitempty"`
-	PropertyNames         *Meta               `json:"propertyNames,omitempty"`
+	Properties            map[string]*Schema  `json:"properties,omitempty"`
+	PatternProperties     map[string]*Schema  `json:"patternProperties,omitempty"`
+	AdditionalProperties  *Schema             `json:"additionalProperties,omitempty"`
+	UnevaluatedProperties *Schema             `json:"unevaluatedProperties,omitempty"`
+	PropertyNames         *Schema             `json:"propertyNames,omitempty"`
 	DependentRequired     map[string][]string `json:"dependentRequired,omitempty"`
-	DependentSchemas      map[string]*Meta    `json:"dependentSchemas,omitempty"`
+	DependentSchemas      map[string]*Schema  `json:"dependentSchemas,omitempty"`
 
 	// Dependencies is the pre-2020-12 keyword. Each value may be an
 	// array of property names (treated like dependentRequired) or a
@@ -184,17 +181,17 @@ type MetaObject struct {
 	Dependencies map[string]*Dependency `json:"dependencies,omitempty"`
 
 	// meta-data.json
-	Title       string   `json:"title,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Deprecated  bool     `json:"deprecated,omitempty"`
-	ReadOnly    bool     `json:"readOnly,omitempty"`
-	WriteOnly   bool     `json:"writeOnly,omitempty"`
+	Title       string           `json:"title,omitempty"`
+	Description string           `json:"description,omitempty"`
+	Deprecated  bool             `json:"deprecated,omitempty"`
+	ReadOnly    bool             `json:"readOnly,omitempty"`
+	WriteOnly   bool             `json:"writeOnly,omitempty"`
 	Examples    []jsontext.Value `json:"examples,omitempty"`
 
-	PrefixItems      []*Meta `json:"prefixItems,omitempty"`
-	Items            *Meta  `json:"items,omitempty"`
-	UnevaluatedItems *Meta  `json:"unevaluatedItems,omitempty"`
-	Contains         *Meta  `json:"contains,omitempty"`
+	PrefixItems      []*Schema `json:"prefixItems,omitempty"`
+	Items            *Schema   `json:"items,omitempty"`
+	UnevaluatedItems *Schema   `json:"unevaluatedItems,omitempty"`
+	Contains         *Schema   `json:"contains,omitempty"`
 
 	MinContains jsontext.Value `json:"minContains,omitempty"`
 	MaxContains jsontext.Value `json:"maxContains,omitempty"`
@@ -230,29 +227,25 @@ type MetaObject struct {
 	Extra map[string]jsontext.Value `json:",inline"`
 }
 
-func NewMetaTypeBool(in bool) *Meta {
-	return &Meta{isBool: true, bool: in}
+func New(in SchemaObject) *Schema {
+	return &Schema{isObject: true, object: in}
 }
 
-func NewMetaTypeObject(in MetaObject) *Meta {
-	return &Meta{isObject: true, object: in}
-}
+func (m *Schema) TypeBool() (bool, bool)           { return m.bool, m.isBool }
+func (m *Schema) TypeObject() (SchemaObject, bool) { return m.object, m.isObject }
 
-func (m *Meta) TypeBool() (bool, bool)         { return m.bool, m.isBool }
-func (m *Meta) TypeObject() (MetaObject, bool) { return m.object, m.isObject }
-
-func (m *Meta) MarshalJSONTo(encoder *jsontext.Encoder) error {
+func (m *Schema) MarshalJSONTo(encoder *jsontext.Encoder) error {
 	switch {
 	case m.isBool:
 		return json.MarshalEncode(encoder, m.bool)
 	case m.isObject:
 		return json.MarshalEncode(encoder, m.object)
 	default:
-		return json.MarshalEncode(encoder, MetaObject{})
+		return json.MarshalEncode(encoder, SchemaObject{})
 	}
 }
 
-func (m *Meta) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+func (m *Schema) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	switch dec.PeekKind() {
 	case jsontext.KindFalse, jsontext.KindTrue:
 		m.unsetIs()
@@ -271,11 +264,11 @@ func (m *Meta) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 // keyword: either a list of required properties or a subschema.
 type Dependency struct {
 	required []string
-	schema   *Meta
+	schema   *Schema
 }
 
 func (d *Dependency) Required() ([]string, bool) { return d.required, d.required != nil }
-func (d *Dependency) Schema() *Meta              { return d.schema }
+func (d *Dependency) Schema() *Schema            { return d.schema }
 
 func (d *Dependency) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	switch dec.PeekKind() {
@@ -287,7 +280,7 @@ func (d *Dependency) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		d.required = req
 		return nil
 	default:
-		var m Meta
+		var m Schema
 		if err := json.UnmarshalDecode(dec, &m); err != nil {
 			return err
 		}

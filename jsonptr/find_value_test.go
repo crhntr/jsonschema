@@ -91,9 +91,9 @@ type inlineHost struct {
 
 func TestFindValueInline(t *testing.T) {
 	h := inlineHost{
-		Name:        "Ada",
-		Extra:       inlineExtra{Tier: "gold", Score: 9},
-		Extras:      map[string]any{"nick": "A"},
+		Name:   "Ada",
+		Extra:  inlineExtra{Tier: "gold", Score: 9},
+		Extras: map[string]any{"nick": "A"},
 	}
 	cases := []struct {
 		ptr     jsonptr.Pointer
@@ -709,7 +709,7 @@ func TestMetaImplementsWalker(t *testing.T) {
 		{
 			ptr: "/$defs/id",
 			live: func(t *testing.T, v any) {
-				_, ok := v.(*jsonschema.Meta)
+				_, ok := v.(*jsonschema.Schema)
 				if !ok {
 					t.Fail()
 				}
@@ -719,7 +719,7 @@ func TestMetaImplementsWalker(t *testing.T) {
 		{
 			ptr: "/properties/child/properties/ref",
 			live: func(t *testing.T, v any) {
-				_, ok := v.(*jsonschema.Meta)
+				_, ok := v.(*jsonschema.Schema)
 				if !ok {
 					t.Fail()
 				}
@@ -729,7 +729,7 @@ func TestMetaImplementsWalker(t *testing.T) {
 		{
 			ptr: "/allOf/1",
 			live: func(t *testing.T, v any) {
-				if _, ok := v.(*jsonschema.Meta); !ok {
+				if _, ok := v.(*jsonschema.Schema); !ok {
 					t.Errorf("live = %T, want *jsonschema.Meta", v)
 				}
 			},

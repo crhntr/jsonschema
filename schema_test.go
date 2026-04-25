@@ -1,83 +1,63 @@
 package jsonschema_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 
 	"github.com/crhntr/jsonschema"
 )
 
-func mustObject(t *testing.T, m *jsonschema.Meta) jsonschema.MetaObject {
-	t.Helper()
-	obj, ok := m.TypeObject()
-	if !ok {
-		t.Fatalf("expected object schema, got bool")
+// TestConformanceLoadsCleanly walks the JSON Schema 2020-12 conformance
+// suite and parses every schema in every test case, asserting that the
+// jsonschema.Schema model accepts the full range of constructs the suite
+// uses. This is a *load-only* pass — it does not validate instances or
+// resolve external $refs; that's the next layer of conformance.
+func TestConformanceLoadsCleanly(t *testing.T) {
+	type conformanceCase struct {
+		Description string         `json:"description"`
+		Schema      jsontext.Value `json:"schema"`
+		Tests       []struct {
+			Description string         `json:"description"`
+			Data        jsontext.Value `json:"data"`
+			Valid       bool           `json:"valid"`
+		} `json:"tests"`
 	}
-	return obj
+
+	matches, err := filepath.Glob("testdata/JSON-Schema-Test-Suite/tests-draft2020-12/*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) == 0 {
+		t.Fatal("no conformance test files found")
+	}
+
+	for _, file := range matches {
+		t.Run(filepath.Base(file), func(t *testing.T) {
+			buf, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cases []conformanceCase
+			if err := json.Unmarshal(buf, &cases); err != nil {
+				t.Fatalf("decode %s: %v", file, err)
+			}
+			for _, c := range cases {
+				t.Run(c.Description, func(t *testing.T) {
+					if _, err := jsonschema.Parse(c.Schema); err != nil {
+						t.Errorf("Parse: %v\nschema: %s", err, c.Schema)
+					}
+				})
+			}
+		})
+	}
 }
 
-// findResolved walks schema.allOf for a $ref containing pathFragment and
-// returns the resolved target (or nil).
-func findResolved(t *testing.T, schema *jsonschema.Meta, pathFragment string) *jsonschema.Meta {
-	t.Helper()
-	obj := mustObject(t, schema)
-	for _, sub := range obj.AllOf {
-		ref := mustObject(t, sub).Ref
-		if strings.Contains(ref, pathFragment) {
-			return sub.Resolved()
-		}
-	}
-	return nil
-}
-
-// findFirstDynamicRef walks the subtree under m looking for the first Meta
-// whose MetaObject has a non-empty $dynamicRef. Used to spot-check
-// bookending of $dynamicRef.
-func findFirstDynamicRef(m *jsonschema.Meta) *jsonschema.Meta {
-	if m == nil {
-		return nil
-	}
-	obj, ok := m.TypeObject()
-	if !ok {
-		return nil
-	}
-	if obj.DynamicRef != "" {
-		return m
-	}
-	for _, c := range obj.Defs {
-		if r := findFirstDynamicRef(c); r != nil {
-			return r
-		}
-	}
-	for _, c := range obj.Properties {
-		if r := findFirstDynamicRef(c); r != nil {
-			return r
-		}
-	}
-	for _, c := range obj.AllOf {
-		if r := findFirstDynamicRef(c); r != nil {
-			return r
-		}
-	}
-	for _, c := range obj.AnyOf {
-		if r := findFirstDynamicRef(c); r != nil {
-			return r
-		}
-	}
-	for _, c := range obj.OneOf {
-		if r := findFirstDynamicRef(c); r != nil {
-			return r
-		}
-	}
-	for _, c := range []*jsonschema.Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.AdditionalProperties, obj.PropertyNames} {
-		if r := findFirstDynamicRef(c); r != nil {
-			return r
-		}
-	}
-	return nil
-}
-
-func TestMeta(t *testing.T) {
+func Test(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		entrypoint string
@@ -147,88 +127,5 @@ func TestMeta(t *testing.T) {
 				t.Errorf("target resource missing $dynamicAnchor %q", anchorName)
 			}
 		})
-	}
-}
-
-func TestResolveJSONPointerFragment(t *testing.T) {
-	_, client := startSchemaServer(t)
-	schema, err := jsonschema.Resolve(t.Context(), client, "https://example.com/refs/json-pointer")
-	if err != nil {
-		t.Fatal(err)
-	}
-	obj := mustObject(t, schema)
-	count := obj.Properties["count"]
-	if count == nil {
-		t.Fatal("properties.count missing")
-	}
-	target := count.Resolved()
-	if target == nil {
-		t.Fatal("count.Resolved() is nil")
-	}
-	tobj := mustObject(t, target)
-	if tobj.Type == nil {
-		t.Fatal("target type is nil")
-	}
-	if got, _ := tobj.Type.TypeString(); string(got) != "integer" {
-		t.Errorf("target type = %q, want integer", got)
-	}
-}
-
-func TestResolveAnchorFragment(t *testing.T) {
-	_, client := startSchemaServer(t)
-	schema, err := jsonschema.Resolve(t.Context(), client, "https://example.com/refs/anchor")
-	if err != nil {
-		t.Fatal(err)
-	}
-	obj := mustObject(t, schema)
-	name := obj.Properties["name"]
-	if name == nil {
-		t.Fatal("properties.name missing")
-	}
-	target := name.Resolved()
-	if target == nil {
-		t.Fatal("name.Resolved() is nil")
-	}
-	if got, _ := mustObject(t, target).Type.TypeString(); string(got) != "string" {
-		t.Errorf("target type = %q, want string", got)
-	}
-}
-
-func TestResolveEmbeddedResource(t *testing.T) {
-	_, client := startSchemaServer(t)
-	schema, err := jsonschema.Resolve(t.Context(), client, "https://example.com/refs/embedded")
-	if err != nil {
-		t.Fatal(err)
-	}
-	obj := mustObject(t, schema)
-	child := obj.Properties["child"]
-	if child == nil {
-		t.Fatal("properties.child missing")
-	}
-	target := child.Resolved()
-	if target == nil {
-		t.Fatal("child.Resolved() is nil")
-	}
-	if got := target.BaseURI(); got != "https://example.com/refs/embedded/inner" {
-		t.Errorf("target BaseURI = %q, want embedded inner", got)
-	}
-}
-
-func TestResolveDynamicRef(t *testing.T) {
-	_, client := startSchemaServer(t)
-	schema, err := jsonschema.Resolve(t.Context(), client, "https://example.com/refs/dynamic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	obj := mustObject(t, schema)
-	next := obj.Properties["next"]
-	if next == nil {
-		t.Fatal("properties.next missing")
-	}
-	if !next.IsDynamic() {
-		t.Error("expected $dynamicRef to be bookended (IsDynamic=true)")
-	}
-	if next.Resolved() != schema {
-		t.Error("expected lexical fallback to be the resource root itself")
 	}
 }

@@ -80,7 +80,7 @@ func readJSONFile[T any](t *testing.T, path string) T {
 // internal $refs are linked. The synthetic URI lets Resolver index even
 // schemas that don't declare $id. External refs to localhost:1234/...
 // are served from the conformance suite's remotes/ directory.
-func loadSuiteSchema(t *testing.T, body []byte) *jsonschema.Meta {
+func loadSuiteSchema(t *testing.T, body []byte) *jsonschema.Schema {
 	t.Helper()
 	schema, err := jsonschema.Parse(body)
 	if err != nil {
@@ -191,7 +191,7 @@ func (rt *remotesTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return rt.base.RoundTrip(r2)
 }
 
-func runSuiteCase(t *testing.T, schema *jsonschema.Meta, g suiteGroup, c suiteCase, passed, failed *atomic.Int64) {
+func runSuiteCase(t *testing.T, schema *jsonschema.Schema, g suiteGroup, c suiteCase, passed, failed *atomic.Int64) {
 	t.Helper()
 	var err error
 	if shouldAssertFormat(t.Name(), g.Schema) {

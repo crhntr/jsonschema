@@ -41,13 +41,13 @@ func childKeyword(parent, keyword string) string {
 // of resource roots being evaluated (for $dynamicRef per §8.2.3.2) plus
 // configuration like whether format keywords assert.
 type evalScope struct {
-	resources       []*Meta
+	resources       []*Schema
 	assertFormat    bool
 	skipValidation  bool
 	skipPrefixItems bool
 }
 
-func (s evalScope) push(resource *Meta) evalScope {
+func (s evalScope) push(resource *Schema) evalScope {
 	if resource == nil || (len(s.resources) > 0 && s.resources[len(s.resources)-1] == resource) {
 		return s
 	}
@@ -56,7 +56,7 @@ func (s evalScope) push(resource *Meta) evalScope {
 	return out
 }
 
-func (s evalScope) findDynamicAnchor(name string) *Meta {
+func (s evalScope) findDynamicAnchor(name string) *Schema {
 	if name == "" {
 		return nil
 	}
@@ -124,7 +124,7 @@ func (a *annotations) merge(b annotations) {
 	}
 }
 
-func (m *Meta) Evaluate(name string, in []byte) error {
+func (m *Schema) Evaluate(name string, in []byte) error {
 	_, err := m.evaluate(name, in, evalScope{})
 	return err
 }
@@ -132,12 +132,12 @@ func (m *Meta) Evaluate(name string, in []byte) error {
 // EvaluateWithFormatAssertion behaves like Evaluate but also enforces
 // format keywords as assertions (per the format-assertion vocabulary).
 // Spec-default Evaluate treats format as an annotation only.
-func (m *Meta) EvaluateWithFormatAssertion(name string, in []byte) error {
+func (m *Schema) EvaluateWithFormatAssertion(name string, in []byte) error {
 	_, err := m.evaluate(name, in, evalScope{assertFormat: true})
 	return err
 }
 
-func (m *Meta) evaluate(name string, in []byte, scope evalScope) (annotations, error) {
+func (m *Schema) evaluate(name string, in []byte, scope evalScope) (annotations, error) {
 	var ann annotations
 	if !json.Valid(in) {
 		return ann, NewErrorWithPosition(name, in, 0, errors.New("invalid JSON"))
@@ -221,7 +221,7 @@ func validateMetaTypeBool(name string, in []byte, dec *jsontext.Decoder, b bool)
 	return NewErrorWithPosition(name, in, dec.InputOffset(), errors.New("nothing allowed here"))
 }
 
-func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
+func (o *SchemaObject) validateValue(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
 	var ann annotations
 	kind := jsontext.NewDecoder(bytes.NewReader(val)).PeekKind()
 	if o.Type != nil && !scope.skipValidation {
@@ -275,7 +275,7 @@ func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsonte
 	return ann, nil
 }
 
-func (o *MetaObject) validateComposition(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
+func (o *SchemaObject) validateComposition(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
 	var ann annotations
 	for i, sub := range o.AllOf {
 		subAnn, err := sub.evaluate(childPath(name, "allOf", i), val, scope)
@@ -344,7 +344,7 @@ func (o *MetaObject) validateComposition(name string, in []byte, off int64, val 
 // validateObjectBody validates body keywords (properties,
 // patternProperties, additionalProperties, required, etc.) and returns
 // the set of property names it considered evaluated.
-func (o *MetaObject) validateObjectBody(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
+func (o *SchemaObject) validateObjectBody(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
 	var ann annotations
 	dec := jsontext.NewDecoder(bytes.NewReader(val))
 	if _, err := dec.ReadToken(); err != nil {
@@ -466,7 +466,7 @@ func (o *MetaObject) validateObjectBody(name string, in []byte, off int64, val j
 
 // validateUnevaluatedProperties applies o.UnevaluatedProperties to
 // every key in val that is NOT in alreadyEvaluated.
-func (o *MetaObject) validateUnevaluatedProperties(name string, in []byte, off int64, val jsontext.Value, scope evalScope, alreadyEvaluated map[string]struct{}) (annotations, error) {
+func (o *SchemaObject) validateUnevaluatedProperties(name string, in []byte, off int64, val jsontext.Value, scope evalScope, alreadyEvaluated map[string]struct{}) (annotations, error) {
 	var ann annotations
 	dec := jsontext.NewDecoder(bytes.NewReader(val))
 	if _, err := dec.ReadToken(); err != nil {
@@ -495,10 +495,10 @@ func (o *MetaObject) validateUnevaluatedProperties(name string, in []byte, off i
 
 type patternRegex struct {
 	re     *regexp.Regexp
-	schema *Meta
+	schema *Schema
 }
 
-func compilePatternProperties(pp map[string]*Meta) ([]patternRegex, error) {
+func compilePatternProperties(pp map[string]*Schema) ([]patternRegex, error) {
 	if len(pp) == 0 {
 		return nil, nil
 	}
@@ -588,7 +588,7 @@ func isValidECMA262Regex(pattern string) bool {
 
 // validateArrayBody handles minItems/maxItems/uniqueItems/prefixItems/
 // items/contains and returns the set of indices considered evaluated.
-func (o *MetaObject) validateArrayBody(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
+func (o *SchemaObject) validateArrayBody(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
 	var ann annotations
 	dec := jsontext.NewDecoder(bytes.NewReader(val))
 	if _, err := dec.ReadToken(); err != nil {
@@ -674,7 +674,7 @@ func (o *MetaObject) validateArrayBody(name string, in []byte, off int64, val js
 
 // validateUnevaluatedItems applies o.UnevaluatedItems to every array
 // index in val that is NOT in alreadyEvaluated.
-func (o *MetaObject) validateUnevaluatedItems(name string, in []byte, off int64, val jsontext.Value, scope evalScope, alreadyEvaluated map[int]struct{}) (annotations, error) {
+func (o *SchemaObject) validateUnevaluatedItems(name string, in []byte, off int64, val jsontext.Value, scope evalScope, alreadyEvaluated map[int]struct{}) (annotations, error) {
 	var ann annotations
 	dec := jsontext.NewDecoder(bytes.NewReader(val))
 	if _, err := dec.ReadToken(); err != nil {
@@ -697,7 +697,7 @@ func (o *MetaObject) validateUnevaluatedItems(name string, in []byte, off int64,
 	return ann, nil
 }
 
-func (o *MetaObject) validateNumber(val jsontext.Value) error {
+func (o *SchemaObject) validateNumber(val jsontext.Value) error {
 	n, ok := new(big.Rat).SetString(string(val))
 	if !ok {
 		return fmt.Errorf("invalid number %s", val)
@@ -740,7 +740,7 @@ func compareRat(keyword jsontext.Value, n *big.Rat) (int, bool) {
 	return r.Cmp(n), true
 }
 
-func (o *MetaObject) validateString(val jsontext.Value, scope evalScope) error {
+func (o *SchemaObject) validateString(val jsontext.Value, scope evalScope) error {
 	if len(o.MinLength) == 0 && len(o.MaxLength) == 0 && o.Pattern == "" && (o.Format == "" || !scope.assertFormat) {
 		return nil
 	}
@@ -1442,7 +1442,7 @@ func decodeJSONString(val jsontext.Value) (string, error) {
 	return s, nil
 }
 
-func (o *MetaObject) validateType(name string, in jsontext.Value, off int64, kind jsontext.Kind, val jsontext.Value) error {
+func (o *SchemaObject) validateType(name string, in jsontext.Value, off int64, kind jsontext.Kind, val jsontext.Value) error {
 	for _, t := range typeNames(o.Type) {
 		if matchesType(t, kind, val) {
 			return nil

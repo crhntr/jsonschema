@@ -2,6 +2,6 @@ package jsonschema
 
 import "os"
 
-func ToGo(root *os.Root, m *MetaObject) error {
+func ToGo(root *os.Root, m *SchemaObject) error {
 	return nil
 }

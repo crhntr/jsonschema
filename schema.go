@@ -66,30 +66,52 @@ func (m *Meta) Anchor(name string) *Meta { return m.anchors[name] }
 // DynamicAnchor looks up a $dynamicAnchor by name within this resource.
 func (m *Meta) DynamicAnchor(name string) *Meta { return m.dynamicAnchors[name] }
 
-// Refs yields every subschema in m's tree (including m itself) whose
-// MetaObject carries a non-empty $ref or $dynamicRef. Use Resolved on
-// the yielded *Meta to follow the link.
-func (m *Meta) Refs() iter.Seq[*Meta] {
+// Subschemas yields each direct subschema child of m. Boolean schemas
+// (and nil) yield nothing. Children are visited in this order: $defs,
+// properties, allOf, anyOf, oneOf, then if / then / else / not / items /
+// additionalProperties / propertyNames. Nil singleton slots are skipped.
+func (m *Meta) Subschemas() iter.Seq[*Meta] {
 	return func(yield func(*Meta) bool) {
-		stopped := false
-		var visit func(*Meta) error
-		visit = func(c *Meta) error {
-			if stopped || c == nil {
-				return nil
-			}
-			obj, ok := c.TypeObject()
-			if !ok {
-				return nil
-			}
-			if obj.Ref != "" || obj.DynamicRef != "" {
-				if !yield(c) {
-					stopped = true
-					return nil
-				}
-			}
-			return walkSubschemas(c, visit)
+		if m == nil {
+			return
 		}
-		_ = visit(m)
+		obj, ok := m.TypeObject()
+		if !ok {
+			return
+		}
+		for _, c := range obj.Defs {
+			if !yield(c) {
+				return
+			}
+		}
+		for _, c := range obj.Properties {
+			if !yield(c) {
+				return
+			}
+		}
+		for i := range obj.AllOf {
+			if !yield(&obj.AllOf[i]) {
+				return
+			}
+		}
+		for i := range obj.AnyOf {
+			if !yield(&obj.AnyOf[i]) {
+				return
+			}
+		}
+		for i := range obj.OneOf {
+			if !yield(&obj.OneOf[i]) {
+				return
+			}
+		}
+		for _, c := range []*Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.AdditionalProperties, obj.PropertyNames} {
+			if c == nil {
+				continue
+			}
+			if !yield(c) {
+				return
+			}
+		}
 	}
 }
 
@@ -129,8 +151,8 @@ type MetaObject struct {
 	Not   *Meta  `json:"not,omitempty"`
 
 	Properties           map[string]*Meta `json:"properties,omitempty"`
-	AdditionalProperties *Meta           `json:"additionalProperties,omitempty"`
-	PropertyNames        *Meta           `json:"propertyNames,omitempty"`
+	AdditionalProperties *Meta            `json:"additionalProperties,omitempty"`
+	PropertyNames        *Meta            `json:"propertyNames,omitempty"`
 
 	// meta-data.json
 	Title       string   `json:"title,omitempty"`

@@ -291,9 +291,12 @@ func (r *Resolver) indexSubtree(m *Meta, base string, resource *Meta, idx *index
 		}
 	}
 
-	return walkSubschemas(m, func(child *Meta) error {
-		return r.indexSubtree(child, base, resource, idx)
-	})
+	for c := range m.Subschemas() {
+		if err := r.indexSubtree(c, base, resource, idx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // openEmbeddedResource handles a subschema with $id. If the resolved $id
@@ -391,48 +394,8 @@ func (r *Resolver) linkSubtree(m *Meta) error {
 		m.dynamic = bookended
 	}
 
-	return walkSubschemas(m, r.linkSubtree)
-}
-
-// walkSubschemas calls visit on every direct child subschema of m: $defs,
-// properties, allOf/anyOf/oneOf entries, and the singleton if/then/else/
-// not/items/additionalProperties/propertyNames slots. Nil children are
-// skipped. Recursion is the visitor's responsibility.
-func walkSubschemas(m *Meta, visit func(*Meta) error) error {
-	obj, ok := m.TypeObject()
-	if !ok {
-		return nil
-	}
-	for _, c := range obj.Defs {
-		if err := visit(c); err != nil {
-			return err
-		}
-	}
-	for _, c := range obj.Properties {
-		if err := visit(c); err != nil {
-			return err
-		}
-	}
-	for i := range obj.AllOf {
-		if err := visit(&obj.AllOf[i]); err != nil {
-			return err
-		}
-	}
-	for i := range obj.AnyOf {
-		if err := visit(&obj.AnyOf[i]); err != nil {
-			return err
-		}
-	}
-	for i := range obj.OneOf {
-		if err := visit(&obj.OneOf[i]); err != nil {
-			return err
-		}
-	}
-	for _, c := range []*Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.AdditionalProperties, obj.PropertyNames} {
-		if c == nil {
-			continue
-		}
-		if err := visit(c); err != nil {
+	for c := range m.Subschemas() {
+		if err := r.linkSubtree(c); err != nil {
 			return err
 		}
 	}

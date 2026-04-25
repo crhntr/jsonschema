@@ -1,7 +1,8 @@
 # JSON Schema 2020-12 → Go code generator
 
-Status: design — Phases 1 (vocabulary parsing) and 2 (type resolver)
-implemented in `internal/generate/`. Phases 3–15 pending.
+Status: design — Phases 1 (vocabulary parsing), 2 (type resolver),
+and 3 (struct IR + emit) implemented in `internal/generate/`.
+Phases 4–15 pending.
 
 ## Context
 
@@ -225,6 +226,8 @@ The generator is multi-pass:
   ParseAnnotations).
 - `internal/generate/types.go` — Phase 2 (Resolver +
   allowedImportPath).
+- `internal/generate/ir.go`, `derive.go`, `emit.go` — Phase 3
+  (struct IR + Derive + Emit).
 
 ## Test discipline
 
@@ -305,7 +308,9 @@ Each phase lands as its own commit.
    (stdlib / `github.com/go-json-experiment/json` / `golang.org/x/*`)
    are rejected at resolver construction.
 
-3. **IR for a single struct schema.** `derive.go` produces an
+3. **IR for a single struct schema.** ✅ Implemented
+   (`internal/generate/ir.go`, `derive.go`, `emit.go`).
+   `Derive(name, *jsonschema.SchemaObject)` produces an
    `ir.Type` from `{type: object, properties: {...}, required:
    [...]}`. Emit only the Go struct (no marshalers). Test: `go
    build`, then `go doc` confirms the struct + its fields.

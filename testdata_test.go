@@ -1,2 +1,0 @@
-package jsonschema_test
-

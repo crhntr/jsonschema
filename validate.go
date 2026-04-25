@@ -908,26 +908,28 @@ func parseOffset(s string) (h, m int, ok bool) {
 func isUUID(s string) bool { return uuidRE.MatchString(s) }
 
 // validateEmailFormat validates an addr-spec per RFC 5321 (email) or
-// RFC 6531 (idn-email). The local-part must round-trip through
-// mail.ParseAddress without a display name; the domain must be a
-// hostname (or IDN hostname) or an IP / IPv6 literal.
+// RFC 6531 (idn-email).
 func validateEmailFormat(s string, idn bool) error {
 	if strings.ContainsAny(s, "<>") {
 		return fmt.Errorf("not a valid email: %q", s)
-	}
-	addr, err := mail.ParseAddress(s)
-	if err != nil || addr.Name != "" {
-		// mail.ParseAddress can't handle non-ASCII local parts.
-		// For idn-email, fall through to a loose check.
-		if !idn {
-			return fmt.Errorf("not a valid email: %q", s)
-		}
 	}
 	at := strings.LastIndexByte(s, '@')
 	if at < 0 || at == 0 || at == len(s)-1 {
 		return fmt.Errorf("not a valid email: %q", s)
 	}
+	local := s[:at]
 	domain := s[at+1:]
+
+	// Local part: validate via mail.ParseAddress on a synthetic "local@x"
+	// (which avoids any wrinkles in the actual domain). For idn, accept
+	// any non-empty local part (mail.ParseAddress can't handle Unicode).
+	if !idn {
+		if _, err := mail.ParseAddress(local + "@x"); err != nil {
+			return fmt.Errorf("not a valid email local part: %q", s)
+		}
+	}
+
+	// Domain: address-literal or hostname.
 	if strings.HasPrefix(domain, "[") && strings.HasSuffix(domain, "]") {
 		ip := domain[1 : len(domain)-1]
 		ip = strings.TrimPrefix(ip, "IPv6:")
@@ -964,7 +966,7 @@ func isHostname(s string) bool {
 			if !strings.HasPrefix(lower, "xn--") {
 				return false
 			}
-			if _, err := idnStrict.ToUnicode(label); err != nil {
+			if _, err := idnPunycode.ToUnicode(label); err != nil {
 				return false
 			}
 		}
@@ -974,14 +976,26 @@ func isHostname(s string) bool {
 
 // idnStrict is a strict IDNA 2008 profile used for format-assertion of
 // host names — rejects invalid Unicode sequences, disallowed
-// characters, and bad punycode.
+// characters, and bad punycode. Uses MapForLookup which combined with
+// ValidateLabels enforces the IDNA 2008 disallowed character set.
 var idnStrict = idna.New(
+	idna.MapForLookup(),
+	idna.Transitional(false),
 	idna.StrictDomainName(true),
 	idna.ValidateLabels(true),
 	idna.VerifyDNSLength(true),
 	idna.BidiRule(),
 	idna.CheckHyphens(true),
 	idna.CheckJoiners(true),
+)
+
+// idnPunycode is a profile that decodes A-labels and validates the
+// resulting Unicode against the IDNA 2008 disallowed table — used to
+// catch disallowed code points hiding inside xn-- labels that the
+// surface-level lookup would otherwise accept.
+var idnPunycode = idna.New(
+	idna.ValidateForRegistration(),
+	idna.VerifyDNSLength(true),
 )
 
 // isIDNHostname round-trips via the strict profile to catch invalid

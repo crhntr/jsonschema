@@ -1,6 +1,7 @@
 package jsonptr_test
 
 import (
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -69,10 +70,10 @@ func TestFindValueRoot(t *testing.T) {
 	if !strings.Contains(string(raw), `"name":"Bo"`) {
 		t.Errorf("raw missing name: %s", raw)
 	}
-	// FindValue dereferences pointers and interfaces uniformly — at the
-	// root that means *person becomes person.
-	if _, ok := live.(person); !ok {
-		t.Errorf("live = %T, want person", live)
+	// FindValue preserves pointer-ness at the root: passing *person
+	// returns *person.
+	if _, ok := live.(*person); !ok {
+		t.Errorf("live = %T, want *person", live)
 	}
 }
 
@@ -390,6 +391,155 @@ func TestFindValueReturnsJSONTextValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	var _ jsontext.Value = raw // compile-time check
+}
+
+// inventory implements jsonptr.Walker so jsonptr can descend into it
+// without going through Marshal — and identity of the returned items is
+// preserved.
+type item struct {
+	SKU string
+	Qty int
+}
+
+type inventory struct {
+	byID map[string]*item
+}
+
+// FindJSONPtrValue consumes the first token (an SKU) and lets FindValue
+// continue descending the *item with the rest.
+func (inv *inventory) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (jsonptr.Pointer, any, error) {
+	tok, rest, ok := ptr.Head()
+	if !ok {
+		return ptr, inv, nil
+	}
+	it, ok := inv.byID[tok]
+	if !ok {
+		return ptr, nil, fmt.Errorf("inventory: missing SKU %q", tok)
+	}
+	return rest, it, nil
+}
+
+func TestFindValueWalkerPreservesIdentity(t *testing.T) {
+	apple := &item{SKU: "apple", Qty: 7}
+	inv := &inventory{byID: map[string]*item{"apple": apple}}
+
+	_, live, err := jsonptr.FindValue("/apple", inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := live.(*item)
+	if !ok {
+		t.Fatalf("live = %T, want *item", live)
+	}
+	if got != apple {
+		t.Errorf("live pointer differs from source: got %p, want %p", got, apple)
+	}
+}
+
+func TestFindValueWalkerThenReflection(t *testing.T) {
+	// Walker hands off after one token; reflection finishes the descent
+	// into the *item's Qty field.
+	apple := &item{SKU: "apple", Qty: 7}
+	inv := &inventory{byID: map[string]*item{"apple": apple}}
+
+	_, live, err := jsonptr.FindValue("/apple/Qty", inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live != 7 {
+		t.Errorf("live = %v, want 7", live)
+	}
+}
+
+func TestFindValueWalkerMissing(t *testing.T) {
+	inv := &inventory{byID: map[string]*item{}}
+	if _, _, err := jsonptr.FindValue("/nope", inv); err == nil {
+		t.Error("expected error from Walker reporting missing child")
+	}
+}
+
+// multiTokenWalker consumes two tokens at once and returns whatever Go
+// value the (kind, name) pair maps to.
+type multiTokenWalker struct{}
+
+func (multiTokenWalker) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (jsonptr.Pointer, any, error) {
+	a, after, ok := ptr.Head()
+	if !ok {
+		return ptr, multiTokenWalker{}, nil
+	}
+	b, rest, ok := after.Head()
+	if !ok {
+		return ptr, nil, fmt.Errorf("multi-token walker needs two tokens")
+	}
+	return rest, a + ":" + b, nil
+}
+
+func TestFindValueWalkerConsumesMultipleTokens(t *testing.T) {
+	_, live, err := jsonptr.FindValue("/foo/bar", multiTokenWalker{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live != "foo:bar" {
+		t.Errorf("live = %v, want foo:bar", live)
+	}
+}
+
+// dualKind implements both Walker AND json.Marshaler. Walker should win.
+type dualKind struct{}
+
+func (dualKind) MarshalJSON() ([]byte, error) {
+	return []byte(`{"x":"FROM_MARSHAL"}`), nil
+}
+
+func (dualKind) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (jsonptr.Pointer, any, error) {
+	tok, rest, ok := ptr.Head()
+	if !ok {
+		return ptr, dualKind{}, nil
+	}
+	if tok == "x" {
+		return rest, "FROM_WALKER", nil
+	}
+	return ptr, nil, fmt.Errorf("dualKind: unknown token %q", tok)
+}
+
+func TestFindValueWalkerTakesPrecedence(t *testing.T) {
+	_, live, err := jsonptr.FindValue("/x", dualKind{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live != "FROM_WALKER" {
+		t.Errorf("live = %v, want FROM_WALKER (Walker should win over Marshaler)", live)
+	}
+}
+
+// pointerWalker implements Walker on a pointer receiver to verify the
+// addressable-pointer path of asWalker.
+type pointerWalker struct{ kids map[string]string }
+
+func (pw *pointerWalker) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (jsonptr.Pointer, any, error) {
+	tok, rest, ok := ptr.Head()
+	if !ok {
+		return ptr, pw, nil
+	}
+	v, found := pw.kids[tok]
+	if !found {
+		return ptr, nil, fmt.Errorf("pointerWalker: missing %q", tok)
+	}
+	return rest, v, nil
+}
+
+func TestFindValueWalkerPointerReceiver(t *testing.T) {
+	type box struct {
+		W pointerWalker `json:"w"`
+	}
+	in := &box{W: pointerWalker{kids: map[string]string{"k": "v"}}}
+	_, live, err := jsonptr.FindValue("/w/k", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live != "v" {
+		t.Errorf("live = %v, want v", live)
+	}
 }
 
 func TestFindValueAcceptsOptions(t *testing.T) {

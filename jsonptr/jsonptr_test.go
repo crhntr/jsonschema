@@ -1,6 +1,7 @@
 package jsonptr_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -131,7 +132,7 @@ func TestPointerTokens(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.ptr), func(t *testing.T) {
-			got := tc.ptr.Tokens()
+			got := slices.Collect(tc.ptr.Tokens())
 			if !equal(got, tc.want) {
 				t.Errorf("%q.Tokens() = %v, want %v", tc.ptr, got, tc.want)
 			}
@@ -167,7 +168,7 @@ func TestPointerAppendRoundTrip(t *testing.T) {
 	for _, t := range tokens {
 		p = p.Append(t)
 	}
-	got := p.Tokens()
+	got := slices.Collect(p.Tokens())
 	if !equal(got, tokens) {
 		t.Errorf("round-trip = %v, want %v", got, tokens)
 	}

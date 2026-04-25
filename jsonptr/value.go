@@ -12,13 +12,53 @@ import (
 	"github.com/go-json-experiment/json/jsontext"
 )
 
+// Walker lets a type control how FindValue descends into it. The method
+// receives the unconsumed Pointer and returns:
+//
+//   - rest: the tail the implementation did NOT consume — FindValue
+//     continues descending from value with rest. Return "" to indicate
+//     "I resolved the whole thing".
+//   - value: the Go value reached after consuming the prefix of ptr.
+//   - err: any error.
+//
+// A type may consume one or several tokens per call. Returning the full
+// input as rest signals "I don't know how to handle this prefix"; an
+// error is the preferred signal.
+//
+// Walker takes precedence over the json.Marshaler / jsontext.MarshalerTo
+// fallback in FindValue, so types that implement Walker preserve Go
+// identity across descent rather than round-tripping through JSON bytes.
+type Walker interface {
+	FindJSONPtrValue(ptr Pointer, opts ...json.Options) (rest Pointer, value any, err error)
+}
+
+var walkerType = reflect.TypeFor[Walker]()
+
+// asWalker returns v as a Walker if its type (or its addressable pointer
+// type) implements the interface.
+func asWalker(v reflect.Value) (Walker, bool) {
+	if !v.IsValid() || !v.CanInterface() {
+		return nil, false
+	}
+	t := v.Type()
+	if t.Implements(walkerType) {
+		return v.Interface().(Walker), true
+	}
+	if v.CanAddr() && reflect.PointerTo(t).Implements(walkerType) {
+		return v.Addr().Interface().(Walker), true
+	}
+	return nil, false
+}
+
 // FindValue navigates to p within in by walking the Go value via reflection
 // and returns both the JSON form at that location and the live Go value.
 // Any json.Options are forwarded to every Marshal / decoder call the
 // implementation makes — both when producing the returned bytes and when
 // decoding through a json.Marshaler boundary.
 //
-// Reflection rules:
+// Descent rules, in order of precedence:
+//   - If the current value implements Walker, JSONPointerStep is called
+//     for the next token. Identity is preserved.
 //   - Pointers and interfaces are dereferenced.
 //   - Maps with string-kinded keys are looked up by token.
 //   - Slices and arrays are indexed by integer token.
@@ -39,22 +79,38 @@ func FindValue(p Pointer, in any, opts ...json.Options) (jsontext.Value, any, er
 		return nil, nil, err
 	}
 	cur := reflect.ValueOf(in)
-	tokens := p.Tokens()
-	for i, tok := range tokens {
+	remaining := p
+	for {
+		tok, rest, ok := remaining.Head()
+		if !ok {
+			break
+		}
 		cur = unwrap(cur)
 		if !cur.IsValid() {
 			return nil, nil, fmt.Errorf("jsonptr %q: nil at token %q", p, tok)
 		}
+		if w, walkerOK := asWalker(cur); walkerOK {
+			next, child, err := w.FindJSONPtrValue(remaining, opts...)
+			if err != nil {
+				return nil, nil, fmt.Errorf("jsonptr %q: %w", p, err)
+			}
+			if len(next) >= len(remaining) {
+				return nil, nil, fmt.Errorf("jsonptr %q: walker consumed no tokens at %q", p, tok)
+			}
+			cur = reflect.ValueOf(child)
+			remaining = next
+			continue
+		}
 		if hasCustomJSON(cur) {
-			return finishViaJSON(cur, tokens[i:], p, opts)
+			return finishViaJSON(cur, remaining, p, opts)
 		}
 		next, err := stepValue(cur, tok)
 		if err != nil {
 			return nil, nil, fmt.Errorf("jsonptr %q: %w", p, err)
 		}
 		cur = next
+		remaining = rest
 	}
-	cur = unwrap(cur)
 	var live any
 	if cur.IsValid() {
 		live = cur.Interface()
@@ -161,22 +217,18 @@ func jsonFieldName(f reflect.StructField) string {
 	return name
 }
 
-// finishViaJSON marshals v and resolves the remaining tokens via Find on
+// finishViaJSON marshals v and resolves the remaining pointer via Find on
 // the resulting bytes. The returned Go value is freshly decoded; JSON
 // numbers come back as *big.Rat so callers do not lose precision and can
 // convert to int / float64 on their own terms.
-func finishViaJSON(v reflect.Value, remaining []string, p Pointer, opts []json.Options) (jsontext.Value, any, error) {
+func finishViaJSON(v reflect.Value, remaining Pointer, p Pointer, opts []json.Options) (jsontext.Value, any, error) {
 	raw, err := json.Marshal(v.Interface(), opts...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jsonptr %q: marshal: %w", p, err)
 	}
 	target := jsontext.Value(raw)
-	if len(remaining) > 0 {
-		var sub Pointer
-		for _, tok := range remaining {
-			sub = sub.Append(tok)
-		}
-		target, err = Find(raw, sub, opts...)
+	if remaining != "" {
+		target, err = Find(raw, remaining, opts...)
 		if err != nil {
 			return nil, nil, err
 		}

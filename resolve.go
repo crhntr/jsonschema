@@ -523,7 +523,10 @@ func walkJSONPointer(m *Meta, ptr string) (*Meta, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	tokens := p.Tokens()
+	var tokens []string
+	for tok := range p.Tokens() {
+		tokens = append(tokens, tok)
+	}
 	cur := m
 	for i := 0; i < len(tokens); {
 		next, advance, err := stepJSONPointer(cur, tokens, i)

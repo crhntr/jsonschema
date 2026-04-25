@@ -19,7 +19,7 @@ func Find(data []byte, p Pointer, opts ...jsontext.Options) (jsontext.Value, err
 		return nil, err
 	}
 	dec := jsontext.NewDecoder(bytes.NewReader(data), opts...)
-	if err := descend(dec, p.Tokens(), p); err != nil {
+	if err := descend(dec, p, p); err != nil {
 		return nil, err
 	}
 	v, err := dec.ReadValue()
@@ -29,10 +29,10 @@ func Find(data []byte, p Pointer, opts ...jsontext.Options) (jsontext.Value, err
 	return v, nil
 }
 
-// descend positions dec at the start of the value identified by tokens.
+// descend positions dec at the start of the value identified by ptr.
 // On return, the next ReadValue / ReadToken call sees that value.
-func descend(dec *jsontext.Decoder, tokens []string, p Pointer) error {
-	for _, tok := range tokens {
+func descend(dec *jsontext.Decoder, ptr Pointer, p Pointer) error {
+	for tok := range ptr.Tokens() {
 		switch dec.PeekKind() {
 		case jsontext.KindBeginObject:
 			if err := descendObject(dec, tok, p); err != nil {

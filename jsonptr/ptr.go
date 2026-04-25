@@ -10,6 +10,7 @@ package jsonptr
 
 import (
 	"fmt"
+	"iter"
 	"strings"
 )
 
@@ -21,18 +22,22 @@ import (
 // (decoded in that order).
 type Pointer string
 
-// Tokens splits p into its sequence of reference tokens, unescaped.
-// Returns nil for the root pointer.
-func (p Pointer) Tokens() []string {
-	if p == "" {
-		return nil
+// Tokens yields the sequence of reference tokens that make up p,
+// unescaped per RFC 6901. The root pointer yields nothing.
+func (p Pointer) Tokens() iter.Seq[string] {
+	return func(yield func(string) bool) {
+		cur := p
+		for {
+			tok, rest, ok := cur.Head()
+			if !ok {
+				return
+			}
+			if !yield(tok) {
+				return
+			}
+			cur = rest
+		}
 	}
-	raw := strings.Split(string(p)[1:], "/")
-	out := make([]string, len(raw))
-	for i, t := range raw {
-		out[i] = unescapeToken(t)
-	}
-	return out
 }
 
 // Append returns a new Pointer that descends through token. The token is
@@ -43,6 +48,19 @@ func (p Pointer) Append(token string) Pointer {
 
 // IsRoot reports whether p is the root pointer ("").
 func (p Pointer) IsRoot() bool { return p == "" }
+
+// Head splits p into its first token and the remaining Pointer. ok is
+// false when p is the root pointer.
+func (p Pointer) Head() (token string, rest Pointer, ok bool) {
+	if p == "" {
+		return "", "", false
+	}
+	body := string(p)[1:]
+	if i := strings.IndexByte(body, '/'); i >= 0 {
+		return unescapeToken(body[:i]), Pointer(body[i:]), true
+	}
+	return unescapeToken(body), "", true
+}
 
 // Validate reports an error if p is not a syntactically valid RFC 6901
 // pointer. The empty pointer and any string starting with "/" are valid.

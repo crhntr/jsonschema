@@ -166,6 +166,7 @@ type MetaObject struct {
 
 	Type    *Type            `json:"type,omitempty"`
 	Enum    []jsontext.Value `json:"enum,omitempty"`
+	Const   jsontext.Value   `json:"const,omitempty"`
 	Default jsontext.Value   `json:"default,omitempty"`
 
 	MultipleOf       jsontext.Value `json:"multipleOf,omitempty"`
@@ -179,6 +180,10 @@ type MetaObject struct {
 	MaxItems    jsontext.Value `json:"maxItems,omitempty"`
 	MinItems    jsontext.Value `json:"minItems,omitempty"`
 	UniqueItems bool           `json:"uniqueItems,omitempty"`
+
+	MaxProperties jsontext.Value `json:"maxProperties,omitempty"`
+	MinProperties jsontext.Value `json:"minProperties,omitempty"`
+	Required      []string       `json:"required,omitempty"`
 
 	Format  string `json:"format,omitempty"`
 	Pattern string `json:"pattern,omitempty"`

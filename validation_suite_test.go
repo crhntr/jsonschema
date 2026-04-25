@@ -1,0 +1,123 @@
+package jsonschema_test
+
+import (
+	"flag"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
+
+	"github.com/crhntr/jsonschema"
+)
+
+var suiteVerbose = flag.Bool("suite.verbose", false, "log every suite case (default off — only the summary)")
+
+// TestValidationSuite runs every draft-2020-12 conformance case as a
+// subtest. Use `go test -run TestValidationSuite/<file>/<group>/<case>`
+// to focus on one. The summary line at the end reports pass/fail
+// counts so progress is easy to track.
+func TestValidationSuite(t *testing.T) {
+	root := "testdata/JSON-Schema-Test-Suite/tests-draft2020-12"
+
+	var passed, failed atomic.Int64
+
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".json" {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		runSuiteFile(t, filepath.ToSlash(rel), path, &passed, &failed)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("suite summary: passed=%d failed=%d total=%d",
+		passed.Load(), failed.Load(), passed.Load()+failed.Load())
+}
+
+func runSuiteFile(t *testing.T, name, path string, passed, failed *atomic.Int64) {
+	t.Helper()
+	t.Run(name, func(t *testing.T) {
+		buf, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var groups []suiteGroup
+		if err := json.Unmarshal(buf, &groups); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		for _, g := range groups {
+			t.Run(suiteName(g.Description), func(t *testing.T) {
+				schema, err := jsonschema.Parse(g.Schema)
+				if err != nil {
+					t.Fatalf("parse schema: %v\nschema: %s", err, g.Schema)
+				}
+				for _, c := range g.Tests {
+					t.Run(suiteName(c.Description), func(t *testing.T) {
+						runSuiteCase(t, schema, g, c, passed, failed)
+					})
+				}
+			})
+		}
+	})
+}
+
+func runSuiteCase(t *testing.T, schema *jsonschema.Meta, g suiteGroup, c suiteCase, passed, failed *atomic.Int64) {
+	t.Helper()
+	err := schema.Evaluate(t.Name(), c.Data)
+	got := err == nil
+	if got == c.Valid {
+		passed.Add(1)
+		if *suiteVerbose {
+			t.Logf("ok: want valid=%v got valid=%v", c.Valid, got)
+		}
+		return
+	}
+	failed.Add(1)
+	t.Errorf("validation mismatch: want valid=%v got valid=%v\nschema: %s\ndata: %s\nerr: %v",
+		c.Valid, got, g.Schema, c.Data, err)
+}
+
+// suiteName makes a description safe for `go test -run` by replacing
+// runs of non-alphanum with "_".
+func suiteName(s string) string {
+	var b strings.Builder
+	prevUnderscore := false
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevUnderscore = false
+		default:
+			if !prevUnderscore {
+				b.WriteByte('_')
+				prevUnderscore = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+type suiteGroup struct {
+	Description string         `json:"description"`
+	Schema      jsontext.Value `json:"schema"`
+	Tests       []suiteCase    `json:"tests"`
+}
+
+type suiteCase struct {
+	Description string         `json:"description"`
+	Data        jsontext.Value `json:"data"`
+	Valid       bool           `json:"valid"`
+}

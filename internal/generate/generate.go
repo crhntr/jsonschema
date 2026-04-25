@@ -13,6 +13,39 @@ import (
 	"github.com/crhntr/jsonschema"
 )
 
+// interfaceAssertions emits compile-time guards that the generated
+// type satisfies json.MarshalerTo and json.UnmarshalerFrom. If the
+// emitted method signatures ever drift from the interfaces, the
+// generated code stops compiling.
+func interfaceAssertions(t Type) ast.Decl {
+	return &ast.GenDecl{
+		Tok:    token.VAR,
+		Lparen: 1, Rparen: 1,
+		Specs: []ast.Spec{
+			interfaceAssertSpec(t.Name, "MarshalerTo"),
+			interfaceAssertSpec(t.Name, "UnmarshalerFrom"),
+		},
+	}
+}
+
+func interfaceAssertSpec(typeName, interfaceName string) *ast.ValueSpec {
+	return &ast.ValueSpec{
+		Names: []*ast.Ident{{Name: "_"}},
+		Type: &ast.SelectorExpr{
+			X:   &ast.Ident{Name: "json"},
+			Sel: &ast.Ident{Name: interfaceName},
+		},
+		Values: []ast.Expr{
+			&ast.CallExpr{
+				Fun: &ast.ParenExpr{
+					X: &ast.StarExpr{X: &ast.Ident{Name: typeName}},
+				},
+				Args: []ast.Expr{&ast.Ident{Name: "nil"}},
+			},
+		},
+	}
+}
+
 func importDecl(paths ...string) *ast.GenDecl {
 	d := &ast.GenDecl{Tok: token.IMPORT, Lparen: 1, Rparen: 1}
 	for _, p := range paths {
@@ -43,6 +76,7 @@ func Generate(schema *jsonschema.SchemaObject, typeName, packageName string) ([]
 			Emit(typ),
 			EmitMarshal(typ),
 			EmitUnmarshal(typ),
+			interfaceAssertions(typ),
 		},
 	}
 

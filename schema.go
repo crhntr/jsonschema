@@ -83,9 +83,8 @@ func (m *Schema) Subschemas() iter.Seq[*Schema] {
 			return
 		}
 		for _, s := range []iter.Seq[*Schema]{
-			maps.Values(obj.Defs),
-			maps.Values(obj.Defs),
 			maps.Values(obj.Properties),
+			maps.Values(obj.Defs),
 			maps.Values(obj.PatternProperties),
 			maps.Values(obj.DependentSchemas),
 			slices.Values(obj.AllOf),

@@ -88,3 +88,82 @@ func TestParseInvalidJSON(t *testing.T) {
 		t.Error("expected error from Parse on invalid JSON")
 	}
 }
+
+func TestSubschemasYieldsEachChildExactlyOnce(t *testing.T) {
+	body := []byte(`{
+		"$defs": {
+			"a": {"description": "defs-a"},
+			"b": {"description": "defs-b"}
+		},
+		"properties": {
+			"p1": {"description": "props-p1"},
+			"p2": {"description": "props-p2"}
+		},
+		"patternProperties": {
+			"^x": {"description": "patternProps-x"}
+		},
+		"dependentSchemas": {
+			"k": {"description": "depSchema-k"}
+		},
+		"allOf": [
+			{"description": "allOf-0"},
+			{"description": "allOf-1"}
+		],
+		"anyOf": [{"description": "anyOf-0"}],
+		"oneOf": [{"description": "oneOf-0"}],
+		"prefixItems": [{"description": "prefixItems-0"}],
+		"if":   {"description": "if"},
+		"then": {"description": "then"},
+		"else": {"description": "else"},
+		"not":  {"description": "not"},
+		"items":                  {"description": "items"},
+		"contains":               {"description": "contains"},
+		"additionalProperties":   {"description": "additionalProperties"},
+		"unevaluatedProperties": {"description": "unevaluatedProperties"},
+		"unevaluatedItems":      {"description": "unevaluatedItems"},
+		"propertyNames":         {"description": "propertyNames"}
+	}`)
+	schema, err := jsonschema.Parse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		"defs-a", "defs-b",
+		"props-p1", "props-p2",
+		"patternProps-x",
+		"depSchema-k",
+		"allOf-0", "allOf-1",
+		"anyOf-0",
+		"oneOf-0",
+		"prefixItems-0",
+		"if", "then", "else", "not",
+		"items", "contains",
+		"additionalProperties", "unevaluatedProperties", "unevaluatedItems",
+		"propertyNames",
+	}
+
+	counts := map[string]int{}
+	for sub := range schema.Subschemas() {
+		obj, ok := sub.TypeObject()
+		if !ok {
+			t.Errorf("yielded a non-object subschema: %#v", sub)
+			continue
+		}
+		if obj.Description == "" {
+			t.Errorf("yielded subschema has no description: %#v", sub)
+			continue
+		}
+		counts[obj.Description]++
+	}
+
+	for _, d := range want {
+		if got := counts[d]; got != 1 {
+			t.Errorf("description %q yielded %d times, want 1", d, got)
+		}
+		delete(counts, d)
+	}
+	for d, n := range counts {
+		t.Errorf("unexpected description %q yielded %d time(s)", d, n)
+	}
+}

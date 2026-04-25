@@ -227,10 +227,6 @@ type SchemaObject struct {
 	Extra map[string]jsontext.Value `json:",inline"`
 }
 
-func New(in SchemaObject) *Schema {
-	return &Schema{isObject: true, object: in}
-}
-
 func (m *Schema) TypeBool() (bool, bool)           { return m.bool, m.isBool }
 func (m *Schema) TypeObject() (SchemaObject, bool) { return m.object, m.isObject }
 
@@ -330,14 +326,6 @@ type TypeString = SimpleType
 
 type TypeArray = []SimpleType
 
-func NewTypeTypeString(in SimpleType) *Type {
-	return &Type{isString: true, string: in}
-}
-
-func NewTypeTypeArray(in []SimpleType) *Type {
-	return &Type{isArray: true, array: in}
-}
-
 func typeEnumStrings() []SimpleType {
 	return []SimpleType{
 		"array",
@@ -377,4 +365,16 @@ func (st SimpleType) Validate() error {
 		return fmt.Errorf("invalid SimpleType: unexpected enum value %s expected one of %s", string(st), string(exp))
 	}
 	return nil
+}
+
+func elements[T any, S ~[]T](in ...S) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for _, s := range in {
+			for _, e := range s {
+				if !yield(e) {
+					return
+				}
+			}
+		}
+	}
 }

@@ -56,21 +56,65 @@ func (s evalScope) findDynamicAnchor(name string) *Meta {
 	return nil
 }
 
-func (m *Meta) Evaluate(name string, in []byte) error {
-	return m.evaluate(name, in, nil)
+// annotations record which properties / array indices were "evaluated"
+// by a schema's keywords. unevaluatedProperties / unevaluatedItems use
+// the union of annotations from siblings (including allOf/anyOf/oneOf
+// successes and $ref) to know what's still leftover.
+type annotations struct {
+	properties map[string]struct{}
+	items      map[int]struct{}
 }
 
-func (m *Meta) evaluate(name string, in []byte, scope evalScope) error {
+func (a *annotations) addProperty(key string) {
+	if a.properties == nil {
+		a.properties = map[string]struct{}{}
+	}
+	a.properties[key] = struct{}{}
+}
+
+func (a *annotations) addItem(idx int) {
+	if a.items == nil {
+		a.items = map[int]struct{}{}
+	}
+	a.items[idx] = struct{}{}
+}
+
+func (a *annotations) merge(b annotations) {
+	for k := range b.properties {
+		a.addProperty(k)
+	}
+	for i := range b.items {
+		a.addItem(i)
+	}
+}
+
+func (m *Meta) Evaluate(name string, in []byte) error {
+	_, err := m.evaluate(name, in, nil)
+	return err
+}
+
+func (m *Meta) evaluate(name string, in []byte, scope evalScope) (annotations, error) {
+	var ann annotations
 	if !json.Valid(in) {
-		return NewErrorWithPosition(name, in, 0, errors.New("invalid JSON"))
+		return ann, NewErrorWithPosition(name, in, 0, errors.New("invalid JSON"))
 	}
 	dec := jsontext.NewDecoder(bytes.NewReader(in))
 	scope = scope.push(m.resource)
 
 	if o, ok := m.TypeObject(); ok {
-		if err := o.validate(name, in, dec, scope); err != nil {
-			return err
+		off := dec.InputOffset()
+		val, err := dec.ReadValue()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return ann, nil
+			}
+			return ann, NewErrorWithPosition(name, in, dec.InputOffset(), err)
 		}
+		bodyAnn, err := o.validateValue(name, in, off, val, scope)
+		if err != nil {
+			return ann, err
+		}
+		ann.merge(bodyAnn)
 		if m.resolved != nil {
 			target := m.resolved
 			if m.dynamic && o.DynamicRef != "" {
@@ -79,16 +123,37 @@ func (m *Meta) evaluate(name string, in []byte, scope evalScope) error {
 					target = t
 				}
 			}
-			return target.evaluate(childKeyword(name, "$ref"), in, scope)
+			refAnn, err := target.evaluate(childKeyword(name, "$ref"), in, scope)
+			if err != nil {
+				return ann, err
+			}
+			ann.merge(refAnn)
 		}
-		return nil
+		// unevaluatedProperties / unevaluatedItems must see annotations
+		// from $ref, so they run after the ref is followed.
+		kind := jsontext.NewDecoder(bytes.NewReader(val)).PeekKind()
+		if kind == jsontext.KindBeginObject && o.UnevaluatedProperties != nil {
+			extraAnn, err := o.validateUnevaluatedProperties(name, in, off, val, scope, ann.properties)
+			if err != nil {
+				return ann, err
+			}
+			ann.merge(extraAnn)
+		}
+		if kind == jsontext.KindBeginArray && o.UnevaluatedItems != nil {
+			extraAnn, err := o.validateUnevaluatedItems(name, in, off, val, scope, ann.items)
+			if err != nil {
+				return ann, err
+			}
+			ann.merge(extraAnn)
+		}
+		return ann, nil
 	}
 
 	if b, ok := m.TypeBool(); ok {
-		return validateMetaTypeBool(name, in, dec, b)
+		return ann, validateMetaTypeBool(name, in, dec, b)
 	}
 
-	return nil
+	return ann, nil
 }
 
 func validateMetaTypeBool(name string, in []byte, dec *jsontext.Decoder, b bool) error {
@@ -106,185 +171,197 @@ func validateMetaTypeBool(name string, in []byte, dec *jsontext.Decoder, b bool)
 	return NewErrorWithPosition(name, in, dec.InputOffset(), errors.New("nothing allowed here"))
 }
 
-func (o *MetaObject) validate(name string, in []byte, dec *jsontext.Decoder, scope evalScope) error {
-	off := dec.InputOffset()
-	val, err := dec.ReadValue()
-	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		return NewErrorWithPosition(name, in, dec.InputOffset(), err)
-	}
-	return o.validateValue(name, in, off, val, scope)
-}
-
-func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsontext.Value, scope evalScope) error {
+func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
+	var ann annotations
 	kind := jsontext.NewDecoder(bytes.NewReader(val)).PeekKind()
 	if o.Type != nil {
 		if err := o.validateType(name, in, off, kind, val); err != nil {
-			return err
+			return ann, err
 		}
 	}
 	if o.Enum != nil {
 		if err := validateEnum(o.Enum, val); err != nil {
-			return NewErrorWithPosition(name, in, off, err)
+			return ann, NewErrorWithPosition(name, in, off, err)
 		}
 	}
 	if len(o.Const) > 0 {
 		eq, err := Equal(val, o.Const)
 		if err != nil {
-			return NewErrorWithPosition(name, in, off, err)
+			return ann, NewErrorWithPosition(name, in, off, err)
 		}
 		if !eq {
-			return NewErrorWithPosition(name, in, off, fmt.Errorf("value does not equal const"))
+			return ann, NewErrorWithPosition(name, in, off, fmt.Errorf("value does not equal const"))
 		}
 	}
 	switch kind {
 	case jsontext.KindNumber:
 		if err := o.validateNumber(val); err != nil {
-			return NewErrorWithPosition(name, in, off, err)
+			return ann, NewErrorWithPosition(name, in, off, err)
 		}
 	case jsontext.KindString:
 		if err := o.validateString(val); err != nil {
-			return NewErrorWithPosition(name, in, off, err)
+			return ann, NewErrorWithPosition(name, in, off, err)
 		}
 	case jsontext.KindBeginObject:
-		if err := o.validateObject(name, in, off, val, scope); err != nil {
-			return err
+		objAnn, err := o.validateObjectBody(name, in, off, val, scope)
+		if err != nil {
+			return ann, err
 		}
+		ann.merge(objAnn)
 	case jsontext.KindBeginArray:
-		if err := o.validateArray(name, in, off, val, scope); err != nil {
-			return err
+		arrAnn, err := o.validateArrayBody(name, in, off, val, scope)
+		if err != nil {
+			return ann, err
 		}
+		ann.merge(arrAnn)
 	}
-	if err := o.validateComposition(name, in, off, val, scope); err != nil {
-		return err
+	compAnn, err := o.validateComposition(name, in, off, val, scope)
+	if err != nil {
+		return ann, err
 	}
-	return nil
+	ann.merge(compAnn)
+	return ann, nil
 }
 
-func (o *MetaObject) validateComposition(name string, in []byte, off int64, val jsontext.Value, scope evalScope) error {
-	for i := range o.AllOf {
-		if err := o.AllOf[i].evaluate(childPath(name, "allOf", i), val, scope); err != nil {
-			return err
+func (o *MetaObject) validateComposition(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
+	var ann annotations
+	for i, sub := range o.AllOf {
+		subAnn, err := sub.evaluate(childPath(name, "allOf", i), val, scope)
+		if err != nil {
+			return ann, err
 		}
+		ann.merge(subAnn)
 	}
 	if len(o.AnyOf) > 0 {
 		matched := false
-		for i := range o.AnyOf {
-			if o.AnyOf[i].evaluate(childPath(name, "anyOf", i), val, scope) == nil {
+		for i, sub := range o.AnyOf {
+			subAnn, err := sub.evaluate(childPath(name, "anyOf", i), val, scope)
+			if err == nil {
 				matched = true
-				break
+				ann.merge(subAnn)
 			}
+			_ = i
 		}
 		if !matched {
-			return NewErrorWithPosition(name, in, off, fmt.Errorf("anyOf: no subschema matched"))
+			return ann, NewErrorWithPosition(name, in, off, fmt.Errorf("anyOf: no subschema matched"))
 		}
 	}
 	if len(o.OneOf) > 0 {
 		matches := 0
-		for i := range o.OneOf {
-			if o.OneOf[i].evaluate(childPath(name, "oneOf", i), val, scope) == nil {
+		var matchedAnn annotations
+		for i, sub := range o.OneOf {
+			subAnn, err := sub.evaluate(childPath(name, "oneOf", i), val, scope)
+			if err == nil {
 				matches++
+				matchedAnn = subAnn
 			}
 		}
 		if matches != 1 {
-			return NewErrorWithPosition(name, in, off,
+			return ann, NewErrorWithPosition(name, in, off,
 				fmt.Errorf("oneOf: %d subschemas matched, want exactly 1", matches))
 		}
+		ann.merge(matchedAnn)
 	}
 	if o.Not != nil {
-		if o.Not.evaluate(childKeyword(name, "not"), val, scope) == nil {
-			return NewErrorWithPosition(name, in, off, fmt.Errorf("not: subschema unexpectedly matched"))
+		if _, err := o.Not.evaluate(childKeyword(name, "not"), val, scope); err == nil {
+			return ann, NewErrorWithPosition(name, in, off, fmt.Errorf("not: subschema unexpectedly matched"))
 		}
 	}
 	if o.If != nil {
-		ifErr := o.If.evaluate(childKeyword(name, "if"), val, scope)
-		if ifErr == nil && o.Then != nil {
-			if err := o.Then.evaluate(childKeyword(name, "then"), val, scope); err != nil {
-				return err
+		ifAnn, ifErr := o.If.evaluate(childKeyword(name, "if"), val, scope)
+		if ifErr == nil {
+			ann.merge(ifAnn)
+			if o.Then != nil {
+				thenAnn, err := o.Then.evaluate(childKeyword(name, "then"), val, scope)
+				if err != nil {
+					return ann, err
+				}
+				ann.merge(thenAnn)
 			}
-		}
-		if ifErr != nil && o.Else != nil {
-			if err := o.Else.evaluate(childKeyword(name, "else"), val, scope); err != nil {
-				return err
+		} else if o.Else != nil {
+			elseAnn, err := o.Else.evaluate(childKeyword(name, "else"), val, scope)
+			if err != nil {
+				return ann, err
 			}
+			ann.merge(elseAnn)
 		}
 	}
-	return nil
+	return ann, nil
 }
 
-func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsontext.Value, scope evalScope) error {
+// validateObjectBody validates body keywords (properties,
+// patternProperties, additionalProperties, required, etc.) and returns
+// the set of property names it considered evaluated.
+func (o *MetaObject) validateObjectBody(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
+	var ann annotations
 	dec := jsontext.NewDecoder(bytes.NewReader(val))
 	if _, err := dec.ReadToken(); err != nil {
-		return NewErrorWithPosition(name, in, off, err)
+		return ann, NewErrorWithPosition(name, in, off, err)
 	}
 	keys := map[string]struct{}{}
 	count := 0
 	patternRes, err := compilePatternProperties(o.PatternProperties)
 	if err != nil {
-		return NewErrorWithPosition(name, in, off, err)
+		return ann, NewErrorWithPosition(name, in, off, err)
 	}
 	for dec.PeekKind() != jsontext.KindEndObject {
 		keyTok, err := dec.ReadToken()
 		if err != nil {
-			return NewErrorWithPosition(name, in, off, err)
+			return ann, NewErrorWithPosition(name, in, off, err)
 		}
 		key := keyTok.String()
 		keys[key] = struct{}{}
 		count++
 		propVal, err := dec.ReadValue()
 		if err != nil {
-			return NewErrorWithPosition(name, in, off, err)
+			return ann, NewErrorWithPosition(name, in, off, err)
 		}
 		propVal = bytes.Clone(propVal)
 		matched := false
 		if sub, ok := o.Properties[key]; ok && sub != nil {
 			matched = true
-			if err := sub.evaluate(childKey(name, key), propVal, scope); err != nil {
-				return err
+			if _, err := sub.evaluate(childKey(name, key), propVal, scope); err != nil {
+				return ann, err
 			}
 		}
 		for _, pp := range patternRes {
 			if pp.re.MatchString(key) {
 				matched = true
 				if pp.schema != nil {
-					if err := pp.schema.evaluate(childKey(name, key), propVal, scope); err != nil {
-						return err
+					if _, err := pp.schema.evaluate(childKey(name, key), propVal, scope); err != nil {
+						return ann, err
 					}
 				}
 			}
 		}
 		if !matched && o.AdditionalProperties != nil {
 			matched = true
-			if err := o.AdditionalProperties.evaluate(childKey(name, key), propVal, scope); err != nil {
-				return err
+			if _, err := o.AdditionalProperties.evaluate(childKey(name, key), propVal, scope); err != nil {
+				return ann, err
 			}
 		}
-		if !matched && o.UnevaluatedProperties != nil {
-			if err := o.UnevaluatedProperties.evaluate(childKey(name, key), propVal, scope); err != nil {
-				return err
-			}
+		if matched {
+			ann.addProperty(key)
 		}
 		if o.PropertyNames != nil {
 			keyBytes, _ := json.Marshal(key)
-			if err := o.PropertyNames.evaluate(childKeyword(name, "propertyNames"), keyBytes, scope); err != nil {
-				return err
+			if _, err := o.PropertyNames.evaluate(childKeyword(name, "propertyNames"), keyBytes, scope); err != nil {
+				return ann, err
 			}
 		}
 	}
 	for _, req := range o.Required {
 		if _, ok := keys[req]; !ok {
-			return NewErrorWithPosition(name, in, off,
+			return ann, NewErrorWithPosition(name, in, off,
 				fmt.Errorf("missing required property %q", req))
 		}
 	}
 	if cmp, ok := compareRat(o.MinProperties, big.NewRat(int64(count), 1)); ok && cmp > 0 {
-		return NewErrorWithPosition(name, in, off,
+		return ann, NewErrorWithPosition(name, in, off,
 			fmt.Errorf("object has %d properties, minProperties %s", count, o.MinProperties))
 	}
 	if cmp, ok := compareRat(o.MaxProperties, big.NewRat(int64(count), 1)); ok && cmp < 0 {
-		return NewErrorWithPosition(name, in, off,
+		return ann, NewErrorWithPosition(name, in, off,
 			fmt.Errorf("object has %d properties, maxProperties %s", count, o.MaxProperties))
 	}
 	for prop, deps := range o.DependentRequired {
@@ -293,7 +370,7 @@ func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsont
 		}
 		for _, d := range deps {
 			if _, ok := keys[d]; !ok {
-				return NewErrorWithPosition(name, in, off,
+				return ann, NewErrorWithPosition(name, in, off,
 					fmt.Errorf("property %q requires %q", prop, d))
 			}
 		}
@@ -305,11 +382,42 @@ func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsont
 		if sub == nil {
 			continue
 		}
-		if err := sub.evaluate(jsonptr.NewBuilder(name).Token("dependentSchemas").Token(prop).String(), val, scope); err != nil {
-			return err
+		depAnn, err := sub.evaluate(jsonptr.NewBuilder(name).Token("dependentSchemas").Token(prop).String(), val, scope)
+		if err != nil {
+			return ann, err
 		}
+		ann.merge(depAnn)
 	}
-	return nil
+	return ann, nil
+}
+
+// validateUnevaluatedProperties applies o.UnevaluatedProperties to
+// every key in val that is NOT in alreadyEvaluated.
+func (o *MetaObject) validateUnevaluatedProperties(name string, in []byte, off int64, val jsontext.Value, scope evalScope, alreadyEvaluated map[string]struct{}) (annotations, error) {
+	var ann annotations
+	dec := jsontext.NewDecoder(bytes.NewReader(val))
+	if _, err := dec.ReadToken(); err != nil {
+		return ann, NewErrorWithPosition(name, in, off, err)
+	}
+	for dec.PeekKind() != jsontext.KindEndObject {
+		keyTok, err := dec.ReadToken()
+		if err != nil {
+			return ann, NewErrorWithPosition(name, in, off, err)
+		}
+		key := keyTok.String()
+		propVal, err := dec.ReadValue()
+		if err != nil {
+			return ann, NewErrorWithPosition(name, in, off, err)
+		}
+		if _, ok := alreadyEvaluated[key]; ok {
+			continue
+		}
+		if _, err := o.UnevaluatedProperties.evaluate(childKey(name, key), bytes.Clone(propVal), scope); err != nil {
+			return ann, err
+		}
+		ann.addProperty(key)
+	}
+	return ann, nil
 }
 
 type patternRegex struct {
@@ -332,25 +440,28 @@ func compilePatternProperties(pp map[string]*Meta) ([]patternRegex, error) {
 	return out, nil
 }
 
-func (o *MetaObject) validateArray(name string, in []byte, off int64, val jsontext.Value, scope evalScope) error {
+// validateArrayBody handles minItems/maxItems/uniqueItems/prefixItems/
+// items/contains and returns the set of indices considered evaluated.
+func (o *MetaObject) validateArrayBody(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
+	var ann annotations
 	dec := jsontext.NewDecoder(bytes.NewReader(val))
 	if _, err := dec.ReadToken(); err != nil {
-		return NewErrorWithPosition(name, in, off, err)
+		return ann, NewErrorWithPosition(name, in, off, err)
 	}
 	var items []jsontext.Value
 	for dec.PeekKind() != jsontext.KindEndArray {
 		v, err := dec.ReadValue()
 		if err != nil {
-			return NewErrorWithPosition(name, in, off, err)
+			return ann, NewErrorWithPosition(name, in, off, err)
 		}
 		items = append(items, bytes.Clone(v))
 	}
 	if cmp, ok := compareRat(o.MinItems, big.NewRat(int64(len(items)), 1)); ok && cmp > 0 {
-		return NewErrorWithPosition(name, in, off,
+		return ann, NewErrorWithPosition(name, in, off,
 			fmt.Errorf("array has %d items, minItems %s", len(items), o.MinItems))
 	}
 	if cmp, ok := compareRat(o.MaxItems, big.NewRat(int64(len(items)), 1)); ok && cmp < 0 {
-		return NewErrorWithPosition(name, in, off,
+		return ann, NewErrorWithPosition(name, in, off,
 			fmt.Errorf("array has %d items, maxItems %s", len(items), o.MaxItems))
 	}
 	if o.UniqueItems {
@@ -358,63 +469,84 @@ func (o *MetaObject) validateArray(name string, in []byte, off int64, val jsonte
 			for j := i + 1; j < len(items); j++ {
 				eq, err := Equal(items[i], items[j])
 				if err != nil {
-					return NewErrorWithPosition(name, in, off, err)
+					return ann, NewErrorWithPosition(name, in, off, err)
 				}
 				if eq {
-					return NewErrorWithPosition(name, in, off,
+					return ann, NewErrorWithPosition(name, in, off,
 						fmt.Errorf("array items %d and %d are equal", i, j))
 				}
 			}
 		}
 	}
-	for i := range o.PrefixItems {
+	for i, sub := range o.PrefixItems {
 		if i >= len(items) {
 			break
 		}
-		if err := o.PrefixItems[i].evaluate(childPath(name, "prefixItems", i), items[i], scope); err != nil {
-			return err
+		if _, err := sub.evaluate(childPath(name, "prefixItems", i), items[i], scope); err != nil {
+			return ann, err
 		}
+		ann.addItem(i)
 	}
 	if o.Items != nil {
 		for i := len(o.PrefixItems); i < len(items); i++ {
-			if err := o.Items.evaluate(jsonptr.NewBuilder(name).Index(i).String(), items[i], scope); err != nil {
-				return err
+			if _, err := o.Items.evaluate(jsonptr.NewBuilder(name).Index(i).String(), items[i], scope); err != nil {
+				return ann, err
 			}
-		}
-	} else if o.UnevaluatedItems != nil {
-		for i := len(o.PrefixItems); i < len(items); i++ {
-			if err := o.UnevaluatedItems.evaluate(childPath(name, "unevaluatedItems", i), items[i], scope); err != nil {
-				return err
-			}
+			ann.addItem(i)
 		}
 	}
 	if o.Contains != nil {
 		matched := 0
 		for i, item := range items {
-			if o.Contains.evaluate(childPath(name, "contains", i), item, scope) == nil {
+			if _, err := o.Contains.evaluate(childPath(name, "contains", i), item, scope); err == nil {
 				matched++
+				ann.addItem(i)
 			}
 		}
 		minN, hasMin := compareRat(o.MinContains, big.NewRat(int64(matched), 1))
 		minRequired := 1
 		if hasMin {
-			// minContains is treated as the lower bound. matched < min means fail.
 			if minN > 0 {
-				return NewErrorWithPosition(name, in, off,
+				return ann, NewErrorWithPosition(name, in, off,
 					fmt.Errorf("contains matched %d items, minContains %s", matched, o.MinContains))
 			}
 			minRequired = 0
 		}
 		if !hasMin && matched < minRequired {
-			return NewErrorWithPosition(name, in, off,
+			return ann, NewErrorWithPosition(name, in, off,
 				fmt.Errorf("contains matched no items"))
 		}
 		if cmp, ok := compareRat(o.MaxContains, big.NewRat(int64(matched), 1)); ok && cmp < 0 {
-			return NewErrorWithPosition(name, in, off,
+			return ann, NewErrorWithPosition(name, in, off,
 				fmt.Errorf("contains matched %d items, maxContains %s", matched, o.MaxContains))
 		}
 	}
-	return nil
+	return ann, nil
+}
+
+// validateUnevaluatedItems applies o.UnevaluatedItems to every array
+// index in val that is NOT in alreadyEvaluated.
+func (o *MetaObject) validateUnevaluatedItems(name string, in []byte, off int64, val jsontext.Value, scope evalScope, alreadyEvaluated map[int]struct{}) (annotations, error) {
+	var ann annotations
+	dec := jsontext.NewDecoder(bytes.NewReader(val))
+	if _, err := dec.ReadToken(); err != nil {
+		return ann, NewErrorWithPosition(name, in, off, err)
+	}
+	i := 0
+	for dec.PeekKind() != jsontext.KindEndArray {
+		v, err := dec.ReadValue()
+		if err != nil {
+			return ann, NewErrorWithPosition(name, in, off, err)
+		}
+		if _, ok := alreadyEvaluated[i]; !ok {
+			if _, err := o.UnevaluatedItems.evaluate(childPath(name, "unevaluatedItems", i), bytes.Clone(v), scope); err != nil {
+				return ann, err
+			}
+			ann.addItem(i)
+		}
+		i++
+	}
+	return ann, nil
 }
 
 func (o *MetaObject) validateNumber(val jsontext.Value) error {
@@ -497,7 +629,6 @@ func decodeJSONString(val jsontext.Value) (string, error) {
 	}
 	return s, nil
 }
-
 
 func (o *MetaObject) validateType(name string, in jsontext.Value, off int64, kind jsontext.Kind, val jsontext.Value) error {
 	for _, t := range typeNames(o.Type) {

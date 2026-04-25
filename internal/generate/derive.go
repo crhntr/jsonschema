@@ -49,11 +49,15 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 		if err != nil {
 			return Type{}, fmt.Errorf("property %q: %w", jsonName, err)
 		}
+		required := slices.Contains(obj.Required, jsonName)
+		if !required {
+			fieldType = &ast.StarExpr{X: fieldType}
+		}
 		t.Fields = append(t.Fields, Field{
 			GoName:   exportedIdent(jsonName),
 			JSONName: jsonName,
 			TypeExpr: fieldType,
-			Required: slices.Contains(obj.Required, jsonName),
+			Required: required,
 		})
 	}
 	return t, nil

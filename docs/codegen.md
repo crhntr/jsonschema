@@ -1,8 +1,8 @@
 # JSON Schema 2020-12 → Go code generator
 
 Status: design — Phases 1 (vocabulary parsing), 2 (type resolver),
-and 3 (struct IR + emit) implemented in `internal/generate/`.
-Phases 4–15 pending.
+3 (struct IR + emit), and 4 (required vs optional) implemented in
+`internal/generate/`. Phases 5–15 pending.
 
 ## Context
 
@@ -315,10 +315,11 @@ Each phase lands as its own commit.
    [...]}`. Emit only the Go struct (no marshalers). Test: `go
    build`, then `go doc` confirms the struct + its fields.
 
-4. **Required vs optional.** Same schema, mixed required. Optional
-   fields are `*T`; required fields are bare `T`. Test: write a tiny
-   `_test.go` next to the generated file that round-trips a known
-   instance (presence + absence); run via `exec go test`.
+4. **Required vs optional.** ✅ Implemented (`derive.go`, `emit.go`).
+   Optional fields are `*T`; required fields are bare `T`. Optional
+   fields' json tag carries `,omitzero` so `nil` round-trips as a
+   missing key under jsonv2. End-to-end presence/absence round-trip
+   covered by the scripttest fixture in Phase 14.
 
 5. **Marshal / Unmarshal generation for the simple struct.** Emit
    `MarshalJSONTo` / `UnmarshalJSONFrom` that enforce required +

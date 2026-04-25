@@ -27,10 +27,14 @@ func Emit(t Type) *ast.GenDecl {
 func emitStructType(t Type) *ast.StructType {
 	fields := &ast.FieldList{}
 	for _, f := range t.Fields {
+		tagValue := f.JSONName
+		if !f.Required {
+			tagValue += ",omitzero"
+		}
 		fields.List = append(fields.List, &ast.Field{
 			Names: []*ast.Ident{{Name: f.GoName}},
 			Type:  f.TypeExpr,
-			Tag:   &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("`json:%s`", strconv.Quote(f.JSONName))},
+			Tag:   &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("`json:%s`", strconv.Quote(tagValue))},
 		})
 	}
 	return &ast.StructType{Fields: fields}

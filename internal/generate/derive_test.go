@@ -76,6 +76,71 @@ func TestDeriveAndEmit_SimpleStruct(t *testing.T) {
 	}
 }
 
+func TestDerive_OptionalFields(t *testing.T) {
+	src := `{
+		"type": "object",
+		"properties": {
+			"name": {"type": "string"},
+			"nickname": {"type": "string"}
+		},
+		"required": ["name"]
+	}`
+	s, err := jsonschema.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	obj, _ := s.TypeObject()
+	typ, err := Derive("User", &obj)
+	if err != nil {
+		t.Fatalf("Derive: %v", err)
+	}
+
+	byJSON := map[string]Field{}
+	for _, f := range typ.Fields {
+		byJSON[f.JSONName] = f
+	}
+
+	if name := byJSON["name"]; name.Required == false {
+		t.Errorf("name.Required = false, want true")
+	} else if id, ok := name.TypeExpr.(*ast.Ident); !ok || id.Name != "string" {
+		t.Errorf("name.TypeExpr = %#v, want *ast.Ident{Name:\"string\"}", name.TypeExpr)
+	}
+
+	nick := byJSON["nickname"]
+	if nick.Required {
+		t.Errorf("nickname.Required = true, want false")
+	}
+	star, ok := nick.TypeExpr.(*ast.StarExpr)
+	if !ok {
+		t.Fatalf("nickname.TypeExpr = %T, want *ast.StarExpr", nick.TypeExpr)
+	}
+	if id, ok := star.X.(*ast.Ident); !ok || id.Name != "string" {
+		t.Errorf("nickname pointer base = %#v, want *ast.Ident{Name:\"string\"}", star.X)
+	}
+}
+
+func TestEmit_OptionalGetsOmitzero(t *testing.T) {
+	typ := Type{
+		Name: "User",
+		Fields: []Field{
+			{GoName: "Name", JSONName: "name", TypeExpr: &ast.Ident{Name: "string"}, Required: true},
+			{GoName: "Nickname", JSONName: "nickname", TypeExpr: &ast.StarExpr{X: &ast.Ident{Name: "string"}}, Required: false},
+		},
+	}
+	src, err := formatFile("model", []ast.Decl{Emit(typ)})
+	if err != nil {
+		t.Fatalf("formatFile: %v", err)
+	}
+	for _, want := range []string{
+		"Name     string  `json:\"name\"`",
+		"Nickname *string `json:\"nickname,omitzero\"`",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("emitted source missing %q\nsrc:\n%s", want, src)
+		}
+	}
+}
+
 func TestEmit_FormatsAsValidGo(t *testing.T) {
 	typ := Type{
 		Name: "User",

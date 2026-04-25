@@ -1,7 +1,7 @@
 # JSON Schema 2020-12 → Go code generator
 
-Status: design — Phase 1 (vocabulary parsing) implemented in
-`internal/generate/`. Phases 2–15 pending.
+Status: design — Phases 1 (vocabulary parsing) and 2 (type resolver)
+implemented in `internal/generate/`. Phases 3–15 pending.
 
 ## Context
 
@@ -223,6 +223,8 @@ The generator is multi-pass:
   `internal/generate.Generate`.
 - `internal/generate/vocab.go` — Phase 1 (Annotations type +
   ParseAnnotations).
+- `internal/generate/types.go` — Phase 2 (Resolver +
+  allowedImportPath).
 
 ## Test discipline
 
@@ -294,13 +296,14 @@ Each phase lands as its own commit.
    a typed `generate.Annotations` struct (`GoIdent`, `GoType`,
    `GoImports`, `GoDoc`, `MapKeyType`, `MapValueType`, `GoJSONTags`).
 
-2. **Type resolver.** Implement the pass-0 `packages.Load` step plus
-   a `ResolveGoType(expr string) (ast.Expr, types.Type, error)` that
-   parses a `goType` string, walks selectors, and looks each up in
-   the loaded package set. Reject identifiers whose package is not
-   in the allowed import set. Test: table-driven cases for
-   `*big.Rat`, `[]time.Time`, `map[string]netip.Addr`, plus negative
-   cases (unimported package, lowercase ident).
+2. **Type resolver.** ✅ Implemented (`internal/generate/types.go`).
+   `Resolver` loads the configured `goImports` via `packages.Load`
+   and exposes `Resolve(src string) (ast.Expr, types.Type, error)`,
+   which parses a `goType` string, walks selectors / pointers /
+   slices / maps, and resolves identifiers against the universe
+   scope or the loaded package set. Imports outside the allowed set
+   (stdlib / `github.com/go-json-experiment/json` / `golang.org/x/*`)
+   are rejected at resolver construction.
 
 3. **IR for a single struct schema.** `derive.go` produces an
    `ir.Type` from `{type: object, properties: {...}, required:

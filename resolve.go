@@ -45,6 +45,9 @@ func (r *Resolver) Resolve(ctx context.Context, rawURL string) (*Schema, error) 
 	if err := r.loadResource(ctx, rootURI); err != nil {
 		return nil, err
 	}
+	if err := r.fetchMissingExternals(ctx); err != nil {
+		return nil, err
+	}
 	if err := r.linkAll(); err != nil {
 		return nil, err
 	}
@@ -341,6 +344,75 @@ func (r *Resolver) recordExternal(base, ref string, idx *indexState) error {
 	idx.seen[target] = struct{}{}
 	idx.external = append(idx.external, target)
 	return nil
+}
+
+// fetchMissingExternals walks every cached resource looking for $ref /
+// $dynamicRef targets whose resource isn't loaded yet, fetching each.
+// Repeats until the cache stabilizes — newly fetched resources may
+// introduce further refs.
+func (r *Resolver) fetchMissingExternals(ctx context.Context) error {
+	for {
+		missing := r.findMissingExternals()
+		if len(missing) == 0 {
+			return nil
+		}
+		for _, uri := range missing {
+			if err := r.loadResource(ctx, uri); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (r *Resolver) findMissingExternals() []string {
+	r.mu.Lock()
+	resources := make([]*Meta, 0, len(r.cache))
+	cached := make(map[string]bool, len(r.cache))
+	for k, m := range r.cache {
+		cached[k] = m != nil
+		if m != nil {
+			resources = append(resources, m)
+		}
+	}
+	r.mu.Unlock()
+
+	seen := map[string]struct{}{}
+	var missing []string
+	var walk func(*Meta)
+	walk = func(c *Meta) {
+		if c == nil {
+			return
+		}
+		obj, ok := c.TypeObject()
+		if !ok {
+			return
+		}
+		for _, ref := range []string{obj.Ref, obj.DynamicRef} {
+			if ref == "" {
+				continue
+			}
+			target, err := resolveRelative(c.baseURI, ref)
+			if err != nil {
+				continue
+			}
+			target = stripFragment(target)
+			if target == "" || cached[target] {
+				continue
+			}
+			if _, dup := seen[target]; dup {
+				continue
+			}
+			seen[target] = struct{}{}
+			missing = append(missing, target)
+		}
+		for child := range c.Subschemas() {
+			walk(child)
+		}
+	}
+	for _, m := range resources {
+		walk(m)
+	}
+	return missing
 }
 
 // linkAll runs Phase B over every cached resource: every $ref / $dynamicRef

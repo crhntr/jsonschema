@@ -2,9 +2,13 @@ package jsonschema_test
 
 import (
 	"flag"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -73,21 +77,99 @@ func runSuiteFile(t *testing.T, name, path string, passed, failed *atomic.Int64)
 
 // loadSuiteSchema parses the schema and runs it through a Resolver so
 // internal $refs are linked. The synthetic URI lets Resolver index even
-// schemas that don't declare $id.
+// schemas that don't declare $id. External refs to localhost:1234/...
+// are served from the conformance suite's remotes/ directory.
 func loadSuiteSchema(t *testing.T, body []byte) *jsonschema.Meta {
 	t.Helper()
 	schema, err := jsonschema.Parse(body)
 	if err != nil {
 		t.Fatalf("parse schema: %v\nschema: %s", err, body)
 	}
-	var r jsonschema.Resolver
+	r := &jsonschema.Resolver{Client: suiteRemotesClient(t)}
 	if _, err := r.Load("https://suite.test/", body); err != nil {
+		if *suiteVerbose {
+			t.Logf("load failed: %v", err)
+		}
 		return schema
 	}
-	if linked, err := r.Resolve(t.Context(), "https://suite.test/"); err == nil {
-		return linked
+	linked, err := r.Resolve(t.Context(), "https://suite.test/")
+	if err != nil {
+		if *suiteVerbose {
+			t.Logf("resolve failed: %v", err)
+		}
+		return schema
 	}
-	return schema
+	return linked
+}
+
+// suiteRemotesClient returns an http.Client that resolves
+// http://localhost:1234/... requests against the conformance suite's
+// remotes/ directory served from disk.
+func suiteRemotesClient(t *testing.T) *http.Client {
+	t.Helper()
+	srv, ok := remotesServer(t)
+	if !ok {
+		return http.DefaultClient
+	}
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := srv.Client()
+	client.Transport = &remotesTransport{target: target.Host, base: client.Transport}
+	return client
+}
+
+// remotesServer is created lazily once per test process and serves the
+// conformance suite's remotes/ tree under any host (the handler ignores
+// the Host header and looks up files by path).
+var remotesSrvOnce struct {
+	once sync.Once
+	srv  *httptest.Server
+	ok   bool
+}
+
+func remotesServer(t *testing.T) (*httptest.Server, bool) {
+	t.Helper()
+	remotesSrvOnce.once.Do(func() {
+		root := "testdata/JSON-Schema-Test-Suite/remotes"
+		if _, err := os.Stat(root); err != nil {
+			return
+		}
+		remotesSrvOnce.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			clean := filepath.Clean(r.URL.Path)
+			if strings.Contains(clean, "..") {
+				http.Error(w, "bad path", http.StatusBadRequest)
+				return
+			}
+			path := filepath.Join(root, filepath.FromSlash(clean))
+			if _, err := os.Stat(path); err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/schema+json")
+			http.ServeFile(w, r, path)
+		}))
+		remotesSrvOnce.ok = true
+	})
+	return remotesSrvOnce.srv, remotesSrvOnce.ok
+}
+
+type remotesTransport struct {
+	target string
+	base   http.RoundTripper
+}
+
+func (rt *remotesTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	r2 := req.Clone(req.Context())
+	r2.URL = &url.URL{
+		Scheme:   "http",
+		Host:     rt.target,
+		Path:     req.URL.Path,
+		RawQuery: req.URL.RawQuery,
+	}
+	r2.Host = rt.target
+	return rt.base.RoundTrip(r2)
 }
 
 func runSuiteCase(t *testing.T, schema *jsonschema.Meta, g suiteGroup, c suiteCase, passed, failed *atomic.Int64) {

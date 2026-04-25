@@ -114,7 +114,12 @@ func (m *Meta) Subschemas() iter.Seq[*Meta] {
 				return
 			}
 		}
-		for _, c := range []*Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.AdditionalProperties, obj.PropertyNames} {
+		for i := range obj.PrefixItems {
+			if !yield(&obj.PrefixItems[i]) {
+				return
+			}
+		}
+		for _, c := range []*Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.Contains, obj.AdditionalProperties, obj.PropertyNames} {
 			if c == nil {
 				continue
 			}

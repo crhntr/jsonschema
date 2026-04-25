@@ -24,8 +24,8 @@ func TestEmitMarshal_Skeleton(t *testing.T) {
 		t.Fatalf("formatFile: %v", err)
 	}
 	for _, want := range []string{
-		`func (r User) MarshalJSONTo(enc *jsontext.Encoder, opts ...json.Options) error`,
-		`func (r *User) UnmarshalJSONFrom(dec *jsontext.Decoder, opts ...json.Options) error`,
+		`func (r User) MarshalJSONTo(enc *jsontext.Encoder) error`,
+		`func (r *User) UnmarshalJSONFrom(dec *jsontext.Decoder) error`,
 		`json.RejectUnknownMembers(true)`,
 		`shadow.Name == nil`,
 		`fmt.Errorf("missing required field %q", "name")`,

@@ -37,6 +37,19 @@ func Test(t *testing.T) {
 	e.Cmds = script.DefaultCmds()
 	e.Conds = script.DefaultConds()
 
+	// GOEXPERIMENT=jsonv2 makes encoding/json/v2 + encoding/json/jsontext
+	// resolvable to "exec go test" / "exec go build" inside fixtures.
+	scriptEnv := []string{
+		"GOEXPERIMENT=jsonv2",
+		"HOME=" + os.Getenv("HOME"),
+		"PATH=" + os.Getenv("PATH"),
+	}
+	for _, k := range []string{"GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT"} {
+		if v := os.Getenv(k); v != "" {
+			scriptEnv = append(scriptEnv, k+"="+v)
+		}
+	}
+
 	e.Cmds["jsch"] = script.Command(script.CmdUsage{
 		Summary: "jsch",
 		Args:    "",
@@ -52,10 +65,10 @@ func Test(t *testing.T) {
 	})
 
 	t.Run("validate", func(t *testing.T) {
-		scripttest.Test(t, t.Context(), e, nil, "testdata/validate/*.txt")
+		scripttest.Test(t, t.Context(), e, scriptEnv, "testdata/validate/*.txt")
 	})
 	t.Run("generate", func(t *testing.T) {
-		scripttest.Test(t, t.Context(), e, nil, "testdata/generate/*.txt")
+		scripttest.Test(t, t.Context(), e, scriptEnv, "testdata/generate/*.txt")
 	})
 }
 

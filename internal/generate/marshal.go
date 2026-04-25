@@ -14,9 +14,9 @@ import (
 func EmitMarshal(t Type) ast.Decl {
 	src := fmt.Sprintf(`package _
 
-func (r %[1]s) MarshalJSONTo(enc *jsontext.Encoder, opts ...json.Options) error {
+func (r %[1]s) MarshalJSONTo(enc *jsontext.Encoder) error {
 	type alias %[1]s
-	return json.MarshalEncode(enc, alias(r), opts...)
+	return json.MarshalEncode(enc, alias(r))
 }
 `, t.Name)
 	return parseDecl(src)
@@ -41,7 +41,9 @@ func EmitUnmarshal(t Type) ast.Decl {
 
 	var optsExtra string
 	if t.RejectUnknown {
-		optsExtra = "\topts = append(opts, json.RejectUnknownMembers(true))\n"
+		optsExtra = "\topts := []json.Options{json.RejectUnknownMembers(true)}\n"
+	} else {
+		optsExtra = "\tvar opts []json.Options\n"
 	}
 
 	var checks strings.Builder
@@ -62,7 +64,7 @@ func EmitUnmarshal(t Type) ast.Decl {
 
 	src := fmt.Sprintf(`package _
 
-func (r *%[1]s) UnmarshalJSONFrom(dec *jsontext.Decoder, opts ...json.Options) error {
+func (r *%[1]s) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	var shadow struct {
 %[2]s	}
 %[3]s	if err := json.UnmarshalDecode(dec, &shadow, opts...); err != nil {

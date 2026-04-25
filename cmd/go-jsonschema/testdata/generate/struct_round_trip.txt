@@ -1,0 +1,85 @@
+go-jsonschema generate --schema schema.json --out ./model --package model --type User
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "description": "A user record.",
+  "additionalProperties": false,
+  "properties": {
+    "name":     {"type": "string"},
+    "age":      {"type": "integer"},
+    "nickname": {"type": "string"}
+  },
+  "required": ["name", "age"]
+}
+-- go.mod --
+module example.com/userpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"strings"
+	"testing"
+)
+
+func TestUser_RoundTripRequired(t *testing.T) {
+	in := []byte(`{"name":"alice","age":30}`)
+	var u User
+	if err := json.Unmarshal(in, &u); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if u.Name != "alice" || u.Age != 30 || u.Nickname != nil {
+		t.Errorf("got %+v, want {Name:alice Age:30 Nickname:nil}", u)
+	}
+	out, err := json.Marshal(u)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != `{"age":30,"name":"alice"}` {
+		t.Errorf("Marshal = %s, want %s", out, `{"age":30,"name":"alice"}`)
+	}
+}
+
+func TestUser_RoundTripOptional(t *testing.T) {
+	nick := "ali"
+	u := User{Name: "alice", Age: 30, Nickname: &nick}
+	out, err := json.Marshal(u)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	want := `{"age":30,"name":"alice","nickname":"ali"}`
+	if string(out) != want {
+		t.Errorf("Marshal = %s, want %s", out, want)
+	}
+	var v User
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if v.Nickname == nil || *v.Nickname != "ali" {
+		t.Errorf("Nickname = %v, want pointer to \"ali\"", v.Nickname)
+	}
+}
+
+func TestUser_MissingRequired(t *testing.T) {
+	var u User
+	err := json.Unmarshal([]byte(`{"name":"alice"}`), &u)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want missing-required-field error")
+	}
+	if !strings.Contains(err.Error(), "missing required field") {
+		t.Errorf("err = %q, want missing-required-field message", err)
+	}
+}
+
+func TestUser_RejectUnknownMember(t *testing.T) {
+	var u User
+	err := json.Unmarshal([]byte(`{"name":"alice","age":30,"extra":1}`), &u)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want unknown-member error")
+	}
+}

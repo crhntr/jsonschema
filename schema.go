@@ -99,23 +99,23 @@ func (m *Meta) Subschemas() iter.Seq[*Meta] {
 				return
 			}
 		}
-		for i := range obj.AllOf {
-			if !yield(&obj.AllOf[i]) {
+		for _, c := range obj.AllOf {
+			if !yield(c) {
 				return
 			}
 		}
-		for i := range obj.AnyOf {
-			if !yield(&obj.AnyOf[i]) {
+		for _, c := range obj.AnyOf {
+			if !yield(c) {
 				return
 			}
 		}
-		for i := range obj.OneOf {
-			if !yield(&obj.OneOf[i]) {
+		for _, c := range obj.OneOf {
+			if !yield(c) {
 				return
 			}
 		}
-		for i := range obj.PrefixItems {
-			if !yield(&obj.PrefixItems[i]) {
+		for _, c := range obj.PrefixItems {
+			if !yield(c) {
 				return
 			}
 		}
@@ -160,9 +160,9 @@ type MetaObject struct {
 	Then *Meta `json:"then,omitempty"`
 	Else *Meta `json:"else,omitempty"`
 
-	AllOf []Meta `json:"allOf,omitempty"`
-	AnyOf []Meta `json:"anyOf,omitempty"`
-	OneOf []Meta `json:"oneOf,omitempty"`
+	AllOf []*Meta `json:"allOf,omitempty"`
+	AnyOf []*Meta `json:"anyOf,omitempty"`
+	OneOf []*Meta `json:"oneOf,omitempty"`
 	Not   *Meta  `json:"not,omitempty"`
 
 	Properties            map[string]*Meta    `json:"properties,omitempty"`
@@ -181,7 +181,7 @@ type MetaObject struct {
 	WriteOnly   bool     `json:"writeOnly,omitempty"`
 	Examples    []string `json:"examples,omitempty"`
 
-	PrefixItems      []Meta `json:"prefixItems,omitempty"`
+	PrefixItems      []*Meta `json:"prefixItems,omitempty"`
 	Items            *Meta  `json:"items,omitempty"`
 	UnevaluatedItems *Meta  `json:"unevaluatedItems,omitempty"`
 	Contains         *Meta  `json:"contains,omitempty"`

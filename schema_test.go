@@ -21,8 +21,7 @@ func mustObject(t *testing.T, m *jsonschema.Meta) jsonschema.MetaObject {
 func findResolved(t *testing.T, schema *jsonschema.Meta, pathFragment string) *jsonschema.Meta {
 	t.Helper()
 	obj := mustObject(t, schema)
-	for i := range obj.AllOf {
-		sub := &obj.AllOf[i]
+	for _, sub := range obj.AllOf {
 		ref := mustObject(t, sub).Ref
 		if strings.Contains(ref, pathFragment) {
 			return sub.Resolved()
@@ -55,18 +54,18 @@ func findFirstDynamicRef(m *jsonschema.Meta) *jsonschema.Meta {
 			return r
 		}
 	}
-	for i := range obj.AllOf {
-		if r := findFirstDynamicRef(&obj.AllOf[i]); r != nil {
+	for _, c := range obj.AllOf {
+		if r := findFirstDynamicRef(c); r != nil {
 			return r
 		}
 	}
-	for i := range obj.AnyOf {
-		if r := findFirstDynamicRef(&obj.AnyOf[i]); r != nil {
+	for _, c := range obj.AnyOf {
+		if r := findFirstDynamicRef(c); r != nil {
 			return r
 		}
 	}
-	for i := range obj.OneOf {
-		if r := findFirstDynamicRef(&obj.OneOf[i]); r != nil {
+	for _, c := range obj.OneOf {
+		if r := findFirstDynamicRef(c); r != nil {
 			return r
 		}
 	}
@@ -115,8 +114,7 @@ func TestMeta(t *testing.T) {
 			if len(obj.AllOf) == 0 {
 				t.Fatal("schema.allOf is empty")
 			}
-			for i := range obj.AllOf {
-				sub := &obj.AllOf[i]
+			for i, sub := range obj.AllOf {
 				resolved := sub.Resolved()
 				if resolved == nil {
 					t.Errorf("allOf[%d] %q: Resolved() is nil", i, mustObject(t, sub).Ref)

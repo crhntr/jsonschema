@@ -78,6 +78,45 @@ func TestFindValueRoot(t *testing.T) {
 	}
 }
 
+type inlineExtra struct {
+	Tier  string `json:"tier"`
+	Score int    `json:"score"`
+}
+
+type inlineHost struct {
+	Name   string         `json:"name"`
+	Extra  inlineExtra    `json:",inline"`
+	Extras map[string]any `json:",inline"`
+}
+
+func TestFindValueInline(t *testing.T) {
+	h := inlineHost{
+		Name:        "Ada",
+		Extra:       inlineExtra{Tier: "gold", Score: 9},
+		Extras:      map[string]any{"nick": "A"},
+	}
+	cases := []struct {
+		ptr     jsonptr.Pointer
+		wantRaw string
+	}{
+		{"/name", `"Ada"`},
+		{"/tier", `"gold"`},
+		{"/score", `9`},
+		{"/nick", `"A"`},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.ptr), func(t *testing.T) {
+			raw, _, err := jsonptr.FindValue(tc.ptr, h)
+			if err != nil {
+				t.Fatalf("FindValue(%q) error: %v", tc.ptr, err)
+			}
+			if normalize(string(raw)) != normalize(tc.wantRaw) {
+				t.Errorf("raw = %s, want %s", raw, tc.wantRaw)
+			}
+		})
+	}
+}
+
 func TestFindValuePointerChain(t *testing.T) {
 	pointee := &person{Name: "Ada", Friends: []*person{{Name: "Bo"}}}
 	pp := &pointee

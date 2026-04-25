@@ -909,7 +909,20 @@ func isHostname(s string) bool {
 	if len(s) == 0 || len(s) > 253 {
 		return false
 	}
-	return hostnameRE.MatchString(s)
+	if !hostnameRE.MatchString(s) {
+		return false
+	}
+	// RFC 5891 §4.2.3.1: label must not contain "--" at positions 3-4
+	// unless it starts with "xn--" (the IDNA A-label prefix).
+	for _, label := range strings.Split(s, ".") {
+		if len(label) >= 4 && label[2] == '-' && label[3] == '-' {
+			lower := strings.ToLower(label)
+			if !strings.HasPrefix(lower, "xn--") {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func isISO8601Duration(s string) bool {

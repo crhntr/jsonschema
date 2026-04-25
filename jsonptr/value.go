@@ -190,18 +190,8 @@ func stepValue(v reflect.Value, tok string) (reflect.Value, error) {
 		}
 		return v.Index(idx), nil
 	case reflect.Struct:
-		if f, ok := lookupStructField(v.Type(), tok); ok {
-			return v.FieldByIndex(f.Index), nil
-		}
-		// Fall back to an inline map (json:",inline" on a
-		// map[string]T field captures unknown keys).
-		if inline, ok := lookupInlineMap(v); ok {
-			key := reflect.New(inline.Type().Key()).Elem()
-			key.SetString(tok)
-			got := inline.MapIndex(key)
-			if got.IsValid() {
-				return got, nil
-			}
+		if got, ok := lookupStructToken(v, tok); ok {
+			return got, nil
 		}
 		return reflect.Value{}, fmt.Errorf("no struct field for %q", tok)
 	default:
@@ -209,37 +199,52 @@ func stepValue(v reflect.Value, tok string) (reflect.Value, error) {
 	}
 }
 
-// lookupInlineMap returns the first map-typed struct field tagged with
-// `json:",inline"` (the go-json-experiment convention for capturing
-// unknown JSON members).
-func lookupInlineMap(v reflect.Value) (reflect.Value, bool) {
+// lookupStructToken finds the value at tok within struct v. It first
+// matches against the struct's own fields (by JSON tag name, falling
+// back to the Go field name), then descends into any field tagged
+// `json:",inline"` — recursively for inline structs, and as a key
+// lookup for inline `map[string]T` fields that capture unknown members.
+func lookupStructToken(v reflect.Value, tok string) (reflect.Value, bool) {
 	t := v.Type()
 	for f := range t.Fields() {
 		if !f.IsExported() {
 			continue
 		}
-		tag := f.Tag.Get("json")
-		if !strings.Contains(tag, "inline") {
+		if hasJSONOption(f, "inline") {
+			continue
+		}
+		if jsonFieldName(f) == tok {
+			return v.FieldByIndex(f.Index), true
+		}
+	}
+	for f := range t.Fields() {
+		if !f.IsExported() || !hasJSONOption(f, "inline") {
 			continue
 		}
 		fv := v.FieldByIndex(f.Index)
-		if fv.Kind() == reflect.Map && fv.Type().Key().Kind() == reflect.String {
-			return fv, true
+		inner := unwrap(fv)
+		if !inner.IsValid() {
+			continue
+		}
+		switch inner.Kind() {
+		case reflect.Struct:
+			if got, ok := lookupStructToken(inner, tok); ok {
+				return got, true
+			}
+		case reflect.Map:
+			if inner.Type().Key().Kind() != reflect.String {
+				continue
+			}
+			key := reflect.New(inner.Type().Key()).Elem()
+			key.SetString(tok)
+			got := inner.MapIndex(key)
+			if got.IsValid() {
+				return got, true
+			}
+		default:
 		}
 	}
 	return reflect.Value{}, false
-}
-
-func lookupStructField(t reflect.Type, name string) (reflect.StructField, bool) {
-	for f := range t.Fields() {
-		if !f.IsExported() {
-			continue
-		}
-		if jsonFieldName(f) == name {
-			return f, true
-		}
-	}
-	return reflect.StructField{}, false
 }
 
 func jsonFieldName(f reflect.StructField) string {
@@ -255,6 +260,25 @@ func jsonFieldName(f reflect.StructField) string {
 		return f.Name
 	}
 	return name
+}
+
+// hasJSONOption reports whether the json struct tag on f contains the
+// given option (e.g. "inline", "omitempty"). Options are the
+// comma-separated tokens that follow the field name.
+func hasJSONOption(f reflect.StructField, opt string) bool {
+	tag := f.Tag.Get("json")
+	_, rest, ok := strings.Cut(tag, ",")
+	if !ok {
+		return false
+	}
+	for rest != "" {
+		var part string
+		part, rest, _ = strings.Cut(rest, ",")
+		if part == opt {
+			return true
+		}
+	}
+	return false
 }
 
 // finishViaJSON marshals v and resolves the remaining pointer via Find on

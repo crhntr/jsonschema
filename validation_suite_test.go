@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"bytes"
 	"flag"
 	"net/http"
 	"net/http/httptest"
@@ -193,7 +194,7 @@ func (rt *remotesTransport) RoundTrip(req *http.Request) (*http.Response, error)
 func runSuiteCase(t *testing.T, schema *jsonschema.Meta, g suiteGroup, c suiteCase, passed, failed *atomic.Int64) {
 	t.Helper()
 	var err error
-	if strings.Contains(t.Name(), "/optional/format/") {
+	if shouldAssertFormat(t.Name(), g.Schema) {
 		err = schema.EvaluateWithFormatAssertion(t.Name(), c.Data)
 	} else {
 		err = schema.Evaluate(t.Name(), c.Data)
@@ -209,6 +210,20 @@ func runSuiteCase(t *testing.T, schema *jsonschema.Meta, g suiteGroup, c suiteCa
 	failed.Add(1)
 	t.Errorf("validation mismatch: want valid=%v got valid=%v\nschema: %s\ndata: %s\nerr: %v",
 		c.Valid, got, g.Schema, c.Data, err)
+}
+
+// shouldAssertFormat reports whether the given schema/test should be
+// validated with format assertion enabled. We opt in for tests under
+// optional/format/ and for any schema whose $schema points at a
+// format-assertion metaschema.
+func shouldAssertFormat(name string, schema []byte) bool {
+	if strings.Contains(name, "/optional/format/") {
+		return true
+	}
+	if bytes.Contains(schema, []byte("format-assertion")) {
+		return true
+	}
+	return false
 }
 
 // suiteName makes a description safe for `go test -run` by replacing

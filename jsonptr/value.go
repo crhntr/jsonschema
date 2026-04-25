@@ -94,12 +94,14 @@ func FindValue(p Pointer, in any, opts ...json.Options) (jsontext.Value, any, er
 			if err != nil {
 				return nil, nil, fmt.Errorf("jsonptr %q: %w", p, err)
 			}
-			if len(next) >= len(remaining) {
-				return nil, nil, fmt.Errorf("jsonptr %q: walker consumed no tokens at %q", p, tok)
+			// Walker consumed at least one token: advance and continue.
+			// If it consumed nothing (returned the input pointer), fall
+			// through to the Marshaler / reflection logic below.
+			if len(next) < len(remaining) {
+				cur = reflect.ValueOf(child)
+				remaining = next
+				continue
 			}
-			cur = reflect.ValueOf(child)
-			remaining = next
-			continue
 		}
 		if hasCustomJSON(cur) {
 			return finishViaJSON(cur, remaining, p, opts)

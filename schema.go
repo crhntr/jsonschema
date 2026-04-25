@@ -182,6 +182,17 @@ func (t *Type) unsetIs() {
 	t.isArray = false
 }
 
+func (t *Type) MarshalJSONTo(enc *jsontext.Encoder) error {
+	switch {
+	case t.isString:
+		return json.MarshalEncode(enc, t.string)
+	case t.isArray:
+		return json.MarshalEncode(enc, t.array)
+	default:
+		return enc.WriteToken(jsontext.Null)
+	}
+}
+
 func (t *Type) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	switch dec.PeekKind() {
 	case jsontext.KindBeginArray:

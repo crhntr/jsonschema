@@ -39,6 +39,11 @@ type Meta struct {
 	anchors        map[string]*Meta
 	dynamicAnchors map[string]*Meta
 	source         []byte
+	// skipValidation is set on resource roots when their declared
+	// metaschema's $vocabulary does not include the JSON Schema
+	// validation vocabulary; when true, keywords from that vocabulary
+	// (type, enum, const, minimum, …) are treated as no-ops.
+	skipValidation bool
 }
 
 // Resolved returns the lexical-scope target of $ref or $dynamicRef, or nil if

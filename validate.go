@@ -41,8 +41,9 @@ func childKeyword(parent, keyword string) string {
 // of resource roots being evaluated (for $dynamicRef per §8.2.3.2) plus
 // configuration like whether format keywords assert.
 type evalScope struct {
-	resources    []*Meta
-	assertFormat bool
+	resources      []*Meta
+	assertFormat   bool
+	skipValidation bool
 }
 
 func (s evalScope) push(resource *Meta) evalScope {
@@ -55,12 +56,24 @@ func (s evalScope) push(resource *Meta) evalScope {
 }
 
 func (s evalScope) findDynamicAnchor(name string) *Meta {
+	if name == "" {
+		return nil
+	}
 	for _, res := range s.resources {
 		if a := res.dynamicAnchors[name]; a != nil {
 			return a
 		}
 	}
 	return nil
+}
+
+// dynamicRefAnchor extracts the plain-name fragment from a $dynamicRef
+// URI reference (e.g. "extended#meta" -> "meta").
+func dynamicRefAnchor(ref string) string {
+	if i := strings.LastIndexByte(ref, '#'); i >= 0 {
+		return ref[i+1:]
+	}
+	return ""
 }
 
 // annotations record which properties / array indices were "evaluated"
@@ -115,6 +128,9 @@ func (m *Meta) evaluate(name string, in []byte, scope evalScope) (annotations, e
 	}
 	dec := jsontext.NewDecoder(bytes.NewReader(in))
 	scope = scope.push(m.resource)
+	if m.resource != nil {
+		scope.skipValidation = m.resource.skipValidation
+	}
 
 	if o, ok := m.TypeObject(); ok {
 		off := dec.InputOffset()
@@ -133,7 +149,7 @@ func (m *Meta) evaluate(name string, in []byte, scope evalScope) (annotations, e
 		if m.resolved != nil {
 			target := m.resolved
 			if m.dynamic && o.DynamicRef != "" {
-				anchorName := strings.TrimPrefix(o.DynamicRef, "#")
+				anchorName := dynamicRefAnchor(o.DynamicRef)
 				if t := scope.findDynamicAnchor(anchorName); t != nil {
 					target = t
 				}
@@ -189,17 +205,17 @@ func validateMetaTypeBool(name string, in []byte, dec *jsontext.Decoder, b bool)
 func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsontext.Value, scope evalScope) (annotations, error) {
 	var ann annotations
 	kind := jsontext.NewDecoder(bytes.NewReader(val)).PeekKind()
-	if o.Type != nil {
+	if o.Type != nil && !scope.skipValidation {
 		if err := o.validateType(name, in, off, kind, val); err != nil {
 			return ann, err
 		}
 	}
-	if o.Enum != nil {
+	if o.Enum != nil && !scope.skipValidation {
 		if err := validateEnum(o.Enum, val); err != nil {
 			return ann, NewErrorWithPosition(name, in, off, err)
 		}
 	}
-	if len(o.Const) > 0 {
+	if len(o.Const) > 0 && !scope.skipValidation {
 		eq, err := Equal(val, o.Const)
 		if err != nil {
 			return ann, NewErrorWithPosition(name, in, off, err)
@@ -210,8 +226,10 @@ func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsonte
 	}
 	switch kind {
 	case jsontext.KindNumber:
-		if err := o.validateNumber(val); err != nil {
-			return ann, NewErrorWithPosition(name, in, off, err)
+		if !scope.skipValidation {
+			if err := o.validateNumber(val); err != nil {
+				return ann, NewErrorWithPosition(name, in, off, err)
+			}
 		}
 	case jsontext.KindString:
 		if err := o.validateString(val, scope); err != nil {

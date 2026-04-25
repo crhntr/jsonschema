@@ -49,9 +49,13 @@ func (r *Resolver) Resolve(ctx context.Context, rawURL string) (*Schema, error) 
 	if err := r.fetchMissingExternals(ctx); err != nil {
 		return nil, err
 	}
+	if err := r.fetchMetaschemas(ctx); err != nil {
+		return nil, err
+	}
 	if err := r.linkAll(); err != nil {
 		return nil, err
 	}
+	r.applyVocabularies()
 
 	r.mu.Lock()
 	root := r.cache[rootURI]
@@ -414,6 +418,111 @@ func (r *Resolver) findMissingExternals() []string {
 		walk(m)
 	}
 	return missing
+}
+
+// fetchMetaschemas loads the metaschema declared by each cached
+// resource's $schema field so that vocabulary information is available
+// during applyVocabularies.
+func (r *Resolver) fetchMetaschemas(ctx context.Context) error {
+	r.mu.Lock()
+	urls := map[string]struct{}{}
+	for _, m := range r.cache {
+		if m == nil {
+			continue
+		}
+		obj, ok := m.TypeObject()
+		if !ok || obj.Schema == "" {
+			continue
+		}
+		uri := stripFragment(obj.Schema)
+		if uri == "" {
+			continue
+		}
+		if _, cached := r.cache[uri]; cached {
+			continue
+		}
+		urls[uri] = struct{}{}
+	}
+	r.mu.Unlock()
+	for uri := range urls {
+		if err := r.loadResource(ctx, uri); err != nil {
+			// Metaschema fetch is best-effort: skip silently.
+			continue
+		}
+	}
+	return nil
+}
+
+// applyVocabularies walks every cached resource, resolves the
+// metaschema declared by $schema, and propagates its vocabulary
+// settings — currently the JSON Schema validation vocabulary's
+// presence is mirrored on the resource as skipValidation when absent.
+func (r *Resolver) applyVocabularies() {
+	const validationVocab = "https://json-schema.org/draft/2020-12/vocab/validation"
+
+	r.mu.Lock()
+	resources := make([]*Meta, 0, len(r.cache))
+	seen := map[*Meta]struct{}{}
+	for _, m := range r.cache {
+		if m == nil {
+			continue
+		}
+		if _, ok := seen[m]; ok {
+			continue
+		}
+		seen[m] = struct{}{}
+		resources = append(resources, m)
+	}
+	r.mu.Unlock()
+
+	for _, m := range resources {
+		obj, ok := m.TypeObject()
+		if !ok || obj.Schema == "" {
+			continue
+		}
+		uri := stripFragment(obj.Schema)
+		r.mu.Lock()
+		meta := r.cache[uri]
+		r.mu.Unlock()
+		if meta == nil {
+			continue
+		}
+		mObj, ok := meta.TypeObject()
+		if !ok {
+			continue
+		}
+		// $vocabulary is only meaningful on the declared metaschema.
+		if mObj.Vocabulary == nil {
+			continue
+		}
+		// If the metaschema explicitly declares its $vocabulary set
+		// and the validation vocab isn't in it, validation keywords
+		// are inactive for schemas using this metaschema.
+		if _, has := mObj.Vocabulary[validationVocab]; !has {
+			r.markSkipValidation(m)
+		}
+	}
+}
+
+// markSkipValidation sets skipValidation on m and every nested
+// subschema in its tree (subschemas inherit the outer resource's
+// vocabulary set unless they declare their own $schema).
+func (r *Resolver) markSkipValidation(m *Meta) {
+	if m == nil {
+		return
+	}
+	m.skipValidation = true
+	obj, ok := m.TypeObject()
+	if !ok {
+		return
+	}
+	if obj.Schema != "" && m != m.resource {
+		// Nested resource declared its own $schema — leave it alone.
+		return
+	}
+	for c := range m.Subschemas() {
+		r.markSkipValidation(c)
+	}
 }
 
 // linkAll runs Phase B over every cached resource: every $ref / $dynamicRef

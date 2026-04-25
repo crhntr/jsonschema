@@ -31,7 +31,6 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 	t := Type{
 		Name: name,
 		Doc:  doc,
-		Kind: KindStruct,
 	}
 
 	jsonNames := make([]string, 0, len(obj.Properties))

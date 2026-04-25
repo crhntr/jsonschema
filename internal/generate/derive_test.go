@@ -37,9 +37,6 @@ func TestDeriveAndEmit_SimpleStruct(t *testing.T) {
 	if typ.Name != "User" {
 		t.Errorf("Name = %q, want %q", typ.Name, "User")
 	}
-	if typ.Kind != KindStruct {
-		t.Errorf("Kind = %v, want KindStruct", typ.Kind)
-	}
 	if typ.Doc != "A user record." {
 		t.Errorf("Doc = %q, want %q", typ.Doc, "A user record.")
 	}
@@ -83,7 +80,6 @@ func TestEmit_FormatsAsValidGo(t *testing.T) {
 	typ := Type{
 		Name: "User",
 		Doc:  "A user record.",
-		Kind: KindStruct,
 		Fields: []Field{
 			{GoName: "Name", JSONName: "name", TypeExpr: &ast.Ident{Name: "string"}, Required: true},
 			{GoName: "Age", JSONName: "age", TypeExpr: &ast.Ident{Name: "int"}, Required: true},

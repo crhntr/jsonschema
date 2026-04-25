@@ -89,6 +89,16 @@ func (m *Meta) Subschemas() iter.Seq[*Meta] {
 				return
 			}
 		}
+		for _, c := range obj.PatternProperties {
+			if !yield(c) {
+				return
+			}
+		}
+		for _, c := range obj.DependentSchemas {
+			if !yield(c) {
+				return
+			}
+		}
 		for i := range obj.AllOf {
 			if !yield(&obj.AllOf[i]) {
 				return
@@ -150,9 +160,12 @@ type MetaObject struct {
 	OneOf []Meta `json:"oneOf,omitempty"`
 	Not   *Meta  `json:"not,omitempty"`
 
-	Properties           map[string]*Meta `json:"properties,omitempty"`
-	AdditionalProperties *Meta            `json:"additionalProperties,omitempty"`
-	PropertyNames        *Meta            `json:"propertyNames,omitempty"`
+	Properties           map[string]*Meta    `json:"properties,omitempty"`
+	PatternProperties    map[string]*Meta    `json:"patternProperties,omitempty"`
+	AdditionalProperties *Meta               `json:"additionalProperties,omitempty"`
+	PropertyNames        *Meta               `json:"propertyNames,omitempty"`
+	DependentRequired    map[string][]string `json:"dependentRequired,omitempty"`
+	DependentSchemas     map[string]*Meta    `json:"dependentSchemas,omitempty"`
 
 	// meta-data.json
 	Title       string   `json:"title,omitempty"`
@@ -162,7 +175,12 @@ type MetaObject struct {
 	WriteOnly   bool     `json:"writeOnly,omitempty"`
 	Examples    []string `json:"examples,omitempty"`
 
-	Items *Meta `json:"items,omitempty"`
+	PrefixItems []Meta `json:"prefixItems,omitempty"`
+	Items       *Meta  `json:"items,omitempty"`
+	Contains    *Meta  `json:"contains,omitempty"`
+
+	MinContains jsontext.Value `json:"minContains,omitempty"`
+	MaxContains jsontext.Value `json:"maxContains,omitempty"`
 
 	Type    *Type            `json:"type,omitempty"`
 	Enum    []jsontext.Value `json:"enum,omitempty"`

@@ -60,10 +60,7 @@ func runSuiteFile(t *testing.T, name, path string, passed, failed *atomic.Int64)
 		}
 		for _, g := range groups {
 			t.Run(suiteName(g.Description), func(t *testing.T) {
-				schema, err := jsonschema.Parse(g.Schema)
-				if err != nil {
-					t.Fatalf("parse schema: %v\nschema: %s", err, g.Schema)
-				}
+				schema := loadSuiteSchema(t, g.Schema)
 				for _, c := range g.Tests {
 					t.Run(suiteName(c.Description), func(t *testing.T) {
 						runSuiteCase(t, schema, g, c, passed, failed)
@@ -72,6 +69,25 @@ func runSuiteFile(t *testing.T, name, path string, passed, failed *atomic.Int64)
 			})
 		}
 	})
+}
+
+// loadSuiteSchema parses the schema and runs it through a Resolver so
+// internal $refs are linked. The synthetic URI lets Resolver index even
+// schemas that don't declare $id.
+func loadSuiteSchema(t *testing.T, body []byte) *jsonschema.Meta {
+	t.Helper()
+	schema, err := jsonschema.Parse(body)
+	if err != nil {
+		t.Fatalf("parse schema: %v\nschema: %s", err, body)
+	}
+	var r jsonschema.Resolver
+	if _, err := r.Load("https://suite.test/", body); err != nil {
+		return schema
+	}
+	if linked, err := r.Resolve(t.Context(), "https://suite.test/"); err == nil {
+		return linked
+	}
+	return schema
 }
 
 func runSuiteCase(t *testing.T, schema *jsonschema.Meta, g suiteGroup, c suiteCase, passed, failed *atomic.Int64) {

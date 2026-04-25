@@ -21,7 +21,13 @@ func (m *Meta) Evaluate(name string, in []byte) error {
 	dec := jsontext.NewDecoder(bytes.NewReader(in))
 
 	if o, ok := m.TypeObject(); ok {
-		return o.validate(name, in, dec)
+		if err := o.validate(name, in, dec); err != nil {
+			return err
+		}
+		if m.resolved != nil {
+			return m.resolved.Evaluate(name+"/$ref", in)
+		}
+		return nil
 	}
 
 	if b, ok := m.TypeBool(); ok {
@@ -161,6 +167,10 @@ func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsont
 	}
 	keys := map[string]struct{}{}
 	count := 0
+	patternRes, err := compilePatternProperties(o.PatternProperties)
+	if err != nil {
+		return NewErrorWithPosition(name, in, off, err)
+	}
 	for dec.PeekKind() != jsontext.KindEndObject {
 		keyTok, err := dec.ReadToken()
 		if err != nil {
@@ -173,8 +183,32 @@ func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsont
 		if err != nil {
 			return NewErrorWithPosition(name, in, off, err)
 		}
+		propVal = bytes.Clone(propVal)
+		matched := false
 		if sub, ok := o.Properties[key]; ok && sub != nil {
+			matched = true
 			if err := sub.Evaluate(name+"."+key, propVal); err != nil {
+				return err
+			}
+		}
+		for _, pp := range patternRes {
+			if pp.re.MatchString(key) {
+				matched = true
+				if pp.schema != nil {
+					if err := pp.schema.Evaluate(name+"."+key, propVal); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		if !matched && o.AdditionalProperties != nil {
+			if err := o.AdditionalProperties.Evaluate(name+"."+key, propVal); err != nil {
+				return err
+			}
+		}
+		if o.PropertyNames != nil {
+			keyBytes, _ := json.Marshal(key)
+			if err := o.PropertyNames.Evaluate(name+"/propertyNames", keyBytes); err != nil {
 				return err
 			}
 		}
@@ -185,15 +219,57 @@ func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsont
 				fmt.Errorf("missing required property %q", req))
 		}
 	}
-	if min, ok := parseInt(o.MinProperties); ok && count < min {
+	if cmp, ok := compareRat(o.MinProperties, big.NewRat(int64(count), 1)); ok && cmp > 0 {
 		return NewErrorWithPosition(name, in, off,
-			fmt.Errorf("object has %d properties, minProperties %d", count, min))
+			fmt.Errorf("object has %d properties, minProperties %s", count, o.MinProperties))
 	}
-	if max, ok := parseInt(o.MaxProperties); ok && count > max {
+	if cmp, ok := compareRat(o.MaxProperties, big.NewRat(int64(count), 1)); ok && cmp < 0 {
 		return NewErrorWithPosition(name, in, off,
-			fmt.Errorf("object has %d properties, maxProperties %d", count, max))
+			fmt.Errorf("object has %d properties, maxProperties %s", count, o.MaxProperties))
+	}
+	for prop, deps := range o.DependentRequired {
+		if _, present := keys[prop]; !present {
+			continue
+		}
+		for _, d := range deps {
+			if _, ok := keys[d]; !ok {
+				return NewErrorWithPosition(name, in, off,
+					fmt.Errorf("property %q requires %q", prop, d))
+			}
+		}
+	}
+	for prop, sub := range o.DependentSchemas {
+		if _, present := keys[prop]; !present {
+			continue
+		}
+		if sub == nil {
+			continue
+		}
+		if err := sub.Evaluate(name+"/dependentSchemas/"+prop, val); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+type patternRegex struct {
+	re     *regexp.Regexp
+	schema *Meta
+}
+
+func compilePatternProperties(pp map[string]*Meta) ([]patternRegex, error) {
+	if len(pp) == 0 {
+		return nil, nil
+	}
+	out := make([]patternRegex, 0, len(pp))
+	for pat, sub := range pp {
+		re, err := regexp.Compile(pat)
+		if err != nil {
+			return nil, fmt.Errorf("patternProperties %q: %w", pat, err)
+		}
+		out = append(out, patternRegex{re: re, schema: sub})
+	}
+	return out, nil
 }
 
 func (o *MetaObject) validateArray(name string, in []byte, off int64, val jsontext.Value) error {
@@ -207,15 +283,15 @@ func (o *MetaObject) validateArray(name string, in []byte, off int64, val jsonte
 		if err != nil {
 			return NewErrorWithPosition(name, in, off, err)
 		}
-		items = append(items, v)
+		items = append(items, bytes.Clone(v))
 	}
-	if min, ok := parseInt(o.MinItems); ok && len(items) < min {
+	if cmp, ok := compareRat(o.MinItems, big.NewRat(int64(len(items)), 1)); ok && cmp > 0 {
 		return NewErrorWithPosition(name, in, off,
-			fmt.Errorf("array has %d items, minItems %d", len(items), min))
+			fmt.Errorf("array has %d items, minItems %s", len(items), o.MinItems))
 	}
-	if max, ok := parseInt(o.MaxItems); ok && len(items) > max {
+	if cmp, ok := compareRat(o.MaxItems, big.NewRat(int64(len(items)), 1)); ok && cmp < 0 {
 		return NewErrorWithPosition(name, in, off,
-			fmt.Errorf("array has %d items, maxItems %d", len(items), max))
+			fmt.Errorf("array has %d items, maxItems %s", len(items), o.MaxItems))
 	}
 	if o.UniqueItems {
 		for i := range items {
@@ -231,11 +307,45 @@ func (o *MetaObject) validateArray(name string, in []byte, off int64, val jsonte
 			}
 		}
 	}
+	for i := range o.PrefixItems {
+		if i >= len(items) {
+			break
+		}
+		if err := o.PrefixItems[i].Evaluate(fmt.Sprintf("%s/prefixItems/%d", name, i), items[i]); err != nil {
+			return err
+		}
+	}
 	if o.Items != nil {
-		for i, item := range items {
-			if err := o.Items.Evaluate(fmt.Sprintf("%s[%d]", name, i), item); err != nil {
+		for i := len(o.PrefixItems); i < len(items); i++ {
+			if err := o.Items.Evaluate(fmt.Sprintf("%s[%d]", name, i), items[i]); err != nil {
 				return err
 			}
+		}
+	}
+	if o.Contains != nil {
+		matched := 0
+		for i, item := range items {
+			if o.Contains.Evaluate(fmt.Sprintf("%s/contains/%d", name, i), item) == nil {
+				matched++
+			}
+		}
+		minN, hasMin := compareRat(o.MinContains, big.NewRat(int64(matched), 1))
+		minRequired := 1
+		if hasMin {
+			// minContains is treated as the lower bound. matched < min means fail.
+			if minN > 0 {
+				return NewErrorWithPosition(name, in, off,
+					fmt.Errorf("contains matched %d items, minContains %s", matched, o.MinContains))
+			}
+			minRequired = 0
+		}
+		if !hasMin && matched < minRequired {
+			return NewErrorWithPosition(name, in, off,
+				fmt.Errorf("contains matched no items"))
+		}
+		if cmp, ok := compareRat(o.MaxContains, big.NewRat(int64(matched), 1)); ok && cmp < 0 {
+			return NewErrorWithPosition(name, in, off,
+				fmt.Errorf("contains matched %d items, maxContains %s", matched, o.MaxContains))
 		}
 	}
 	return nil
@@ -293,11 +403,11 @@ func (o *MetaObject) validateString(val jsontext.Value) error {
 		return err
 	}
 	count := utf8.RuneCountInString(s)
-	if min, ok := parseInt(o.MinLength); ok && count < min {
-		return fmt.Errorf("string length %d less than minLength %d", count, min)
+	if cmp, ok := compareRat(o.MinLength, big.NewRat(int64(count), 1)); ok && cmp > 0 {
+		return fmt.Errorf("string length %d less than minLength %s", count, o.MinLength)
 	}
-	if max, ok := parseInt(o.MaxLength); ok && count > max {
-		return fmt.Errorf("string length %d greater than maxLength %d", count, max)
+	if cmp, ok := compareRat(o.MaxLength, big.NewRat(int64(count), 1)); ok && cmp < 0 {
+		return fmt.Errorf("string length %d greater than maxLength %s", count, o.MaxLength)
 	}
 	if o.Pattern != "" {
 		re, err := regexp.Compile(o.Pattern)
@@ -322,16 +432,6 @@ func decodeJSONString(val jsontext.Value) (string, error) {
 	return s, nil
 }
 
-func parseInt(v jsontext.Value) (int, bool) {
-	if len(v) == 0 {
-		return 0, false
-	}
-	r, ok := new(big.Rat).SetString(string(v))
-	if !ok || !r.IsInt() {
-		return 0, false
-	}
-	return int(r.Num().Int64()), true
-}
 
 func (o *MetaObject) validateType(name string, in jsontext.Value, off int64, kind jsontext.Kind, val jsontext.Value) error {
 	for _, t := range typeNames(o.Type) {

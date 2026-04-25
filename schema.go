@@ -3,6 +3,7 @@ package jsonschema
 import (
 	"errors"
 	"fmt"
+	"iter"
 	"slices"
 
 	"github.com/go-json-experiment/json"
@@ -64,6 +65,33 @@ func (m *Meta) Anchor(name string) *Meta { return m.anchors[name] }
 
 // DynamicAnchor looks up a $dynamicAnchor by name within this resource.
 func (m *Meta) DynamicAnchor(name string) *Meta { return m.dynamicAnchors[name] }
+
+// Refs yields every subschema in m's tree (including m itself) whose
+// MetaObject carries a non-empty $ref or $dynamicRef. Use Resolved on
+// the yielded *Meta to follow the link.
+func (m *Meta) Refs() iter.Seq[*Meta] {
+	return func(yield func(*Meta) bool) {
+		stopped := false
+		var visit func(*Meta) error
+		visit = func(c *Meta) error {
+			if stopped || c == nil {
+				return nil
+			}
+			obj, ok := c.TypeObject()
+			if !ok {
+				return nil
+			}
+			if obj.Ref != "" || obj.DynamicRef != "" {
+				if !yield(c) {
+					stopped = true
+					return nil
+				}
+			}
+			return walkSubschemas(c, visit)
+		}
+		_ = visit(m)
+	}
+}
 
 // Source returns the original JSON document bytes this Meta was parsed from.
 // Only populated on resource roots (top-level document or embedded $id

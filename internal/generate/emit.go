@@ -8,11 +8,18 @@ import (
 )
 
 // Emit turns an IR Type into a top-level *ast.GenDecl ready for
-// printing.
+// printing. Scalar types emit `type Name <expr>`; struct types emit
+// `type Name struct { … }`.
 func Emit(t Type) *ast.GenDecl {
+	var typExpr ast.Expr
+	if t.Underlying != nil {
+		typExpr = t.Underlying
+	} else {
+		typExpr = emitStructType(t)
+	}
 	spec := &ast.TypeSpec{
 		Name: &ast.Ident{Name: t.Name},
-		Type: emitStructType(t),
+		Type: typExpr,
 	}
 	decl := &ast.GenDecl{
 		Tok:   token.TYPE,

@@ -1,0 +1,62 @@
+go-jsonschema generate --schema schema.json --out ./model --package model --type Username
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "string",
+  "minLength": 3,
+  "maxLength": 12
+}
+-- go.mod --
+module example.com/userpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"strings"
+	"testing"
+)
+
+func TestUsername_RoundTrip(t *testing.T) {
+	in := []byte(`"alice"`)
+	var u Username
+	if err := json.Unmarshal(in, &u); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if u != "alice" {
+		t.Errorf("Unmarshal = %q, want %q", string(u), "alice")
+	}
+	out, err := json.Marshal(u)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != `"alice"` {
+		t.Errorf("Marshal = %s, want %s", out, `"alice"`)
+	}
+}
+
+func TestUsername_TooShort(t *testing.T) {
+	var u Username
+	err := json.Unmarshal([]byte(`"hi"`), &u)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want minLength rejection")
+	}
+	if !strings.Contains(err.Error(), "below minimum 3") {
+		t.Errorf("err = %q, want minimum-length message", err)
+	}
+}
+
+func TestUsername_TooLong(t *testing.T) {
+	var u Username
+	err := json.Unmarshal([]byte(`"abcdefghijklmnop"`), &u)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want maxLength rejection")
+	}
+	if !strings.Contains(err.Error(), "above maximum 12") {
+		t.Errorf("err = %q, want maximum-length message", err)
+	}
+}

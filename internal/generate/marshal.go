@@ -22,12 +22,17 @@ func (r %[1]s) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return parseDecl(src)
 }
 
-// EmitUnmarshal returns the UnmarshalJSONFrom method for t. It
-// decodes into a shadow struct whose fields are pointers, then
-// rejects nil values for required fields and copies the rest into
-// the receiver. additionalProperties: false is enforced via
+// EmitUnmarshal returns the UnmarshalJSONFrom method for t. For
+// struct types it decodes into a pointer-shadow struct, rejects nil
+// values for required fields, and copies the rest into the receiver.
+// For scalar types it decodes the underlying primitive and enforces
+// length / range constraints before assigning the receiver.
+// additionalProperties: false is enforced via
 // json.RejectUnknownMembers when t.RejectUnknown is set.
 func EmitUnmarshal(t Type) ast.Decl {
+	if t.Underlying != nil {
+		return emitScalarUnmarshal(t)
+	}
 	var shadowFields strings.Builder
 	for _, f := range t.Fields {
 		shadowFields.WriteString("\t\t")
@@ -73,6 +78,31 @@ func (r *%[1]s) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 %[4]s%[5]s	return nil
 }
 `, t.Name, shadowFields.String(), optsExtra, checks.String(), assigns.String())
+	return parseDecl(src)
+}
+
+// emitScalarUnmarshal generates UnmarshalJSONFrom for a scalar
+// alias type, enforcing the constraints attached to the IR Type.
+func emitScalarUnmarshal(t Type) ast.Decl {
+	underlying := exprString(t.Underlying)
+	var checks strings.Builder
+	if t.Constraints.MinLength != nil {
+		fmt.Fprintf(&checks, "\tif len(v) < %d {\n\t\treturn fmt.Errorf(\"%s: length %%d below minimum %d\", len(v))\n\t}\n", *t.Constraints.MinLength, t.Name, *t.Constraints.MinLength)
+	}
+	if t.Constraints.MaxLength != nil {
+		fmt.Fprintf(&checks, "\tif len(v) > %d {\n\t\treturn fmt.Errorf(\"%s: length %%d above maximum %d\", len(v))\n\t}\n", *t.Constraints.MaxLength, t.Name, *t.Constraints.MaxLength)
+	}
+	src := fmt.Sprintf(`package _
+
+func (r *%[1]s) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	var v %[2]s
+	if err := json.UnmarshalDecode(dec, &v); err != nil {
+		return err
+	}
+%[3]s	*r = %[1]s(v)
+	return nil
+}
+`, t.Name, underlying, checks.String())
 	return parseDecl(src)
 }
 

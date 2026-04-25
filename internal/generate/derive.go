@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -32,6 +33,19 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 		Name:          name,
 		Doc:           doc,
 		RejectUnknown: rejectsAdditionalProperties(obj),
+	}
+
+	// Scalar root: schema's type is a single primitive and there
+	// are no properties. Emit `type Name <primitive>` with optional
+	// constraint enforcement.
+	if isScalarRoot(obj) {
+		expr, err := derivePrimitive(obj)
+		if err != nil {
+			return Type{}, fmt.Errorf("scalar root: %w", err)
+		}
+		t.Underlying = expr
+		t.Constraints = deriveConstraints(obj)
+		return t, nil
 	}
 
 	jsonNames := make([]string, 0, len(obj.Properties))
@@ -84,6 +98,52 @@ func derivePrimitive(obj *jsonschema.SchemaObject) (ast.Expr, error) {
 	default:
 		return nil, fmt.Errorf("type %q not supported in Phase 3", s)
 	}
+}
+
+// isScalarRoot reports whether obj describes a single primitive
+// (string / integer / number / boolean) with no object/array shape.
+func isScalarRoot(obj *jsonschema.SchemaObject) bool {
+	if len(obj.Properties) > 0 {
+		return false
+	}
+	if obj.Type == nil {
+		return false
+	}
+	s, ok := obj.Type.TypeString()
+	if !ok {
+		return false
+	}
+	switch s {
+	case "string", "integer", "number", "boolean":
+		return true
+	default:
+		return false
+	}
+}
+
+// deriveConstraints lifts the assertion keywords supported in
+// Phase 6 off obj into an IR Constraints value.
+func deriveConstraints(obj *jsonschema.SchemaObject) Constraints {
+	var c Constraints
+	if n, ok := jsontextInt(obj.MinLength); ok {
+		c.MinLength = &n
+	}
+	if n, ok := jsontextInt(obj.MaxLength); ok {
+		c.MaxLength = &n
+	}
+	return c
+}
+
+// jsontextInt parses a jsontext.Value holding a JSON integer.
+func jsontextInt(v []byte) (int, bool) {
+	if len(v) == 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(string(v))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // rejectsAdditionalProperties reports whether obj declares

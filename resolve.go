@@ -413,18 +413,18 @@ func walkSubschemas(m *Meta, visit func(*Meta) error) error {
 			return err
 		}
 	}
-	for _, c := range obj.AllOf {
-		if err := visit(c); err != nil {
+	for i := range obj.AllOf {
+		if err := visit(&obj.AllOf[i]); err != nil {
 			return err
 		}
 	}
-	for _, c := range obj.AnyOf {
-		if err := visit(c); err != nil {
+	for i := range obj.AnyOf {
+		if err := visit(&obj.AnyOf[i]); err != nil {
 			return err
 		}
 	}
-	for _, c := range obj.OneOf {
-		if err := visit(c); err != nil {
+	for i := range obj.OneOf {
+		if err := visit(&obj.OneOf[i]); err != nil {
 			return err
 		}
 	}

@@ -34,8 +34,11 @@ type Walker interface {
 
 var walkerType = reflect.TypeFor[Walker]()
 
-// asWalker returns v as a Walker if its type (or its addressable pointer
-// type) implements the interface.
+// asWalker returns v as a Walker if its type (or *T) implements the
+// interface. When only *T implements Walker and v is not addressable
+// (e.g., obtained from reflect.ValueOf or as a map value), asWalker
+// makes an addressable copy so the pointer-receiver method is callable.
+// Walker is treated as read-only, so the copy semantics are safe.
 func asWalker(v reflect.Value) (Walker, bool) {
 	if !v.IsValid() || !v.CanInterface() {
 		return nil, false
@@ -44,10 +47,15 @@ func asWalker(v reflect.Value) (Walker, bool) {
 	if t.Implements(walkerType) {
 		return v.Interface().(Walker), true
 	}
-	if v.CanAddr() && reflect.PointerTo(t).Implements(walkerType) {
+	if !reflect.PointerTo(t).Implements(walkerType) {
+		return nil, false
+	}
+	if v.CanAddr() {
 		return v.Addr().Interface().(Walker), true
 	}
-	return nil, false
+	addr := reflect.New(t)
+	addr.Elem().Set(v)
+	return addr.Interface().(Walker), true
 }
 
 // FindValue navigates to p within in by walking the Go value via reflection

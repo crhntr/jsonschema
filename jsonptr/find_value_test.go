@@ -529,6 +529,35 @@ func (pw *pointerWalker) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Opti
 	return rest, v, nil
 }
 
+// nonAddressableWalker has its Walker method on the pointer receiver and
+// is wrapped in a map value (which reflect cannot address). asWalker
+// must still detect the Walker by allocating an addressable copy.
+type nonAddressableWalker struct{ payload string }
+
+func (n *nonAddressableWalker) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (jsonptr.Pointer, any, error) {
+	tok, rest, ok := ptr.Head()
+	if !ok {
+		return ptr, n, nil
+	}
+	if tok != "payload" {
+		return ptr, nil, fmt.Errorf("nonAddressableWalker: unknown %q", tok)
+	}
+	return rest, n.payload, nil
+}
+
+func TestFindValueWalkerOnNonAddressable(t *testing.T) {
+	in := map[string]nonAddressableWalker{
+		"a": {payload: "hello"},
+	}
+	_, live, err := jsonptr.FindValue("/a/payload", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live != "hello" {
+		t.Errorf("live = %v, want hello", live)
+	}
+}
+
 func TestFindValueWalkerPointerReceiver(t *testing.T) {
 	type box struct {
 		W pointerWalker `json:"w"`
@@ -659,11 +688,13 @@ func TestMetaImplementsWalker(t *testing.T) {
 			raw: `"$ref":"#/$defs/id"`,
 		},
 		{
+			// AllOf is []Meta in the source struct, so the leaf is a
+			// Meta value rather than a *Meta. Slice indexing through
+			// reflection preserves the element type.
 			ptr: "/allOf/1",
 			live: func(t *testing.T, v any) {
-				_, ok := v.(*jsonschema.Meta)
-				if !ok {
-					t.Fail()
+				if _, ok := v.(jsonschema.Meta); !ok {
+					t.Errorf("live = %T, want jsonschema.Meta", v)
 				}
 			},
 			raw: `"title":"second"`,

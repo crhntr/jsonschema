@@ -1,0 +1,12 @@
+go-jsonschema validate --schema-file schema.json instance.json
+
+-- schema.json --
+{
+  "type": "array",
+  "items": { "type": "integer" },
+  "minItems": 1,
+  "maxItems": 5,
+  "uniqueItems": true
+}
+-- instance.json --
+[1, 2, 3]

@@ -1,0 +1,6 @@
+go-jsonschema validate --schema-file schema.json hello.json
+
+-- schema.json --
+{"type": "string"}
+-- hello.json --
+"hello"

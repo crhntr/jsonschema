@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/go-json-experiment/json"
-
 	"github.com/crhntr/jsonschema"
 )
 
@@ -73,9 +71,15 @@ func validate(wd string, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	var m jsonschema.Meta
-	if err := json.Unmarshal(schemaJSON, &m); err != nil {
-		return err
+	// Run the schema through a Resolver so internal $refs are linked.
+	// The schema may not declare $id, so seed under a synthetic URI.
+	r := &jsonschema.Resolver{}
+	if _, err := r.Load("file:///cli/schema", schemaJSON); err != nil {
+		return fmt.Errorf("load schema: %w", err)
+	}
+	m, err := r.Resolve(context.Background(), "file:///cli/schema")
+	if err != nil {
+		return fmt.Errorf("resolve schema: %w", err)
 	}
 
 	for _, arg := range flagSet.Args() {

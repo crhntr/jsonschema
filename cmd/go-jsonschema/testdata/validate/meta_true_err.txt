@@ -1,4 +1,5 @@
 ! go-jsonschema validate --schema-file simple.schema.json empty.json
+stderr 'invalid JSON'
 
 -- simple.schema.json --
 true

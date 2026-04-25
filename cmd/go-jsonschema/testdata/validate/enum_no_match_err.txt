@@ -1,0 +1,7 @@
+! go-jsonschema validate --schema-file schema.json instance.json
+stderr 'value is not in enum'
+
+-- schema.json --
+{"enum": ["red", "green", "blue"]}
+-- instance.json --
+"yellow"

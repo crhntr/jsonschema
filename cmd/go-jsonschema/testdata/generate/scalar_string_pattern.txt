@@ -1,0 +1,42 @@
+go-jsonschema generate --schema schema.json --out ./model --package model --type Slug
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "string",
+  "pattern": "^[a-z][a-z0-9-]*$"
+}
+-- go.mod --
+module example.com/slugpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"strings"
+	"testing"
+)
+
+func TestSlug_Match(t *testing.T) {
+	var s Slug
+	if err := json.Unmarshal([]byte(`"hello-world"`), &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if string(s) != "hello-world" {
+		t.Errorf("got %q, want %q", string(s), "hello-world")
+	}
+}
+
+func TestSlug_NoMatch(t *testing.T) {
+	var s Slug
+	err := json.Unmarshal([]byte(`"Hello World"`), &s)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want pattern rejection")
+	}
+	if !strings.Contains(err.Error(), "does not match pattern") {
+		t.Errorf("err = %q, want pattern-rejection message", err)
+	}
+}

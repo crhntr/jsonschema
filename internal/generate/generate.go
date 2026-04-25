@@ -65,19 +65,26 @@ func Generate(schema *jsonschema.SchemaObject, typeName, packageName string) ([]
 		return nil, fmt.Errorf("derive %s: %w", typeName, err)
 	}
 
+	decls := []ast.Decl{
+		importDecl(
+			"encoding/json/v2",
+			"encoding/json/jsontext",
+			"fmt",
+			"regexp",
+		),
+		Emit(typ),
+	}
+	if pat := EmitPatternVar(typ); pat != nil {
+		decls = append(decls, pat)
+	}
+	decls = append(decls,
+		EmitMarshal(typ),
+		EmitUnmarshal(typ),
+		interfaceAssertions(typ),
+	)
 	file := &ast.File{
-		Name: &ast.Ident{Name: packageName},
-		Decls: []ast.Decl{
-			importDecl(
-				"encoding/json/v2",
-				"encoding/json/jsontext",
-				"fmt",
-			),
-			Emit(typ),
-			EmitMarshal(typ),
-			EmitUnmarshal(typ),
-			interfaceAssertions(typ),
-		},
+		Name:  &ast.Ident{Name: packageName},
+		Decls: decls,
 	}
 
 	var buf bytes.Buffer

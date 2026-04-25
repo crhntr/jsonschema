@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strconv"
 	"strings"
 )
 
@@ -83,27 +84,187 @@ func (r *%[1]s) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 
 // emitScalarUnmarshal generates UnmarshalJSONFrom for a scalar
 // alias type, enforcing the constraints attached to the IR Type.
+// The function body is built from go/ast nodes (not string templates)
+// so the constraint checks are individually inspectable AST and the
+// compiler validates each at generation time.
 func emitScalarUnmarshal(t Type) ast.Decl {
-	underlying := exprString(t.Underlying)
-	var checks strings.Builder
-	if t.Constraints.MinLength != nil {
-		fmt.Fprintf(&checks, "\tif len(v) < %d {\n\t\treturn fmt.Errorf(\"%s: length %%d below minimum %d\", len(v))\n\t}\n", *t.Constraints.MinLength, t.Name, *t.Constraints.MinLength)
+	body := []ast.Stmt{
+		// var v <underlying>
+		&ast.DeclStmt{Decl: &ast.GenDecl{
+			Tok: token.VAR,
+			Specs: []ast.Spec{&ast.ValueSpec{
+				Names: []*ast.Ident{ident("v")},
+				Type:  t.Underlying,
+			}},
+		}},
+		// if err := json.UnmarshalDecode(dec, &v); err != nil { return err }
+		&ast.IfStmt{
+			Init: &ast.AssignStmt{
+				Lhs: []ast.Expr{ident("err")},
+				Tok: token.DEFINE,
+				Rhs: []ast.Expr{callExpr(
+					sel("json", "UnmarshalDecode"),
+					ident("dec"),
+					&ast.UnaryExpr{Op: token.AND, X: ident("v")},
+				)},
+			},
+			Cond: binOp(ident("err"), token.NEQ, ident("nil")),
+			Body: &ast.BlockStmt{List: []ast.Stmt{returnStmt(ident("err"))}},
+		},
 	}
-	if t.Constraints.MaxLength != nil {
-		fmt.Fprintf(&checks, "\tif len(v) > %d {\n\t\treturn fmt.Errorf(\"%s: length %%d above maximum %d\", len(v))\n\t}\n", *t.Constraints.MaxLength, t.Name, *t.Constraints.MaxLength)
-	}
-	src := fmt.Sprintf(`package _
+	body = append(body, scalarConstraintChecks(t)...)
+	body = append(body,
+		// *r = T(v)
+		&ast.AssignStmt{
+			Lhs: []ast.Expr{&ast.StarExpr{X: ident("r")}},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{callExpr(ident(t.Name), ident("v"))},
+		},
+		// return nil
+		returnStmt(ident("nil")),
+	)
 
-func (r *%[1]s) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	var v %[2]s
-	if err := json.UnmarshalDecode(dec, &v); err != nil {
-		return err
+	return &ast.FuncDecl{
+		Recv: &ast.FieldList{List: []*ast.Field{{
+			Names: []*ast.Ident{ident("r")},
+			Type:  &ast.StarExpr{X: ident(t.Name)},
+		}}},
+		Name: ident("UnmarshalJSONFrom"),
+		Type: &ast.FuncType{
+			Params: &ast.FieldList{List: []*ast.Field{{
+				Names: []*ast.Ident{ident("dec")},
+				Type:  &ast.StarExpr{X: sel("jsontext", "Decoder")},
+			}}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: ident("error")}}},
+		},
+		Body: &ast.BlockStmt{List: body},
 	}
-%[3]s	*r = %[1]s(v)
-	return nil
 }
-`, t.Name, underlying, checks.String())
-	return parseDecl(src)
+
+// scalarConstraintChecks builds AST statements that enforce the
+// constraint keywords on t. Each check looks like:
+//
+//	if <cond> { return fmt.Errorf(...) }
+//
+// and runs against the locally-bound variable v.
+func scalarConstraintChecks(t Type) []ast.Stmt {
+	var stmts []ast.Stmt
+	c := t.Constraints
+	lenV := callExpr(ident("len"), ident("v"))
+
+	if c.MinLength != nil {
+		stmts = append(stmts, ifReturnFmtErrorf(
+			binOp(lenV, token.LSS, intLit(*c.MinLength)),
+			t.Name+": length %d below minimum "+strconv.Itoa(*c.MinLength),
+			lenV,
+		))
+	}
+	if c.MaxLength != nil {
+		stmts = append(stmts, ifReturnFmtErrorf(
+			binOp(lenV, token.GTR, intLit(*c.MaxLength)),
+			t.Name+": length %d above maximum "+strconv.Itoa(*c.MaxLength),
+			lenV,
+		))
+	}
+	if c.Minimum != nil {
+		stmts = append(stmts, ifReturnFmtErrorf(
+			binOp(ident("v"), token.LSS, rawNumLit(*c.Minimum)),
+			t.Name+": value %v below minimum "+*c.Minimum,
+			ident("v"),
+		))
+	}
+	if c.Maximum != nil {
+		stmts = append(stmts, ifReturnFmtErrorf(
+			binOp(ident("v"), token.GTR, rawNumLit(*c.Maximum)),
+			t.Name+": value %v above maximum "+*c.Maximum,
+			ident("v"),
+		))
+	}
+	if c.Pattern != "" {
+		stmts = append(stmts, ifReturnFmtErrorf(
+			&ast.UnaryExpr{
+				Op: token.NOT,
+				X: callExpr(
+					&ast.SelectorExpr{X: ident(patternVarName(t.Name)), Sel: ident("MatchString")},
+					ident("v"),
+				),
+			},
+			t.Name+": value %q does not match pattern "+c.Pattern,
+			ident("v"),
+		))
+	}
+	if len(c.Enum) > 0 {
+		stmts = append(stmts, enumCheckStmt(t.Name, c.Enum))
+	}
+	return stmts
+}
+
+// patternVarName is the package-level identifier holding the
+// compiled *regexp.Regexp for type t.
+func patternVarName(typeName string) string {
+	return strings.ToLower(typeName[:1]) + typeName[1:] + "Pattern"
+}
+
+// EmitPatternVar returns `var <typeNameLower>Pattern =
+// regexp.MustCompile("<pattern>")` for t, or nil if t has no pattern.
+func EmitPatternVar(t Type) ast.Decl {
+	if t.Constraints.Pattern == "" {
+		return nil
+	}
+	return &ast.GenDecl{
+		Tok: token.VAR,
+		Specs: []ast.Spec{&ast.ValueSpec{
+			Names: []*ast.Ident{ident(patternVarName(t.Name))},
+			Values: []ast.Expr{callExpr(
+				sel("regexp", "MustCompile"),
+				stringLit(t.Constraints.Pattern),
+			)},
+		}},
+	}
+}
+
+// enumCheckStmt builds:
+//
+//	switch v {
+//	case <e1>, <e2>, …:
+//	default:
+//		return fmt.Errorf("T: value %v not in enum", v)
+//	}
+//
+// where each <eN> is a Go literal whose source is the raw JSON text
+// of the enum entry.
+func enumCheckStmt(typeName string, enum []string) ast.Stmt {
+	cases := make([]ast.Expr, 0, len(enum))
+	for _, raw := range enum {
+		cases = append(cases, enumLiteral(raw))
+	}
+	return &ast.SwitchStmt{
+		Tag: ident("v"),
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.CaseClause{List: cases}, // matched: no body
+			&ast.CaseClause{Body: []ast.Stmt{returnStmt(
+				fmtErrorfCall(typeName+": value %v not in enum", ident("v")),
+			)}},
+		}},
+	}
+}
+
+// enumLiteral converts a raw JSON enum entry to a Go expression.
+// JSON strings stay quoted; numbers / true / false / null splice
+// through as their raw text.
+func enumLiteral(raw string) ast.Expr {
+	if len(raw) > 0 && raw[0] == '"' {
+		// JSON's interior-string escapes (\", \\, \n, \uXXXX, …) are
+		// a subset of Go's, so the JSON text doubles as a valid Go
+		// double-quoted string literal for the values seen in
+		// schemas. \/ would need translation if it ever appeared.
+		return &ast.BasicLit{Kind: token.STRING, Value: raw}
+	}
+	switch raw {
+	case "true", "false", "null":
+		return ident(raw)
+	}
+	return rawNumLit(raw)
 }
 
 // shadowFieldType returns the type expression for the corresponding

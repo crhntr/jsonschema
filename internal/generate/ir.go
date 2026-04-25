@@ -30,10 +30,21 @@ type Type struct {
 }
 
 // Constraints holds the JSON Schema assertion keywords that the
-// generated marshaler validates after decoding.
+// generated marshaler validates after decoding. Numeric bounds are
+// stored as their raw JSON text so they splice losslessly into Go
+// numeric literals regardless of int / float representation.
 type Constraints struct {
 	MinLength *int
 	MaxLength *int
+	Minimum   *string
+	Maximum   *string
+	// Enum is the raw JSON text of each permitted value, in
+	// declaration order. The generated UnmarshalJSONFrom compares
+	// the decoded scalar against each entry.
+	Enum []string
+	// Pattern is the ECMA-262 regular expression a string scalar
+	// must match. Compiled once at package init via regexp.MustCompile.
+	Pattern string
 }
 
 // Field is one field on the emitted Go struct.

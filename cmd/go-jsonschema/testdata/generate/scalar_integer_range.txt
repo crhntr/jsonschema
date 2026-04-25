@@ -1,0 +1,62 @@
+go-jsonschema generate --schema schema.json --out ./model --package model --type Age
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "integer",
+  "minimum": 1,
+  "maximum": 150
+}
+-- go.mod --
+module example.com/agepkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"strings"
+	"testing"
+)
+
+func TestAge_RoundTrip(t *testing.T) {
+	in := []byte(`42`)
+	var a Age
+	if err := json.Unmarshal(in, &a); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if a != 42 {
+		t.Errorf("Unmarshal = %d, want 42", int(a))
+	}
+	out, err := json.Marshal(a)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != "42" {
+		t.Errorf("Marshal = %s, want 42", out)
+	}
+}
+
+func TestAge_BelowMin(t *testing.T) {
+	var a Age
+	err := json.Unmarshal([]byte(`0`), &a)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want minimum rejection")
+	}
+	if !strings.Contains(err.Error(), "below minimum 1") {
+		t.Errorf("err = %q, want minimum message", err)
+	}
+}
+
+func TestAge_AboveMax(t *testing.T) {
+	var a Age
+	err := json.Unmarshal([]byte(`200`), &a)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want maximum rejection")
+	}
+	if !strings.Contains(err.Error(), "above maximum 150") {
+		t.Errorf("err = %q, want maximum message", err)
+	}
+}

@@ -131,7 +131,25 @@ func deriveConstraints(obj *jsonschema.SchemaObject) Constraints {
 	if n, ok := jsontextInt(obj.MaxLength); ok {
 		c.MaxLength = &n
 	}
+	if s, ok := jsontextNumber(obj.Minimum); ok {
+		c.Minimum = &s
+	}
+	if s, ok := jsontextNumber(obj.Maximum); ok {
+		c.Maximum = &s
+	}
+	for _, e := range obj.Enum {
+		c.Enum = append(c.Enum, string(e))
+	}
+	c.Pattern = obj.Pattern
 	return c
+}
+
+// jsontextNumber returns the raw JSON number text of v.
+func jsontextNumber(v []byte) (string, bool) {
+	if len(v) == 0 {
+		return "", false
+	}
+	return string(v), true
 }
 
 // jsontextInt parses a jsontext.Value holding a JSON integer.

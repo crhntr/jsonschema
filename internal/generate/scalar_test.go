@@ -37,6 +37,29 @@ func TestDerive_StringScalarWithLengthBounds(t *testing.T) {
 	}
 }
 
+func TestDerive_IntegerScalarWithRange(t *testing.T) {
+	src := `{"type":"integer","minimum":1,"maximum":150}`
+	s, err := jsonschema.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	obj, _ := s.TypeObject()
+	typ, err := Derive("Age", &obj)
+	if err != nil {
+		t.Fatalf("Derive: %v", err)
+	}
+	id, ok := typ.Underlying.(*ast.Ident)
+	if !ok || id.Name != "int" {
+		t.Errorf("Underlying = %#v, want *ast.Ident{Name:\"int\"}", typ.Underlying)
+	}
+	if typ.Constraints.Minimum == nil || *typ.Constraints.Minimum != "1" {
+		t.Errorf("Minimum = %v, want \"1\"", typ.Constraints.Minimum)
+	}
+	if typ.Constraints.Maximum == nil || *typ.Constraints.Maximum != "150" {
+		t.Errorf("Maximum = %v, want \"150\"", typ.Constraints.Maximum)
+	}
+}
+
 func TestEmit_ScalarStringAlias(t *testing.T) {
 	min, max := 3, 12
 	typ := Type{

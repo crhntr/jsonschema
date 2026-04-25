@@ -41,7 +41,18 @@ func TestValidationSuite(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		runSuiteFile(t, filepath.ToSlash(rel), path, &passed, &failed)
+		t.Run(filepath.ToSlash(rel), func(t *testing.T) {
+			for _, g := range readJSONFile[[]suiteGroup](t, path) {
+				t.Run(suiteName(g.Description), func(t *testing.T) {
+					schema := loadSuiteSchema(t, g.Schema)
+					for _, c := range g.Tests {
+						t.Run(suiteName(c.Description), func(t *testing.T) {
+							runSuiteCase(t, schema, g, c, &passed, &failed)
+						})
+					}
+				})
+			}
+		})
 		return nil
 	})
 	if err != nil {
@@ -52,28 +63,17 @@ func TestValidationSuite(t *testing.T) {
 		passed.Load(), failed.Load(), passed.Load()+failed.Load())
 }
 
-func runSuiteFile(t *testing.T, name, path string, passed, failed *atomic.Int64) {
+func readJSONFile[T any](t *testing.T, path string) T {
 	t.Helper()
-	t.Run(name, func(t *testing.T) {
-		buf, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var groups []suiteGroup
-		if err := json.Unmarshal(buf, &groups); err != nil {
-			t.Fatalf("decode %s: %v", path, err)
-		}
-		for _, g := range groups {
-			t.Run(suiteName(g.Description), func(t *testing.T) {
-				schema := loadSuiteSchema(t, g.Schema)
-				for _, c := range g.Tests {
-					t.Run(suiteName(c.Description), func(t *testing.T) {
-						runSuiteCase(t, schema, g, c, passed, failed)
-					})
-				}
-			})
-		}
-	})
+	buf, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data T
+	if err := json.Unmarshal(buf, &data); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	return data
 }
 
 // loadSuiteSchema parses the schema and runs it through a Resolver so
@@ -150,7 +150,7 @@ func remotesServer(t *testing.T) (*httptest.Server, bool) {
 			// from testdata/schema/<host>/<path>.json, then fall
 			// back to the conformance remotes/ tree.
 			host := r.Header.Get(originalHostHeader)
-			candidates := []string{}
+			var candidates []string
 			if host != "" {
 				schemaPath := filepath.Join("testdata", "schema", host, filepath.FromSlash(clean))
 				if filepath.Ext(schemaPath) == "" {

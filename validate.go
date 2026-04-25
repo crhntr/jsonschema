@@ -12,7 +12,26 @@ import (
 
 	"github.com/go-json-experiment/json/jsontext"
 	"github.com/go-json-experiment/json/v1"
+
+	"github.com/crhntr/jsonschema/jsonptr"
 )
+
+// childPath returns parent/token/index — used to build per-keyword paths
+// for error context without going through fmt.Sprintf.
+func childPath(parent, keyword string, index int) string {
+	return jsonptr.NewBuilder(parent).Token(keyword).Index(index).String()
+}
+
+// childKey returns parent/key (key is escaped per RFC 6901).
+func childKey(parent, key string) string {
+	return jsonptr.NewBuilder(parent).Token(key).String()
+}
+
+// childKeyword returns parent/keyword (no escaping needed for known
+// schema keywords).
+func childKeyword(parent, keyword string) string {
+	return jsonptr.NewBuilder(parent).Token(keyword).String()
+}
 
 // evalScope is the dynamic scope of validation: the chain of resource
 // roots whose schemas are currently being evaluated against the
@@ -60,7 +79,7 @@ func (m *Meta) evaluate(name string, in []byte, scope evalScope) error {
 					target = t
 				}
 			}
-			return target.evaluate(name+"/$ref", in, scope)
+			return target.evaluate(childKeyword(name, "$ref"), in, scope)
 		}
 		return nil
 	}
@@ -146,14 +165,14 @@ func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsonte
 
 func (o *MetaObject) validateComposition(name string, in []byte, off int64, val jsontext.Value, scope evalScope) error {
 	for i := range o.AllOf {
-		if err := o.AllOf[i].Evaluate(fmt.Sprintf("%s/allOf/%d", name, i), val); err != nil {
+		if err := o.AllOf[i].evaluate(childPath(name, "allOf", i), val, scope); err != nil {
 			return err
 		}
 	}
 	if len(o.AnyOf) > 0 {
 		matched := false
 		for i := range o.AnyOf {
-			if o.AnyOf[i].Evaluate(fmt.Sprintf("%s/anyOf/%d", name, i), val) == nil {
+			if o.AnyOf[i].evaluate(childPath(name, "anyOf", i), val, scope) == nil {
 				matched = true
 				break
 			}
@@ -165,7 +184,7 @@ func (o *MetaObject) validateComposition(name string, in []byte, off int64, val 
 	if len(o.OneOf) > 0 {
 		matches := 0
 		for i := range o.OneOf {
-			if o.OneOf[i].Evaluate(fmt.Sprintf("%s/oneOf/%d", name, i), val) == nil {
+			if o.OneOf[i].evaluate(childPath(name, "oneOf", i), val, scope) == nil {
 				matches++
 			}
 		}
@@ -175,19 +194,19 @@ func (o *MetaObject) validateComposition(name string, in []byte, off int64, val 
 		}
 	}
 	if o.Not != nil {
-		if o.Not.Evaluate(name+"/not", val) == nil {
+		if o.Not.evaluate(childKeyword(name, "not"), val, scope) == nil {
 			return NewErrorWithPosition(name, in, off, fmt.Errorf("not: subschema unexpectedly matched"))
 		}
 	}
 	if o.If != nil {
-		ifErr := o.If.evaluate(name+"/if", val, scope)
+		ifErr := o.If.evaluate(childKeyword(name, "if"), val, scope)
 		if ifErr == nil && o.Then != nil {
-			if err := o.Then.Evaluate(name+"/then", val); err != nil {
+			if err := o.Then.evaluate(childKeyword(name, "then"), val, scope); err != nil {
 				return err
 			}
 		}
 		if ifErr != nil && o.Else != nil {
-			if err := o.Else.Evaluate(name+"/else", val); err != nil {
+			if err := o.Else.evaluate(childKeyword(name, "else"), val, scope); err != nil {
 				return err
 			}
 		}
@@ -222,7 +241,7 @@ func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsont
 		matched := false
 		if sub, ok := o.Properties[key]; ok && sub != nil {
 			matched = true
-			if err := sub.Evaluate(name+"."+key, propVal); err != nil {
+			if err := sub.evaluate(childKey(name, key), propVal, scope); err != nil {
 				return err
 			}
 		}
@@ -230,20 +249,26 @@ func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsont
 			if pp.re.MatchString(key) {
 				matched = true
 				if pp.schema != nil {
-					if err := pp.schema.Evaluate(name+"."+key, propVal); err != nil {
+					if err := pp.schema.evaluate(childKey(name, key), propVal, scope); err != nil {
 						return err
 					}
 				}
 			}
 		}
 		if !matched && o.AdditionalProperties != nil {
-			if err := o.AdditionalProperties.Evaluate(name+"."+key, propVal); err != nil {
+			matched = true
+			if err := o.AdditionalProperties.evaluate(childKey(name, key), propVal, scope); err != nil {
+				return err
+			}
+		}
+		if !matched && o.UnevaluatedProperties != nil {
+			if err := o.UnevaluatedProperties.evaluate(childKey(name, key), propVal, scope); err != nil {
 				return err
 			}
 		}
 		if o.PropertyNames != nil {
 			keyBytes, _ := json.Marshal(key)
-			if err := o.PropertyNames.Evaluate(name+"/propertyNames", keyBytes); err != nil {
+			if err := o.PropertyNames.evaluate(childKeyword(name, "propertyNames"), keyBytes, scope); err != nil {
 				return err
 			}
 		}
@@ -280,7 +305,7 @@ func (o *MetaObject) validateObject(name string, in []byte, off int64, val jsont
 		if sub == nil {
 			continue
 		}
-		if err := sub.Evaluate(name+"/dependentSchemas/"+prop, val); err != nil {
+		if err := sub.evaluate(jsonptr.NewBuilder(name).Token("dependentSchemas").Token(prop).String(), val, scope); err != nil {
 			return err
 		}
 	}
@@ -346,13 +371,19 @@ func (o *MetaObject) validateArray(name string, in []byte, off int64, val jsonte
 		if i >= len(items) {
 			break
 		}
-		if err := o.PrefixItems[i].Evaluate(fmt.Sprintf("%s/prefixItems/%d", name, i), items[i]); err != nil {
+		if err := o.PrefixItems[i].evaluate(childPath(name, "prefixItems", i), items[i], scope); err != nil {
 			return err
 		}
 	}
 	if o.Items != nil {
 		for i := len(o.PrefixItems); i < len(items); i++ {
-			if err := o.Items.Evaluate(fmt.Sprintf("%s[%d]", name, i), items[i]); err != nil {
+			if err := o.Items.evaluate(jsonptr.NewBuilder(name).Index(i).String(), items[i], scope); err != nil {
+				return err
+			}
+		}
+	} else if o.UnevaluatedItems != nil {
+		for i := len(o.PrefixItems); i < len(items); i++ {
+			if err := o.UnevaluatedItems.evaluate(childPath(name, "unevaluatedItems", i), items[i], scope); err != nil {
 				return err
 			}
 		}
@@ -360,7 +391,7 @@ func (o *MetaObject) validateArray(name string, in []byte, off int64, val jsonte
 	if o.Contains != nil {
 		matched := 0
 		for i, item := range items {
-			if o.Contains.Evaluate(fmt.Sprintf("%s/contains/%d", name, i), item) == nil {
+			if o.Contains.evaluate(childPath(name, "contains", i), item, scope) == nil {
 				matched++
 			}
 		}

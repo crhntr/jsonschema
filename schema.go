@@ -119,7 +119,7 @@ func (m *Meta) Subschemas() iter.Seq[*Meta] {
 				return
 			}
 		}
-		for _, c := range []*Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.Contains, obj.AdditionalProperties, obj.PropertyNames} {
+		for _, c := range []*Meta{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.Contains, obj.AdditionalProperties, obj.UnevaluatedProperties, obj.UnevaluatedItems, obj.PropertyNames} {
 			if c == nil {
 				continue
 			}
@@ -165,12 +165,13 @@ type MetaObject struct {
 	OneOf []Meta `json:"oneOf,omitempty"`
 	Not   *Meta  `json:"not,omitempty"`
 
-	Properties           map[string]*Meta    `json:"properties,omitempty"`
-	PatternProperties    map[string]*Meta    `json:"patternProperties,omitempty"`
-	AdditionalProperties *Meta               `json:"additionalProperties,omitempty"`
-	PropertyNames        *Meta               `json:"propertyNames,omitempty"`
-	DependentRequired    map[string][]string `json:"dependentRequired,omitempty"`
-	DependentSchemas     map[string]*Meta    `json:"dependentSchemas,omitempty"`
+	Properties            map[string]*Meta    `json:"properties,omitempty"`
+	PatternProperties     map[string]*Meta    `json:"patternProperties,omitempty"`
+	AdditionalProperties  *Meta               `json:"additionalProperties,omitempty"`
+	UnevaluatedProperties *Meta               `json:"unevaluatedProperties,omitempty"`
+	PropertyNames         *Meta               `json:"propertyNames,omitempty"`
+	DependentRequired     map[string][]string `json:"dependentRequired,omitempty"`
+	DependentSchemas      map[string]*Meta    `json:"dependentSchemas,omitempty"`
 
 	// meta-data.json
 	Title       string   `json:"title,omitempty"`
@@ -180,9 +181,10 @@ type MetaObject struct {
 	WriteOnly   bool     `json:"writeOnly,omitempty"`
 	Examples    []string `json:"examples,omitempty"`
 
-	PrefixItems []Meta `json:"prefixItems,omitempty"`
-	Items       *Meta  `json:"items,omitempty"`
-	Contains    *Meta  `json:"contains,omitempty"`
+	PrefixItems      []Meta `json:"prefixItems,omitempty"`
+	Items            *Meta  `json:"items,omitempty"`
+	UnevaluatedItems *Meta  `json:"unevaluatedItems,omitempty"`
+	Contains         *Meta  `json:"contains,omitempty"`
 
 	MinContains jsontext.Value `json:"minContains,omitempty"`
 	MaxContains jsontext.Value `json:"maxContains,omitempty"`

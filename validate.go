@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"net"
 	"net/mail"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/go-json-experiment/json/jsontext"
@@ -667,41 +666,25 @@ func (o *MetaObject) validateString(val jsontext.Value, scope evalScope) error {
 func validateFormat(format, s string) error {
 	switch format {
 	case "ipv4":
-		ip := net.ParseIP(s)
-		if ip == nil || ip.To4() == nil || strings.Contains(s, ":") {
+		addr, err := netip.ParseAddr(s)
+		if err != nil || !addr.Is4() || strings.Contains(s, ":") {
 			return fmt.Errorf("not a valid ipv4: %q", s)
 		}
-		// Reject leading zeros like 192.168.001.001.
-		for _, octet := range strings.Split(s, ".") {
-			if len(octet) > 1 && octet[0] == '0' {
-				return fmt.Errorf("ipv4 octet has leading zero: %q", s)
-			}
-		}
 	case "ipv6":
-		ip := net.ParseIP(s)
-		if ip == nil || !strings.Contains(s, ":") {
+		addr, err := netip.ParseAddr(s)
+		if err != nil || !addr.Is6() || !strings.Contains(s, ":") || addr.Zone() != "" {
 			return fmt.Errorf("not a valid ipv6: %q", s)
 		}
 	case "date-time":
-		if _, err := time.Parse(time.RFC3339, s); err != nil {
-			if _, err2 := time.Parse(time.RFC3339Nano, s); err2 != nil {
-				return fmt.Errorf("not a valid date-time: %q", s)
-			}
+		if !isDateTime(s) {
+			return fmt.Errorf("not a valid date-time: %q", s)
 		}
 	case "date":
-		if _, err := time.Parse("2006-01-02", s); err != nil {
+		if !isDate(s) {
 			return fmt.Errorf("not a valid date: %q", s)
 		}
 	case "time":
-		layouts := []string{"15:04:05Z07:00", "15:04:05.999999999Z07:00"}
-		ok := false
-		for _, l := range layouts {
-			if _, err := time.Parse(l, s); err == nil {
-				ok = true
-				break
-			}
-		}
-		if !ok {
+		if !isTime(s) {
 			return fmt.Errorf("not a valid time: %q", s)
 		}
 	case "duration":
@@ -727,7 +710,7 @@ func validateFormat(format, s string) error {
 			if format == "email" {
 				ip = strings.TrimPrefix(ip, "IPv6:")
 			}
-			if net.ParseIP(ip) == nil {
+			if _, err := netip.ParseAddr(ip); err != nil {
 				return fmt.Errorf("not a valid email IP literal: %q", s)
 			}
 		} else if !isHostname(domain) {
@@ -780,7 +763,145 @@ func validateFormat(format, s string) error {
 var (
 	uuidRE     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	hostnameRE = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+	dateRE     = regexp.MustCompile(`^([0-9]{4})-([0-9]{2})-([0-9]{2})$`)
+	timeRE     = regexp.MustCompile(`^([0-9]{2}):([0-9]{2}):([0-9]{2})(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$`)
+	dateTimeRE = regexp.MustCompile(`^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$`)
 )
+
+func isDate(s string) bool {
+	m := dateRE.FindStringSubmatch(s)
+	if m == nil {
+		return false
+	}
+	y := atoi(m[1])
+	mo := atoi(m[2])
+	d := atoi(m[3])
+	return validDate(y, mo, d)
+}
+
+func isTime(s string) bool {
+	m := timeRE.FindStringSubmatch(s)
+	if m == nil {
+		return false
+	}
+	h := atoi(m[1])
+	mi := atoi(m[2])
+	se := atoi(m[3])
+	off := m[5]
+	return validTime(h, mi, se, off)
+}
+
+func isDateTime(s string) bool {
+	m := dateTimeRE.FindStringSubmatch(s)
+	if m == nil {
+		return false
+	}
+	y := atoi(m[1])
+	mo := atoi(m[2])
+	d := atoi(m[3])
+	h := atoi(m[4])
+	mi := atoi(m[5])
+	se := atoi(m[6])
+	off := m[8]
+	return validDate(y, mo, d) && validTime(h, mi, se, off)
+}
+
+func atoi(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		n = n*10 + int(s[i]-'0')
+	}
+	return n
+}
+
+func validDate(y, mo, d int) bool {
+	if mo < 1 || mo > 12 {
+		return false
+	}
+	if d < 1 || d > daysInMonth(y, mo) {
+		return false
+	}
+	return true
+}
+
+func daysInMonth(y, mo int) int {
+	switch mo {
+	case 1, 3, 5, 7, 8, 10, 12:
+		return 31
+	case 4, 6, 9, 11:
+		return 30
+	case 2:
+		if (y%4 == 0 && y%100 != 0) || y%400 == 0 {
+			return 29
+		}
+		return 28
+	}
+	return 0
+}
+
+func validTime(h, mi, se int, offset string) bool {
+	if h > 23 || mi > 59 {
+		return false
+	}
+	// Allow leap second (60) only at 23:59 with offset that lands on
+	// UTC midnight.
+	if se > 60 {
+		return false
+	}
+	if se == 60 {
+		// Compute UTC hour/minute by applying offset.
+		offH, offM, ok := parseOffset(offset)
+		if !ok {
+			return false
+		}
+		// Leap seconds are inserted at end of UTC day. The local
+		// time minus offset must equal 23:59:60 UTC.
+		hUTC := h - offH
+		miUTC := mi - offM
+		if miUTC < 0 {
+			miUTC += 60
+			hUTC--
+		}
+		if miUTC >= 60 {
+			miUTC -= 60
+			hUTC++
+		}
+		if hUTC < 0 {
+			hUTC += 24
+		}
+		if hUTC >= 24 {
+			hUTC -= 24
+		}
+		if hUTC != 23 || miUTC != 59 {
+			return false
+		}
+	}
+	if _, _, ok := parseOffset(offset); !ok {
+		return false
+	}
+	return true
+}
+
+func parseOffset(s string) (h, m int, ok bool) {
+	if s == "Z" || s == "z" {
+		return 0, 0, true
+	}
+	if len(s) != 6 {
+		return 0, 0, false
+	}
+	if s[0] != '+' && s[0] != '-' {
+		return 0, 0, false
+	}
+	h = atoi(s[1:3])
+	m = atoi(s[4:6])
+	if h > 23 || m > 59 {
+		return 0, 0, false
+	}
+	if s[0] == '-' {
+		h, m = -h, -m
+	}
+	return h, m, true
+}
 
 func isUUID(s string) bool { return uuidRE.MatchString(s) }
 
@@ -923,52 +1044,48 @@ func isRelativeJSONPointer(s string) bool {
 	return jsonptr.Pointer(rest).Validate() == nil
 }
 
-// isURI checks the RFC 3986 URI character set. requireAbs requires a
-// scheme. ASCII-only.
+// isURI uses url.ParseRequestURI / url.Parse for structure and adds an
+// ASCII + RFC 3986 character-set check (the stdlib parsers are too
+// permissive for RFC 3986 and accept things like spaces, control
+// chars, and non-ASCII).
 func isURI(s string, requireAbs bool) bool {
 	if !isASCII(s) {
 		return false
 	}
-	for _, c := range s {
-		if !isURIChar(byte(c)) {
+	for i := 0; i < len(s); i++ {
+		if !isURIChar(s[i]) {
 			return false
 		}
-	}
-	u, err := url.Parse(s)
-	if err != nil {
-		return false
 	}
 	if requireAbs {
-		if u.Scheme == "" {
+		u, err := url.Parse(s)
+		if err != nil || !u.IsAbs() {
 			return false
 		}
-		if !isSchemeName(u.Scheme) {
-			return false
-		}
+		return true
 	}
-	return true
+	_, err := url.Parse(s)
+	return err == nil
 }
 
-// isIRI permits non-ASCII characters per RFC 3987.
+// isIRI permits non-ASCII per RFC 3987 but still rejects control
+// chars and disallowed ASCII (space, <>"`{}|\^).
 func isIRI(s string, requireAbs bool) bool {
 	for _, c := range s {
-		if c == ' ' || c == '<' || c == '>' || c == '"' || c == '`' || c == '{' || c == '}' || c == '|' || c == '\\' || c == '^' || c < 0x21 {
+		if c < 0x21 || c == ' ' || c == '<' || c == '>' || c == '"' ||
+			c == '`' || c == '{' || c == '}' || c == '|' || c == '\\' || c == '^' {
 			return false
 		}
-	}
-	u, err := url.Parse(s)
-	if err != nil {
-		return false
 	}
 	if requireAbs {
-		if u.Scheme == "" {
+		u, err := url.Parse(s)
+		if err != nil || !u.IsAbs() {
 			return false
 		}
-		if !isSchemeName(u.Scheme) {
-			return false
-		}
+		return true
 	}
-	return true
+	_, err := url.Parse(s)
+	return err == nil
 }
 
 func isASCII(s string) bool {
@@ -983,13 +1100,10 @@ func isASCII(s string) bool {
 // isURIChar reports whether c is in the RFC 3986 unreserved /
 // reserved / pct-encoded character set.
 func isURIChar(c byte) bool {
-	if c >= 'A' && c <= 'Z' {
-		return true
-	}
-	if c >= 'a' && c <= 'z' {
-		return true
-	}
-	if c >= '0' && c <= '9' {
+	switch {
+	case c >= 'A' && c <= 'Z',
+		c >= 'a' && c <= 'z',
+		c >= '0' && c <= '9':
 		return true
 	}
 	switch c {
@@ -1000,24 +1114,6 @@ func isURIChar(c byte) bool {
 		return true
 	}
 	return false
-}
-
-func isSchemeName(s string) bool {
-	if s == "" {
-		return false
-	}
-	if !((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z')) {
-		return false
-	}
-	for i := 1; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-			c == '+' || c == '-' || c == '.' {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
 func isURITemplate(s string) bool {

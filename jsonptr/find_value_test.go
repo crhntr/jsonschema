@@ -688,13 +688,10 @@ func TestMetaImplementsWalker(t *testing.T) {
 			raw: `"$ref":"#/$defs/id"`,
 		},
 		{
-			// AllOf is []Meta in the source struct, so the leaf is a
-			// Meta value rather than a *Meta. Slice indexing through
-			// reflection preserves the element type.
 			ptr: "/allOf/1",
 			live: func(t *testing.T, v any) {
-				if _, ok := v.(jsonschema.Meta); !ok {
-					t.Errorf("live = %T, want jsonschema.Meta", v)
+				if _, ok := v.(*jsonschema.Meta); !ok {
+					t.Errorf("live = %T, want *jsonschema.Meta", v)
 				}
 			},
 			raw: `"title":"second"`,

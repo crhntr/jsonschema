@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"maps"
 	"slices"
 
 	"github.com/go-json-experiment/json"
@@ -81,52 +82,33 @@ func (m *Schema) Subschemas() iter.Seq[*Schema] {
 		if !ok {
 			return
 		}
-		for _, c := range obj.Defs {
-			if !yield(c) {
-				return
-			}
-		}
-		for _, c := range obj.Properties {
-			if !yield(c) {
-				return
-			}
-		}
-		for _, c := range obj.PatternProperties {
-			if !yield(c) {
-				return
-			}
-		}
-		for _, c := range obj.DependentSchemas {
-			if !yield(c) {
-				return
-			}
-		}
-		for _, c := range obj.AllOf {
-			if !yield(c) {
-				return
-			}
-		}
-		for _, c := range obj.AnyOf {
-			if !yield(c) {
-				return
-			}
-		}
-		for _, c := range obj.OneOf {
-			if !yield(c) {
-				return
-			}
-		}
-		for _, c := range obj.PrefixItems {
-			if !yield(c) {
-				return
-			}
-		}
-		for _, c := range []*Schema{obj.If, obj.Then, obj.Else, obj.Not, obj.Items, obj.Contains, obj.AdditionalProperties, obj.UnevaluatedProperties, obj.UnevaluatedItems, obj.PropertyNames} {
-			if c == nil {
-				continue
-			}
-			if !yield(c) {
-				return
+		for _, s := range []iter.Seq[*Schema]{
+			maps.Values(obj.Defs),
+			maps.Values(obj.Defs),
+			maps.Values(obj.Properties),
+			maps.Values(obj.PatternProperties),
+			maps.Values(obj.DependentSchemas),
+			slices.Values(obj.AllOf),
+			slices.Values(obj.AnyOf),
+			slices.Values(obj.OneOf),
+			slices.Values(obj.PrefixItems),
+			slices.Values([]*Schema{
+				obj.If,
+				obj.Then,
+				obj.Else,
+				obj.Not,
+				obj.Items,
+				obj.Contains,
+				obj.AdditionalProperties,
+				obj.UnevaluatedProperties,
+				obj.UnevaluatedItems,
+				obj.PropertyNames,
+			}),
+		} {
+			for e := range s {
+				if !yield(e) {
+					return
+				}
 			}
 		}
 	}
@@ -365,16 +347,4 @@ func (st SimpleType) Validate() error {
 		return fmt.Errorf("invalid SimpleType: unexpected enum value %s expected one of %s", string(st), string(exp))
 	}
 	return nil
-}
-
-func elements[T any, S ~[]T](in ...S) iter.Seq[T] {
-	return func(yield func(T) bool) {
-		for _, s := range in {
-			for _, e := range s {
-				if !yield(e) {
-					return
-				}
-			}
-		}
-	}
 }

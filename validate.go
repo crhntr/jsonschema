@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-json-experiment/json/jsontext"
 	"github.com/go-json-experiment/json/v1"
+	"golang.org/x/net/idna"
 
 	"github.com/crhntr/jsonschema/jsonptr"
 )
@@ -692,33 +693,16 @@ func validateFormat(format, s string) error {
 			return fmt.Errorf("not a valid duration: %q", s)
 		}
 	case "email", "idn-email":
-		// Reject display-name forms ("Name <addr>") by disallowing < >.
-		if strings.ContainsAny(s, "<>") {
-			return fmt.Errorf("not a valid email: %q", s)
+		if err := validateEmailFormat(s, format == "idn-email"); err != nil {
+			return err
 		}
-		addr, err := mail.ParseAddress(s)
-		if err != nil || addr.Name != "" {
-			return fmt.Errorf("not a valid email: %q", s)
-		}
-		at := strings.LastIndexByte(s, '@')
-		if at < 0 {
-			return fmt.Errorf("not a valid email: %q", s)
-		}
-		domain := s[at+1:]
-		if strings.HasPrefix(domain, "[") && strings.HasSuffix(domain, "]") {
-			ip := domain[1 : len(domain)-1]
-			if format == "email" {
-				ip = strings.TrimPrefix(ip, "IPv6:")
-			}
-			if _, err := netip.ParseAddr(ip); err != nil {
-				return fmt.Errorf("not a valid email IP literal: %q", s)
-			}
-		} else if !isHostname(domain) {
-			return fmt.Errorf("not a valid email domain: %q", s)
-		}
-	case "hostname", "idn-hostname":
+	case "hostname":
 		if !isHostname(s) {
 			return fmt.Errorf("not a valid hostname: %q", s)
+		}
+	case "idn-hostname":
+		if !isIDNHostname(s) {
+			return fmt.Errorf("not a valid idn-hostname: %q", s)
 		}
 	case "uri":
 		if !isURI(s, true) {
@@ -905,6 +889,47 @@ func parseOffset(s string) (h, m int, ok bool) {
 
 func isUUID(s string) bool { return uuidRE.MatchString(s) }
 
+// validateEmailFormat validates an addr-spec per RFC 5321 (email) or
+// RFC 6531 (idn-email). The local-part must round-trip through
+// mail.ParseAddress without a display name; the domain must be a
+// hostname (or IDN hostname) or an IP / IPv6 literal.
+func validateEmailFormat(s string, idn bool) error {
+	if strings.ContainsAny(s, "<>") {
+		return fmt.Errorf("not a valid email: %q", s)
+	}
+	addr, err := mail.ParseAddress(s)
+	if err != nil || addr.Name != "" {
+		// mail.ParseAddress can't handle non-ASCII local parts.
+		// For idn-email, fall through to a loose check.
+		if !idn {
+			return fmt.Errorf("not a valid email: %q", s)
+		}
+	}
+	at := strings.LastIndexByte(s, '@')
+	if at < 0 || at == 0 || at == len(s)-1 {
+		return fmt.Errorf("not a valid email: %q", s)
+	}
+	domain := s[at+1:]
+	if strings.HasPrefix(domain, "[") && strings.HasSuffix(domain, "]") {
+		ip := domain[1 : len(domain)-1]
+		ip = strings.TrimPrefix(ip, "IPv6:")
+		if _, err := netip.ParseAddr(ip); err != nil {
+			return fmt.Errorf("not a valid email IP literal: %q", s)
+		}
+		return nil
+	}
+	if idn {
+		if !isIDNHostname(domain) {
+			return fmt.Errorf("not a valid idn-email domain: %q", s)
+		}
+		return nil
+	}
+	if !isHostname(domain) {
+		return fmt.Errorf("not a valid email domain: %q", s)
+	}
+	return nil
+}
+
 func isHostname(s string) bool {
 	if len(s) == 0 || len(s) > 253 {
 		return false
@@ -913,14 +938,42 @@ func isHostname(s string) bool {
 		return false
 	}
 	// RFC 5891 §4.2.3.1: label must not contain "--" at positions 3-4
-	// unless it starts with "xn--" (the IDNA A-label prefix).
+	// unless it starts with "xn--" (the IDNA A-label prefix). For
+	// xn-- labels, also verify Punycode is decodable.
 	for _, label := range strings.Split(s, ".") {
 		if len(label) >= 4 && label[2] == '-' && label[3] == '-' {
 			lower := strings.ToLower(label)
 			if !strings.HasPrefix(lower, "xn--") {
 				return false
 			}
+			if _, err := idnStrict.ToUnicode(label); err != nil {
+				return false
+			}
 		}
+	}
+	return true
+}
+
+// idnStrict is a strict IDNA 2008 profile used for format-assertion of
+// host names — rejects invalid Unicode sequences, disallowed
+// characters, and bad punycode.
+var idnStrict = idna.New(
+	idna.StrictDomainName(true),
+	idna.ValidateLabels(true),
+	idna.VerifyDNSLength(true),
+	idna.BidiRule(),
+	idna.CheckHyphens(true),
+	idna.CheckJoiners(true),
+)
+
+// isIDNHostname round-trips via the strict profile to catch invalid
+// Unicode sequences and disallowed characters in IDN labels.
+func isIDNHostname(s string) bool {
+	if s == "" || len(s) > 253*4 {
+		return false
+	}
+	if _, err := idnStrict.ToASCII(s); err != nil {
+		return false
 	}
 	return true
 }

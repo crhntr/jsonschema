@@ -41,9 +41,10 @@ func childKeyword(parent, keyword string) string {
 // of resource roots being evaluated (for $dynamicRef per §8.2.3.2) plus
 // configuration like whether format keywords assert.
 type evalScope struct {
-	resources      []*Meta
-	assertFormat   bool
-	skipValidation bool
+	resources       []*Meta
+	assertFormat    bool
+	skipValidation  bool
+	skipPrefixItems bool
 }
 
 func (s evalScope) push(resource *Meta) evalScope {
@@ -65,6 +66,21 @@ func (s evalScope) findDynamicAnchor(name string) *Meta {
 		}
 	}
 	return nil
+}
+
+// isPre2020Schema reports whether the schema's declared $schema URL
+// references a JSON Schema draft older than 2020-12 (where keywords
+// like prefixItems didn't exist).
+func isPre2020Schema(schemaURL string) bool {
+	if schemaURL == "" {
+		return false
+	}
+	for _, draft := range []string{"draft-04", "draft-06", "draft-07", "2019-09"} {
+		if strings.Contains(schemaURL, draft) {
+			return true
+		}
+	}
+	return false
 }
 
 // dynamicRefAnchor extracts the plain-name fragment from a $dynamicRef
@@ -130,6 +146,9 @@ func (m *Meta) evaluate(name string, in []byte, scope evalScope) (annotations, e
 	scope = scope.push(m.resource)
 	if m.resource != nil {
 		scope.skipValidation = m.resource.skipValidation
+		if mObj, ok := m.resource.TypeObject(); ok {
+			scope.skipPrefixItems = isPre2020Schema(mObj.Schema)
+		}
 	}
 
 	if o, ok := m.TypeObject(); ok {
@@ -485,13 +504,86 @@ func compilePatternProperties(pp map[string]*Meta) ([]patternRegex, error) {
 	}
 	out := make([]patternRegex, 0, len(pp))
 	for pat, sub := range pp {
-		re, err := regexp.Compile(pat)
+		re, err := compileECMA262(pat)
 		if err != nil {
 			return nil, fmt.Errorf("patternProperties %q: %w", pat, err)
 		}
 		out = append(out, patternRegex{re: re, schema: sub})
 	}
 	return out, nil
+}
+
+// compileECMA262 translates an ECMA-262 regular expression into a Go
+// regexp.Regexp, expanding escapes that differ between ECMA and Go's
+// RE2: \cX control codes and \s / \S extended whitespace classes.
+func compileECMA262(pattern string) (*regexp.Regexp, error) {
+	return regexp.Compile(translateECMA262(pattern))
+}
+
+const ecma262WhitespaceClass = `[\t\n\v\f\r \x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]`
+
+var ecma262WhitespaceNegClass = "[^" + ecma262WhitespaceClass[1:len(ecma262WhitespaceClass)-1] + "]"
+
+func translateECMA262(pattern string) string {
+	var b strings.Builder
+	b.Grow(len(pattern))
+	for i := 0; i < len(pattern); i++ {
+		c := pattern[i]
+		if c != '\\' || i+1 >= len(pattern) {
+			b.WriteByte(c)
+			continue
+		}
+		next := pattern[i+1]
+		switch {
+		case next == 'c' && i+2 < len(pattern) && isASCIILetter(pattern[i+2]):
+			letter := pattern[i+2] & 0x1F
+			fmt.Fprintf(&b, `\x{%02X}`, letter)
+			i += 2
+		case next == 's':
+			b.WriteString(ecma262WhitespaceClass)
+			i++
+		case next == 'S':
+			b.WriteString(ecma262WhitespaceNegClass)
+			i++
+		default:
+			b.WriteByte(c)
+			b.WriteByte(next)
+			i++
+		}
+	}
+	return b.String()
+}
+
+func isASCIILetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// isValidECMA262Regex performs a syntactic check that the pattern uses
+// only ECMA 262-recognized escape sequences. Catches escapes like \a
+// (bell) that Go's regex accepts but ECMA does not. Doesn't aim for a
+// full parse — just rejects unknown letter escapes.
+func isValidECMA262Regex(pattern string) bool {
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] != '\\' {
+			continue
+		}
+		if i+1 >= len(pattern) {
+			return false
+		}
+		c := pattern[i+1]
+		if isASCIILetter(c) {
+			switch c {
+			case 'd', 'D', 's', 'S', 'w', 'W', 'b', 'B',
+				'f', 'n', 'r', 't', 'v',
+				'c', 'x', 'u', 'p', 'P', 'k':
+				// recognized ECMA 262 letter escapes
+			default:
+				return false
+			}
+		}
+		i++
+	}
+	return true
 }
 
 // validateArrayBody handles minItems/maxItems/uniqueItems/prefixItems/
@@ -532,14 +624,16 @@ func (o *MetaObject) validateArrayBody(name string, in []byte, off int64, val js
 			}
 		}
 	}
-	for i, sub := range o.PrefixItems {
-		if i >= len(items) {
-			break
+	if !scope.skipPrefixItems {
+		for i, sub := range o.PrefixItems {
+			if i >= len(items) {
+				break
+			}
+			if _, err := sub.evaluate(childPath(name, "prefixItems", i), items[i], scope); err != nil {
+				return ann, err
+			}
+			ann.addItem(i)
 		}
-		if _, err := sub.evaluate(childPath(name, "prefixItems", i), items[i], scope); err != nil {
-			return ann, err
-		}
-		ann.addItem(i)
 	}
 	if o.Items != nil {
 		for i := len(o.PrefixItems); i < len(items); i++ {
@@ -662,7 +756,7 @@ func (o *MetaObject) validateString(val jsontext.Value, scope evalScope) error {
 		return fmt.Errorf("string length %d greater than maxLength %s", count, o.MaxLength)
 	}
 	if o.Pattern != "" {
-		re, err := regexp.Compile(o.Pattern)
+		re, err := compileECMA262(o.Pattern)
 		if err != nil {
 			return fmt.Errorf("invalid pattern %q: %w", o.Pattern, err)
 		}
@@ -743,7 +837,10 @@ func validateFormat(format, s string) error {
 			return fmt.Errorf("not a valid uuid: %q", s)
 		}
 	case "regex":
-		if _, err := regexp.Compile(s); err != nil {
+		if !isValidECMA262Regex(s) {
+			return fmt.Errorf("not a valid ECMA 262 regex: %q", s)
+		}
+		if _, err := compileECMA262(s); err != nil {
 			return fmt.Errorf("not a valid regex: %w", err)
 		}
 	case "json-pointer":
@@ -966,7 +1063,11 @@ func isHostname(s string) bool {
 			if !strings.HasPrefix(lower, "xn--") {
 				return false
 			}
-			if _, err := idnPunycode.ToUnicode(label); err != nil {
+			decoded, err := idnPunycode.ToUnicode(label)
+			if err != nil {
+				return false
+			}
+			if !isValidIDNALabel(decoded) {
 				return false
 			}
 		}
@@ -1004,10 +1105,106 @@ func isIDNHostname(s string) bool {
 	if s == "" || len(s) > 253*4 {
 		return false
 	}
+	// IDN treats U+3002 (ideographic full stop), U+FF0E (fullwidth
+	// full stop), and U+FF61 (halfwidth ideographic full stop) as
+	// label separators equivalent to ASCII dot. A trailing one
+	// would yield an empty label.
+	for _, sep := range []rune{'.', 0x3002, 0xFF0E, 0xFF61} {
+		if strings.HasSuffix(s, string(sep)) {
+			return false
+		}
+	}
 	if _, err := idnStrict.ToASCII(s); err != nil {
 		return false
 	}
+	for _, label := range strings.Split(s, ".") {
+		if !isValidIDNALabel(label) {
+			return false
+		}
+	}
 	return true
+}
+
+// idna2008DisallowedExceptions is the RFC 5892 §2.6 Exceptions table,
+// limited to entries marked DISALLOWED. The Go idna package's
+// processing profile decodes these to Unicode but doesn't reject
+// them; we enforce the registration-time rule here.
+var idna2008DisallowedExceptions = map[rune]bool{
+	0x0640: true, // ARABIC TATWEEL
+	0x07FA: true, // NKO LAJANYALAN
+	0x302E: true, // HANGUL SINGLE DOT TONE MARK
+	0x302F: true, // HANGUL DOUBLE DOT TONE MARK
+	0x3031: true, // VERTICAL KANA REPEAT MARK
+	0x3032: true, // VERTICAL KANA REPEAT WITH VOICED SOUND MARK
+	0x3033: true, // VERTICAL KANA REPEAT MARK UPPER HALF
+	0x3034: true, // VERTICAL KANA REPEAT WITH VOICED SOUND MARK UPPER HALF
+	0x3035: true, // VERTICAL KANA REPEAT MARK LOWER HALF
+	0x303B: true, // VERTICAL IDEOGRAPHIC ITERATION MARK
+}
+
+// isValidIDNALabel checks the decoded U-label against the IDNA 2008
+// disallowed character set (subset: §2.6 Exceptions DISALLOWED entries
+// and the most common CONTEXTO rules — middle dot, joiners). Catches
+// labels the Go idna processing profile decodes but should reject.
+func isValidIDNALabel(label string) bool {
+	if label == "" {
+		return false
+	}
+	runes := []rune(label)
+	for i, r := range runes {
+		if idna2008DisallowedExceptions[r] {
+			return false
+		}
+		switch r {
+		case 0x00B7: // MIDDLE DOT (CONTEXTO): allowed only between l's.
+			if i == 0 || i == len(runes)-1 {
+				return false
+			}
+			if runes[i-1] != 'l' || runes[i+1] != 'l' {
+				return false
+			}
+		case 0x0375: // GREEK LOWER NUMERAL SIGN: must precede a Greek letter.
+			if i == len(runes)-1 || !isGreekLetter(runes[i+1]) {
+				return false
+			}
+		case 0x05F3, 0x05F4: // HEBREW PUNCTUATION GERESH/GERSHAYIM: must follow a Hebrew letter.
+			if i == 0 || !isHebrewLetter(runes[i-1]) {
+				return false
+			}
+		case 0x30FB: // KATAKANA MIDDLE DOT: requires CJK letter in label.
+			if !labelHasCJK(runes) {
+				return false
+			}
+		case 0x200C, 0x200D: // ZWNJ / ZWJ (CONTEXTJ): require specific joining contexts (approximate).
+			if i == 0 || i == len(runes)-1 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isGreekLetter(r rune) bool {
+	return (r >= 0x0370 && r <= 0x03FF) || (r >= 0x1F00 && r <= 0x1FFF)
+}
+
+func isHebrewLetter(r rune) bool {
+	return r >= 0x05D0 && r <= 0x05EA
+}
+
+func labelHasCJK(runes []rune) bool {
+	for _, r := range runes {
+		if r == 0x30FB {
+			// KATAKANA MIDDLE DOT itself doesn't count as a context.
+			continue
+		}
+		if (r >= 0x3040 && r <= 0x309F) || // Hiragana
+			(r >= 0x30A0 && r <= 0x30FF) || // Katakana
+			(r >= 0x4E00 && r <= 0x9FFF) { // CJK Unified Ideographs
+			return true
+		}
+	}
+	return false
 }
 
 func isISO8601Duration(s string) bool {

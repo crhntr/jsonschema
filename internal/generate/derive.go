@@ -29,8 +29,9 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 	}
 
 	t := Type{
-		Name: name,
-		Doc:  doc,
+		Name:          name,
+		Doc:           doc,
+		RejectUnknown: rejectsAdditionalProperties(obj),
 	}
 
 	jsonNames := make([]string, 0, len(obj.Properties))
@@ -83,6 +84,16 @@ func derivePrimitive(obj *jsonschema.SchemaObject) (ast.Expr, error) {
 	default:
 		return nil, fmt.Errorf("type %q not supported in Phase 3", s)
 	}
+}
+
+// rejectsAdditionalProperties reports whether obj declares
+// additionalProperties: false (i.e. the boolean schema `false`).
+func rejectsAdditionalProperties(obj *jsonschema.SchemaObject) bool {
+	if obj.AdditionalProperties == nil {
+		return false
+	}
+	b, ok := obj.AdditionalProperties.TypeBool()
+	return ok && !b
 }
 
 func exportedIdent(jsonName string) string {

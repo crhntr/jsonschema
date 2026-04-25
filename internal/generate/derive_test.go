@@ -141,6 +141,34 @@ func TestEmit_OptionalGetsOmitzero(t *testing.T) {
 	}
 }
 
+func TestDerive_AdditionalPropertiesFalse(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"explicit false", `{"type":"object","additionalProperties":false}`, true},
+		{"absent", `{"type":"object"}`, false},
+		{"explicit true", `{"type":"object","additionalProperties":true}`, false},
+		{"schema (not bool)", `{"type":"object","additionalProperties":{"type":"string"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := jsonschema.Parse([]byte(tc.src))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			obj, _ := s.TypeObject()
+			typ, err := Derive("X", &obj)
+			if err != nil {
+				t.Fatalf("Derive: %v", err)
+			}
+			if typ.RejectUnknown != tc.want {
+				t.Errorf("RejectUnknown = %v, want %v", typ.RejectUnknown, tc.want)
+			}
+		})
+	}
+}
+
 func TestEmit_FormatsAsValidGo(t *testing.T) {
 	typ := Type{
 		Name: "User",

@@ -1,0 +1,114 @@
+package generate
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strings"
+)
+
+// EmitMarshal returns the MarshalJSONTo method for t. The body
+// delegates to encoding/json/v2 via a local alias type so generated
+// code does not recurse into itself.
+func EmitMarshal(t Type) ast.Decl {
+	src := fmt.Sprintf(`package _
+
+func (r %[1]s) MarshalJSONTo(enc *jsontext.Encoder, opts ...json.Options) error {
+	type alias %[1]s
+	return json.MarshalEncode(enc, alias(r), opts...)
+}
+`, t.Name)
+	return parseDecl(src)
+}
+
+// EmitUnmarshal returns the UnmarshalJSONFrom method for t. It
+// decodes into a shadow struct whose fields are pointers, then
+// rejects nil values for required fields and copies the rest into
+// the receiver. additionalProperties: false is enforced via
+// json.RejectUnknownMembers when t.RejectUnknown is set.
+func EmitUnmarshal(t Type) ast.Decl {
+	var shadowFields strings.Builder
+	for _, f := range t.Fields {
+		shadowFields.WriteString("\t\t")
+		shadowFields.WriteString(f.GoName)
+		shadowFields.WriteString(" ")
+		shadowFields.WriteString(shadowFieldType(f))
+		shadowFields.WriteString(" `json:")
+		shadowFields.WriteString(fmt.Sprintf("%q", f.JSONName))
+		shadowFields.WriteString("`\n")
+	}
+
+	var optsExtra string
+	if t.RejectUnknown {
+		optsExtra = "\topts = append(opts, json.RejectUnknownMembers(true))\n"
+	}
+
+	var checks strings.Builder
+	for _, f := range t.Fields {
+		if f.Required {
+			fmt.Fprintf(&checks, "\tif shadow.%s == nil {\n\t\treturn fmt.Errorf(\"missing required field %%q\", %q)\n\t}\n", f.GoName, f.JSONName)
+		}
+	}
+
+	var assigns strings.Builder
+	for _, f := range t.Fields {
+		if f.Required {
+			fmt.Fprintf(&assigns, "\tr.%s = *shadow.%s\n", f.GoName, f.GoName)
+		} else {
+			fmt.Fprintf(&assigns, "\tr.%s = shadow.%s\n", f.GoName, f.GoName)
+		}
+	}
+
+	src := fmt.Sprintf(`package _
+
+func (r *%[1]s) UnmarshalJSONFrom(dec *jsontext.Decoder, opts ...json.Options) error {
+	var shadow struct {
+%[2]s	}
+%[3]s	if err := json.UnmarshalDecode(dec, &shadow, opts...); err != nil {
+		return err
+	}
+%[4]s%[5]s	return nil
+}
+`, t.Name, shadowFields.String(), optsExtra, checks.String(), assigns.String())
+	return parseDecl(src)
+}
+
+// shadowFieldType returns the type expression for the corresponding
+// field on the unmarshal shadow struct. Required fields are pointed
+// to (so a missing key is observable), optional fields keep their
+// emitted type (already *T from Phase 4).
+func shadowFieldType(f Field) string {
+	expr := exprString(f.TypeExpr)
+	if f.Required {
+		return "*" + expr
+	}
+	return expr
+}
+
+func parseDecl(src string) ast.Decl {
+	file, err := parser.ParseFile(token.NewFileSet(), "", src, 0)
+	if err != nil {
+		panic(fmt.Errorf("parse generated decl: %w\nsrc:\n%s", err, src))
+	}
+	return file.Decls[0]
+}
+
+// exprString prints a type expression to its Go source form. Used
+// to embed field types into the templated shadow struct.
+func exprString(e ast.Expr) string {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return x.Name
+	case *ast.StarExpr:
+		return "*" + exprString(x.X)
+	case *ast.SelectorExpr:
+		return exprString(x.X) + "." + x.Sel.Name
+	case *ast.ArrayType:
+		return "[]" + exprString(x.Elt)
+	case *ast.MapType:
+		return "map[" + exprString(x.Key) + "]" + exprString(x.Value)
+	default:
+		panic(fmt.Errorf("unsupported type expression %T", e))
+	}
+}

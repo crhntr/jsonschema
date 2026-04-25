@@ -8,6 +8,10 @@ type Type struct {
 	Name   string
 	Doc    string
 	Fields []Field
+	// RejectUnknown is set when the source schema declares
+	// additionalProperties: false; the generated UnmarshalJSONFrom
+	// then refuses unknown members.
+	RejectUnknown bool
 }
 
 // Field is one field on the emitted Go struct.

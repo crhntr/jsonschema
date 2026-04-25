@@ -1,8 +1,8 @@
 # JSON Schema 2020-12 → Go code generator
 
 Status: design — Phases 1 (vocabulary parsing), 2 (type resolver),
-3 (struct IR + emit), and 4 (required vs optional) implemented in
-`internal/generate/`. Phases 5–15 pending.
+3 (struct IR + emit), 4 (required vs optional), and 5 (marshaler
+emission) implemented in `internal/generate/`. Phases 6–15 pending.
 
 ## Context
 
@@ -321,8 +321,14 @@ Each phase lands as its own commit.
    missing key under jsonv2. End-to-end presence/absence round-trip
    covered by the scripttest fixture in Phase 14.
 
-5. **Marshal / Unmarshal generation for the simple struct.** Emit
-   `MarshalJSONTo` / `UnmarshalJSONFrom` that enforce required +
+5. **Marshal / Unmarshal generation for the simple struct.** ✅
+   Implemented (`marshal.go`). `EmitMarshal` delegates to jsonv2 via
+   a local alias type; `EmitUnmarshal` decodes into a pointer-shadow
+   struct, rejects nil for required fields, and propagates
+   `json.RejectUnknownMembers(true)` when the schema declares
+   `additionalProperties: false`. End-to-end round-trip is left to
+   the Phase 14 scripttest fixture. Original spec: emit that
+   enforces required +
    `additionalProperties: false`. Test: run a generated test that
    feeds invalid + valid instances; expects the right errors.
 

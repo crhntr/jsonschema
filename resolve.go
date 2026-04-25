@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -414,18 +413,18 @@ func walkSubschemas(m *Meta, visit func(*Meta) error) error {
 			return err
 		}
 	}
-	for i := range obj.AllOf {
-		if err := visit(&obj.AllOf[i]); err != nil {
+	for _, c := range obj.AllOf {
+		if err := visit(c); err != nil {
 			return err
 		}
 	}
-	for i := range obj.AnyOf {
-		if err := visit(&obj.AnyOf[i]); err != nil {
+	for _, c := range obj.AnyOf {
+		if err := visit(c); err != nil {
 			return err
 		}
 	}
-	for i := range obj.OneOf {
-		if err := visit(&obj.OneOf[i]); err != nil {
+	for _, c := range obj.OneOf {
+		if err := visit(c); err != nil {
 			return err
 		}
 	}
@@ -505,146 +504,46 @@ func resolveFragment(resource *Meta, frag string) (*Meta, bool, error) {
 	return nil, true, fmt.Errorf("anchor %q not found in resource %q", decoded, resource.baseURI)
 }
 
-// singleChildAccessors maps JSON Pointer single-token names to the
-// MetaObject field they descend into.
-var singleChildAccessors = map[string]func(MetaObject) *Meta{
-	"if":                   func(o MetaObject) *Meta { return o.If },
-	"then":                 func(o MetaObject) *Meta { return o.Then },
-	"else":                 func(o MetaObject) *Meta { return o.Else },
-	"not":                  func(o MetaObject) *Meta { return o.Not },
-	"items":                func(o MetaObject) *Meta { return o.Items },
-	"additionalProperties": func(o MetaObject) *Meta { return o.AdditionalProperties },
-	"propertyNames":        func(o MetaObject) *Meta { return o.PropertyNames },
+// FindJSONPtrValue implements jsonptr.Walker. It delegates to
+// jsonptr.FindValue on the underlying MetaObject — the reflection walker
+// already knows how to descend through MetaObject's json-tagged fields
+// (and into nested *Meta children, which themselves implement Walker).
+// Identity is preserved end-to-end without a custom traversal table.
+//
+// Boolean schemas have nothing to descend into; the root pointer
+// resolves to the bool value, anything deeper is an error.
+func (m *Meta) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (jsonptr.Pointer, any, error) {
+	if obj, ok := m.TypeObject(); ok {
+		_, live, err := jsonptr.FindValue(ptr, obj, opts...)
+		if err != nil {
+			return ptr, nil, err
+		}
+		return "", live, nil
+	}
+	if ptr == "" {
+		b, _ := m.TypeBool()
+		return "", b, nil
+	}
+	return ptr, nil, fmt.Errorf("cannot descend into boolean schema at %q", ptr)
 }
 
 // walkJSONPointer follows an RFC 6901 JSON Pointer through a Meta tree.
-// The pointer descends through Meta fields whose JSON encoding matches
-// each token (e.g. "/$defs/foo/properties/bar"). Unknown tokens produce
-// an error — JSON Pointers used inside JSON Schema documents always
-// terminate inside Meta.
+// Used by the resolver during link phase, where every $ref / $dynamicRef
+// fragment terminates inside a *Meta.
 func walkJSONPointer(m *Meta, ptr string) (*Meta, error) {
 	p := jsonptr.Pointer(ptr)
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	var tokens []string
-	for tok := range p.Tokens() {
-		tokens = append(tokens, tok)
-	}
-	cur := m
-	for i := 0; i < len(tokens); {
-		next, advance, known, err := stepJSONPointer(cur, tokens, i)
-		if err != nil {
-			return nil, fmt.Errorf("JSON Pointer %q: %w", ptr, err)
-		}
-		if !known {
-			return nil, fmt.Errorf("JSON Pointer %q: token %q not traversable", ptr, tokens[i])
-		}
-		cur = next
-		i += advance
-	}
-	return cur, nil
-}
-
-// FindJSONPtrValue implements jsonptr.Walker. It descends through every
-// pointer token that names a subschema-bearing field ($defs, properties,
-// allOf/anyOf/oneOf entries, if/then/else/not/items/additionalProperties/
-// propertyNames). On a token that doesn't name a subschema field, it
-// stops and returns the current *Meta together with the unconsumed
-// pointer — letting jsonptr.FindValue continue the descent (typically
-// via Meta's MarshalJSONTo into byte-mode for scalar fields like title
-// or description).
-func (m *Meta) FindJSONPtrValue(ptr jsonptr.Pointer, _ ...json.Options) (jsonptr.Pointer, any, error) {
-	var tokens []string
-	for tok := range ptr.Tokens() {
-		tokens = append(tokens, tok)
-	}
-	cur := m
-	for i := 0; i < len(tokens); {
-		next, advance, known, err := stepJSONPointer(cur, tokens, i)
-		if err != nil {
-			return ptr, nil, err
-		}
-		if !known {
-			return tokensToPointer(tokens[i:]), cur, nil
-		}
-		cur = next
-		i += advance
-	}
-	return "", cur, nil
-}
-
-func tokensToPointer(tokens []string) jsonptr.Pointer {
-	var p jsonptr.Pointer
-	for _, tok := range tokens {
-		p = p.Append(tok)
-	}
-	return p
-}
-
-// stepJSONPointer advances m through one or two pointer tokens. known
-// reports whether tokens[i] names a Meta-traversable field; an error is
-// returned only when the token is recognized but the lookup itself fails
-// (missing $defs entry, out-of-range allOf index, etc.). Unknown tokens
-// produce known=false with no error so callers can decide whether to
-// stop or fall through.
-func stepJSONPointer(m *Meta, tokens []string, i int) (next *Meta, advance int, known bool, err error) {
-	obj, ok := m.TypeObject()
-	if !ok {
-		return nil, 0, true, fmt.Errorf("cannot descend into boolean schema")
-	}
-	tok := tokens[i]
-	switch tok {
-	case "$defs", "$vocabulary":
-		n, a, err := mapPointerStep(tok, obj.Defs, tokens, i)
-		return n, a, true, err
-	case "properties", "patternProperties":
-		n, a, err := mapPointerStep(tok, obj.Properties, tokens, i)
-		return n, a, true, err
-	case "allOf":
-		n, a, err := arrayPointerStep(tok, obj.AllOf, tokens, i)
-		return n, a, true, err
-	case "anyOf":
-		n, a, err := arrayPointerStep(tok, obj.AnyOf, tokens, i)
-		return n, a, true, err
-	case "oneOf":
-		n, a, err := arrayPointerStep(tok, obj.OneOf, tokens, i)
-		return n, a, true, err
-	}
-	if accessor, ok := singleChildAccessors[tok]; ok {
-		child := accessor(obj)
-		if child == nil {
-			return nil, 0, true, fmt.Errorf("%s not present", tok)
-		}
-		return child, 1, true, nil
-	}
-	return nil, 0, false, nil
-}
-
-func mapPointerStep(name string, m map[string]*Meta, tokens []string, i int) (*Meta, int, error) {
-	if i+1 >= len(tokens) {
-		return nil, 0, fmt.Errorf("trailing key required after %s", name)
-	}
-	key := tokens[i+1]
-	next, ok := m[key]
-	if !ok || next == nil {
-		return nil, 0, fmt.Errorf("%s/%s missing", name, key)
-	}
-	return next, 2, nil
-}
-
-func arrayPointerStep(name string, arr []Meta, tokens []string, i int) (*Meta, int, error) {
-	if i+1 >= len(tokens) {
-		return nil, 0, fmt.Errorf("trailing index required after %s", name)
-	}
-	idx, err := strconv.Atoi(tokens[i+1])
+	_, live, err := jsonptr.FindValue(p, m)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s index %q: %w", name, tokens[i+1], err)
+		return nil, fmt.Errorf("JSON Pointer %q: %w", ptr, err)
 	}
-	if idx < 0 || idx >= len(arr) {
-		return nil, 0, fmt.Errorf("%s index %d out of range", name, idx)
+	target, ok := live.(*Meta)
+	if !ok {
+		return nil, fmt.Errorf("JSON Pointer %q: target is %T, not a schema", ptr, live)
 	}
-	return &arr[idx], 2, nil
+	return target, nil
 }
 
 func resolveRelative(base, ref string) (string, error) {

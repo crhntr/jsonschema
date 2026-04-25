@@ -95,9 +95,9 @@ type MetaObject struct {
 	Then *Meta `json:"then,omitempty"`
 	Else *Meta `json:"else,omitempty"`
 
-	AllOf []Meta `json:"allOf,omitempty"`
-	AnyOf []Meta `json:"anyOf,omitempty"`
-	OneOf []Meta `json:"oneOf,omitempty"`
+	AllOf []*Meta `json:"allOf,omitempty"`
+	AnyOf []*Meta `json:"anyOf,omitempty"`
+	OneOf []*Meta `json:"oneOf,omitempty"`
 	Not   *Meta  `json:"not,omitempty"`
 
 	Properties           map[string]*Meta `json:"properties,omitempty"`

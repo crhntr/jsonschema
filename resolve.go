@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 
 	"github.com/crhntr/jsonschema/jsonptr"
 )
@@ -563,8 +564,10 @@ func (m *Meta) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (json
 }
 
 // walkJSONPointer follows an RFC 6901 JSON Pointer through a Meta tree.
-// Used by the resolver during link phase, where every $ref / $dynamicRef
-// fragment terminates inside a *Meta.
+// Used by the resolver during link phase. Most fragments terminate at
+// a *Meta, but JSON Schema allows refs into unknown keywords (whose
+// values are captured in MetaObject.Extra as raw bytes); those are
+// lazily parsed into a fresh Meta.
 func walkJSONPointer(m *Meta, ptr string) (*Meta, error) {
 	p := jsonptr.Pointer(ptr)
 	if err := p.Validate(); err != nil {
@@ -574,11 +577,13 @@ func walkJSONPointer(m *Meta, ptr string) (*Meta, error) {
 	if err != nil {
 		return nil, fmt.Errorf("JSON Pointer %q: %w", ptr, err)
 	}
-	target, ok := live.(*Meta)
-	if !ok {
-		return nil, fmt.Errorf("JSON Pointer %q: target is %T, not a schema", ptr, live)
+	if target, ok := live.(*Meta); ok {
+		return target, nil
 	}
-	return target, nil
+	if raw, ok := live.(jsontext.Value); ok {
+		return Parse(raw)
+	}
+	return nil, fmt.Errorf("JSON Pointer %q: target is %T, not a schema", ptr, live)
 }
 
 func resolveRelative(base, ref string) (string, error) {

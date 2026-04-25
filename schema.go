@@ -184,7 +184,7 @@ type MetaObject struct {
 	Deprecated  bool     `json:"deprecated,omitempty"`
 	ReadOnly    bool     `json:"readOnly,omitempty"`
 	WriteOnly   bool     `json:"writeOnly,omitempty"`
-	Examples    []string `json:"examples,omitempty"`
+	Examples    []jsontext.Value `json:"examples,omitempty"`
 
 	PrefixItems      []*Meta `json:"prefixItems,omitempty"`
 	Items            *Meta  `json:"items,omitempty"`
@@ -217,6 +217,12 @@ type MetaObject struct {
 
 	Format  string `json:"format,omitempty"`
 	Pattern string `json:"pattern,omitempty"`
+
+	// Extra captures schema members that don't correspond to any known
+	// keyword. JSON Pointers may legitimately reference these (per
+	// RFC 6901 + JSON Schema's unknown-keyword behavior); resolver
+	// walks fall back to Extra when a normal field lookup misses.
+	Extra map[string]jsontext.Value `json:",inline"`
 }
 
 func NewMetaTypeBool(in bool) *Meta {

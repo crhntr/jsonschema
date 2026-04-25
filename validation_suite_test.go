@@ -115,9 +115,12 @@ func suiteRemotesClient(t *testing.T) *http.Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := srv.Client()
-	client.Transport = &remotesTransport{target: target.Host, base: client.Transport}
-	return client
+	// Don't mutate srv.Client() (it's cached on the server and shared
+	// across tests — wrapping its transport repeatedly would be a real
+	// bug). Build a fresh client per test.
+	return &http.Client{
+		Transport: &remotesTransport{target: target.Host, base: srv.Client().Transport},
+	}
 }
 
 // remotesServer is created lazily once per test process and serves the
@@ -142,13 +145,27 @@ func remotesServer(t *testing.T) (*httptest.Server, bool) {
 				http.Error(w, "bad path", http.StatusBadRequest)
 				return
 			}
-			path := filepath.Join(root, filepath.FromSlash(clean))
-			if _, err := os.Stat(path); err != nil {
-				http.NotFound(w, r)
-				return
+			// Look up by original host first (json-schema.org/...)
+			// from testdata/schema/<host>/<path>.json, then fall
+			// back to the conformance remotes/ tree.
+			host := r.Header.Get(originalHostHeader)
+			candidates := []string{}
+			if host != "" {
+				schemaPath := filepath.Join("testdata", "schema", host, filepath.FromSlash(clean))
+				if filepath.Ext(schemaPath) == "" {
+					schemaPath += ".json"
+				}
+				candidates = append(candidates, schemaPath)
 			}
-			w.Header().Set("Content-Type", "application/schema+json")
-			http.ServeFile(w, r, path)
+			candidates = append(candidates, filepath.Join(root, filepath.FromSlash(clean)))
+			for _, p := range candidates {
+				if _, err := os.Stat(p); err == nil {
+					w.Header().Set("Content-Type", "application/schema+json")
+					http.ServeFile(w, r, p)
+					return
+				}
+			}
+			http.NotFound(w, r)
 		}))
 		remotesSrvOnce.ok = true
 	})
@@ -162,6 +179,7 @@ type remotesTransport struct {
 
 func (rt *remotesTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r2 := req.Clone(req.Context())
+	r2.Header.Set(originalHostHeader, req.URL.Host)
 	r2.URL = &url.URL{
 		Scheme:   "http",
 		Host:     rt.target,

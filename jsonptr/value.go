@@ -190,14 +190,44 @@ func stepValue(v reflect.Value, tok string) (reflect.Value, error) {
 		}
 		return v.Index(idx), nil
 	case reflect.Struct:
-		f, ok := lookupStructField(v.Type(), tok)
-		if !ok {
-			return reflect.Value{}, fmt.Errorf("no struct field for %q", tok)
+		if f, ok := lookupStructField(v.Type(), tok); ok {
+			return v.FieldByIndex(f.Index), nil
 		}
-		return v.FieldByIndex(f.Index), nil
+		// Fall back to an inline map (json:",inline" on a
+		// map[string]T field captures unknown keys).
+		if inline, ok := lookupInlineMap(v); ok {
+			key := reflect.New(inline.Type().Key()).Elem()
+			key.SetString(tok)
+			got := inline.MapIndex(key)
+			if got.IsValid() {
+				return got, nil
+			}
+		}
+		return reflect.Value{}, fmt.Errorf("no struct field for %q", tok)
 	default:
 		return reflect.Value{}, fmt.Errorf("cannot descend into %s at token %q", v.Kind(), tok)
 	}
+}
+
+// lookupInlineMap returns the first map-typed struct field tagged with
+// `json:",inline"` (the go-json-experiment convention for capturing
+// unknown JSON members).
+func lookupInlineMap(v reflect.Value) (reflect.Value, bool) {
+	t := v.Type()
+	for f := range t.Fields() {
+		if !f.IsExported() {
+			continue
+		}
+		tag := f.Tag.Get("json")
+		if !strings.Contains(tag, "inline") {
+			continue
+		}
+		fv := v.FieldByIndex(f.Index)
+		if fv.Kind() == reflect.Map && fv.Type().Key().Kind() == reflect.String {
+			return fv, true
+		}
+	}
+	return reflect.Value{}, false
 }
 
 func lookupStructField(t reflect.Type, name string) (reflect.StructField, bool) {

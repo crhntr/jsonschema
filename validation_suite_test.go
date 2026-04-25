@@ -174,7 +174,12 @@ func (rt *remotesTransport) RoundTrip(req *http.Request) (*http.Response, error)
 
 func runSuiteCase(t *testing.T, schema *jsonschema.Meta, g suiteGroup, c suiteCase, passed, failed *atomic.Int64) {
 	t.Helper()
-	err := schema.Evaluate(t.Name(), c.Data)
+	var err error
+	if strings.Contains(t.Name(), "/optional/format/") {
+		err = schema.EvaluateWithFormatAssertion(t.Name(), c.Data)
+	} else {
+		err = schema.Evaluate(t.Name(), c.Data)
+	}
 	got := err == nil
 	if got == c.Valid {
 		passed.Add(1)

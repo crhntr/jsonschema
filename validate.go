@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
+	"net/mail"
+	"net/url"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-json-experiment/json/jsontext"
@@ -33,22 +37,25 @@ func childKeyword(parent, keyword string) string {
 	return jsonptr.NewBuilder(parent).Token(keyword).String()
 }
 
-// evalScope is the dynamic scope of validation: the chain of resource
-// roots whose schemas are currently being evaluated against the
-// instance. It is used to resolve $dynamicRef per JSON Schema 2020-12
-// §8.2.3.2 — when a $dynamicRef is bookended, the validator walks the
-// scope outermost-to-innermost looking for a matching $dynamicAnchor.
-type evalScope []*Meta
+// evalScope carries dynamic-scope state through validation: the chain
+// of resource roots being evaluated (for $dynamicRef per §8.2.3.2) plus
+// configuration like whether format keywords assert.
+type evalScope struct {
+	resources    []*Meta
+	assertFormat bool
+}
 
 func (s evalScope) push(resource *Meta) evalScope {
-	if resource == nil || (len(s) > 0 && s[len(s)-1] == resource) {
+	if resource == nil || (len(s.resources) > 0 && s.resources[len(s.resources)-1] == resource) {
 		return s
 	}
-	return append(s, resource)
+	out := s
+	out.resources = append(out.resources, resource)
+	return out
 }
 
 func (s evalScope) findDynamicAnchor(name string) *Meta {
-	for _, res := range s {
+	for _, res := range s.resources {
 		if a := res.dynamicAnchors[name]; a != nil {
 			return a
 		}
@@ -89,7 +96,15 @@ func (a *annotations) merge(b annotations) {
 }
 
 func (m *Meta) Evaluate(name string, in []byte) error {
-	_, err := m.evaluate(name, in, nil)
+	_, err := m.evaluate(name, in, evalScope{})
+	return err
+}
+
+// EvaluateWithFormatAssertion behaves like Evaluate but also enforces
+// format keywords as assertions (per the format-assertion vocabulary).
+// Spec-default Evaluate treats format as an annotation only.
+func (m *Meta) EvaluateWithFormatAssertion(name string, in []byte) error {
+	_, err := m.evaluate(name, in, evalScope{assertFormat: true})
 	return err
 }
 
@@ -199,7 +214,7 @@ func (o *MetaObject) validateValue(name string, in []byte, off int64, val jsonte
 			return ann, NewErrorWithPosition(name, in, off, err)
 		}
 	case jsontext.KindString:
-		if err := o.validateString(val); err != nil {
+		if err := o.validateString(val, scope); err != nil {
 			return ann, NewErrorWithPosition(name, in, off, err)
 		}
 	case jsontext.KindBeginObject:
@@ -592,8 +607,8 @@ func compareRat(keyword jsontext.Value, n *big.Rat) (int, bool) {
 	return r.Cmp(n), true
 }
 
-func (o *MetaObject) validateString(val jsontext.Value) error {
-	if len(o.MinLength) == 0 && len(o.MaxLength) == 0 && o.Pattern == "" {
+func (o *MetaObject) validateString(val jsontext.Value, scope evalScope) error {
+	if len(o.MinLength) == 0 && len(o.MaxLength) == 0 && o.Pattern == "" && (o.Format == "" || !scope.assertFormat) {
 		return nil
 	}
 	s, err := decodeJSONString(val)
@@ -616,7 +631,183 @@ func (o *MetaObject) validateString(val jsontext.Value) error {
 			return fmt.Errorf("string does not match pattern %q", o.Pattern)
 		}
 	}
+	if o.Format != "" && scope.assertFormat {
+		if err := validateFormat(o.Format, s); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// validateFormat enforces format assertions for known JSON Schema 2020-12
+// formats. Unknown formats pass silently (per spec, format is an annotation
+// by default; we treat known ones as assertions which matches what the
+// suite expects).
+func validateFormat(format, s string) error {
+	switch format {
+	case "ipv4":
+		ip := net.ParseIP(s)
+		if ip == nil || ip.To4() == nil || strings.Contains(s, ":") {
+			return fmt.Errorf("not a valid ipv4: %q", s)
+		}
+		// Reject leading zeros like 192.168.001.001.
+		for _, octet := range strings.Split(s, ".") {
+			if len(octet) > 1 && octet[0] == '0' {
+				return fmt.Errorf("ipv4 octet has leading zero: %q", s)
+			}
+		}
+	case "ipv6":
+		ip := net.ParseIP(s)
+		if ip == nil || !strings.Contains(s, ":") {
+			return fmt.Errorf("not a valid ipv6: %q", s)
+		}
+	case "date-time":
+		if _, err := time.Parse(time.RFC3339, s); err != nil {
+			if _, err2 := time.Parse(time.RFC3339Nano, s); err2 != nil {
+				return fmt.Errorf("not a valid date-time: %q", s)
+			}
+		}
+	case "date":
+		if _, err := time.Parse("2006-01-02", s); err != nil {
+			return fmt.Errorf("not a valid date: %q", s)
+		}
+	case "time":
+		layouts := []string{"15:04:05Z07:00", "15:04:05.999999999Z07:00"}
+		ok := false
+		for _, l := range layouts {
+			if _, err := time.Parse(l, s); err == nil {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("not a valid time: %q", s)
+		}
+	case "duration":
+		if !isISO8601Duration(s) {
+			return fmt.Errorf("not a valid duration: %q", s)
+		}
+	case "email", "idn-email":
+		if _, err := mail.ParseAddress(s); err != nil {
+			return fmt.Errorf("not a valid email: %q", s)
+		}
+	case "hostname", "idn-hostname":
+		if !isHostname(s) {
+			return fmt.Errorf("not a valid hostname: %q", s)
+		}
+	case "uri":
+		u, err := url.Parse(s)
+		if err != nil || !u.IsAbs() {
+			return fmt.Errorf("not a valid uri: %q", s)
+		}
+	case "uri-reference", "iri-reference":
+		if _, err := url.Parse(s); err != nil {
+			return fmt.Errorf("not a valid uri-reference: %q", s)
+		}
+	case "iri":
+		u, err := url.Parse(s)
+		if err != nil || !u.IsAbs() {
+			return fmt.Errorf("not a valid iri: %q", s)
+		}
+	case "uuid":
+		if !isUUID(s) {
+			return fmt.Errorf("not a valid uuid: %q", s)
+		}
+	case "regex":
+		if _, err := regexp.Compile(s); err != nil {
+			return fmt.Errorf("not a valid regex: %w", err)
+		}
+	case "json-pointer":
+		if err := jsonptr.Pointer(s).Validate(); err != nil {
+			return fmt.Errorf("not a valid json-pointer: %w", err)
+		}
+	case "relative-json-pointer":
+		if !isRelativeJSONPointer(s) {
+			return fmt.Errorf("not a valid relative-json-pointer: %q", s)
+		}
+	case "uri-template":
+		if !isURITemplate(s) {
+			return fmt.Errorf("not a valid uri-template: %q", s)
+		}
+	}
+	return nil
+}
+
+var (
+	uuidRE     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	hostnameRE = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+	durationRE = regexp.MustCompile(`^P(?:(?:\d+W)|(?:(?:\d+Y)?(?:\d+M)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+S)?)?))$`)
+)
+
+func isUUID(s string) bool { return uuidRE.MatchString(s) }
+
+func isHostname(s string) bool {
+	if len(s) == 0 || len(s) > 253 {
+		return false
+	}
+	return hostnameRE.MatchString(s)
+}
+
+func isISO8601Duration(s string) bool {
+	if s == "P" || s == "" {
+		return false
+	}
+	if !durationRE.MatchString(s) {
+		return false
+	}
+	// Reject "PT" / "P" (no components).
+	if s == "PT" {
+		return false
+	}
+	// Must have at least one component after P.
+	rest := s[1:]
+	if rest == "" || rest == "T" {
+		return false
+	}
+	return true
+}
+
+func isRelativeJSONPointer(s string) bool {
+	if s == "" {
+		return false
+	}
+	// non-negative-integer ("#" | json-pointer)
+	i := 0
+	if s[0] == '0' {
+		i = 1
+	} else {
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		if i == 0 {
+			return false
+		}
+	}
+	rest := s[i:]
+	if rest == "#" {
+		return true
+	}
+	return jsonptr.Pointer(rest).Validate() == nil
+}
+
+func isURITemplate(s string) bool {
+	// Minimal check: balanced { } and no nesting.
+	depth := 0
+	for _, r := range s {
+		switch r {
+		case '{':
+			if depth > 0 {
+				return false
+			}
+			depth++
+		case '}':
+			if depth == 0 {
+				return false
+			}
+			depth--
+		}
+	}
+	return depth == 0
 }
 
 // decodeJSONString returns the Go string represented by a JSON-encoded

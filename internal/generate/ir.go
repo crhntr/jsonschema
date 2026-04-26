@@ -19,6 +19,13 @@ type Type struct {
 	// Fields is set for struct declarations.
 	Fields []Field
 
+	// NullProperties names JSON members whose schema is
+	// {"type":"null"}. These have no Go field — null carries no
+	// useful Go state — but the generated marshaler always writes
+	// them as null and the unmarshaler verifies they were received
+	// as null (and, if Required, present).
+	NullProperties []NullProperty
+
 	// RejectUnknown is set when the source schema declares
 	// additionalProperties: false; the generated UnmarshalJSONFrom
 	// then refuses unknown members.
@@ -73,5 +80,14 @@ type Field struct {
 	GoName   string
 	JSONName string
 	TypeExpr ast.Expr
+	Required bool
+}
+
+// NullProperty is a JSON member whose schema fixes its value to
+// null. The generated marshaler emits it unconditionally; the
+// unmarshaler enforces the null literal and (if Required) presence.
+// It does not contribute a Go struct field.
+type NullProperty struct {
+	JSONName string
 	Required bool
 }

@@ -9,10 +9,15 @@ import (
 	"strings"
 )
 
-// EmitMarshal returns the MarshalJSONTo method for t. The body
+// EmitMarshal returns the MarshalJSONTo method for t. By default it
 // delegates to encoding/json/v2 via a local alias type so generated
-// code does not recurse into itself.
+// code does not recurse into itself. Structs that carry
+// NullProperties switch to manual token-by-token writing because
+// null-only members have no Go field for the alias to encode.
 func EmitMarshal(t Type) ast.Decl {
+	if len(t.NullProperties) > 0 && t.Underlying == nil && len(t.Variants) == 0 {
+		return emitManualStructMarshal(t)
+	}
 	src := fmt.Sprintf(`package _
 
 func (r %[1]s) MarshalJSONTo(enc *jsontext.Encoder) error {
@@ -20,6 +25,39 @@ func (r %[1]s) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return json.MarshalEncode(enc, alias(r))
 }
 `, t.Name)
+	return parseDecl(src)
+}
+
+// emitManualStructMarshal writes the struct as a sequence of
+// jsontext tokens so wire-only NullProperty members are emitted
+// alongside the regular Go fields.
+func emitManualStructMarshal(t Type) ast.Decl {
+	var body strings.Builder
+	body.WriteString("\tif err := enc.WriteToken(jsontext.BeginObject); err != nil {\n\t\treturn err\n\t}\n")
+
+	for _, f := range t.Fields {
+		if f.Required {
+			fmt.Fprintf(&body, "\tif err := enc.WriteToken(jsontext.String(%q)); err != nil {\n\t\treturn err\n\t}\n", f.JSONName)
+			fmt.Fprintf(&body, "\tif err := json.MarshalEncode(enc, r.%s); err != nil {\n\t\treturn err\n\t}\n", f.GoName)
+		} else {
+			fmt.Fprintf(&body, "\tif r.%s != nil {\n", f.GoName)
+			fmt.Fprintf(&body, "\t\tif err := enc.WriteToken(jsontext.String(%q)); err != nil {\n\t\t\treturn err\n\t\t}\n", f.JSONName)
+			fmt.Fprintf(&body, "\t\tif err := json.MarshalEncode(enc, *r.%s); err != nil {\n\t\t\treturn err\n\t\t}\n", f.GoName)
+			body.WriteString("\t}\n")
+		}
+	}
+	for _, np := range t.NullProperties {
+		fmt.Fprintf(&body, "\tif err := enc.WriteToken(jsontext.String(%q)); err != nil {\n\t\treturn err\n\t}\n", np.JSONName)
+		body.WriteString("\tif err := enc.WriteToken(jsontext.Null); err != nil {\n\t\treturn err\n\t}\n")
+	}
+
+	body.WriteString("\treturn enc.WriteToken(jsontext.EndObject)\n")
+
+	src := fmt.Sprintf(`package _
+
+func (r %[1]s) MarshalJSONTo(enc *jsontext.Encoder) error {
+%[2]s}
+`, t.Name, body.String())
 	return parseDecl(src)
 }
 
@@ -44,6 +82,13 @@ func EmitUnmarshal(t Type) ast.Decl {
 		shadowFields.WriteString(fmt.Sprintf("%q", f.JSONName))
 		shadowFields.WriteString("`\n")
 	}
+	for _, np := range t.NullProperties {
+		// Use jsontext.Value (a []byte), not *jsontext.Value: jsonv2
+		// sets pointer-typed fields to nil when the JSON value is
+		// null, which would erase presence/absence distinction.
+		// A bare []byte length 0 means absent; "null" means present.
+		fmt.Fprintf(&shadowFields, "\t\t%s jsontext.Value `json:%q`\n", nullShadowFieldName(np.JSONName), np.JSONName)
+	}
 
 	var optsExtra string
 	if t.RejectUnknown {
@@ -57,6 +102,13 @@ func EmitUnmarshal(t Type) ast.Decl {
 		if f.Required {
 			fmt.Fprintf(&checks, "\tif shadow.%s == nil {\n\t\treturn fmt.Errorf(\"missing required field %%q\", %q)\n\t}\n", f.GoName, f.JSONName)
 		}
+	}
+	for _, np := range t.NullProperties {
+		field := nullShadowFieldName(np.JSONName)
+		if np.Required {
+			fmt.Fprintf(&checks, "\tif len(shadow.%s) == 0 {\n\t\treturn fmt.Errorf(\"missing required field %%q\", %q)\n\t}\n", field, np.JSONName)
+		}
+		fmt.Fprintf(&checks, "\tif len(shadow.%[1]s) != 0 && string(shadow.%[1]s) != \"null\" {\n\t\treturn fmt.Errorf(\"field %%q must be null, got %%s\", %[2]q, shadow.%[1]s)\n\t}\n", field, np.JSONName)
 	}
 
 	var assigns strings.Builder
@@ -265,6 +317,13 @@ func enumLiteral(raw string) ast.Expr {
 		return ident(raw)
 	}
 	return rawNumLit(raw)
+}
+
+// nullShadowFieldName is the shadow-struct field name carrying a
+// jsontext.Value for a wire-only null property. The leading
+// underscore prefix avoids collisions with regular Go fields.
+func nullShadowFieldName(jsonName string) string {
+	return "Null_" + exportedIdent(jsonName)
 }
 
 // shadowFieldType returns the type expression for the corresponding

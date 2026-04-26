@@ -104,11 +104,23 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 		if !ok {
 			return Type{}, fmt.Errorf("property %q: only object schemas are supported in Phase 3", jsonName)
 		}
+		required := slices.Contains(obj.Required, jsonName)
+
+		// {"type":"null"} carries no useful Go state — record it as
+		// a NullProperty for the marshaler/unmarshaler to enforce on
+		// the wire.
+		if isNullPropertySchema(&propObj) {
+			t.NullProperties = append(t.NullProperties, NullProperty{
+				JSONName: jsonName,
+				Required: required,
+			})
+			continue
+		}
+
 		fieldType, err := derivePrimitive(&propObj)
 		if err != nil {
 			return Type{}, fmt.Errorf("property %q: %w", jsonName, err)
 		}
-		required := slices.Contains(obj.Required, jsonName)
 		if !required {
 			fieldType = &ast.StarExpr{X: fieldType}
 		}
@@ -313,6 +325,16 @@ func mapKeyTypeFor(a Annotations) ast.Expr {
 		return ident(a.MapKeyType)
 	}
 	return ident("string")
+}
+
+// isNullPropertySchema reports whether obj is the singleton schema
+// `{"type":"null"}`.
+func isNullPropertySchema(obj *jsonschema.SchemaObject) bool {
+	if obj.Type == nil {
+		return false
+	}
+	s, ok := obj.Type.TypeString()
+	return ok && s == "null"
 }
 
 // rejectsAdditionalProperties reports whether obj declares

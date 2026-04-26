@@ -141,6 +141,43 @@ func TestEmit_OptionalGetsOmitzero(t *testing.T) {
 	}
 }
 
+func TestDerive_NullPropertyHasNoGoField(t *testing.T) {
+	src := `{
+		"type": "object",
+		"properties": {
+			"name":   {"type": "string"},
+			"marker": {"type": "null"}
+		},
+		"required": ["name", "marker"]
+	}`
+	s, err := jsonschema.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	obj, _ := s.TypeObject()
+	typ, err := Derive("User", &obj)
+	if err != nil {
+		t.Fatalf("Derive: %v", err)
+	}
+	for _, f := range typ.Fields {
+		if f.JSONName == "marker" {
+			t.Errorf("Fields contains marker (got %#v); null props should not have Go fields", f)
+		}
+	}
+	found := false
+	for _, np := range typ.NullProperties {
+		if np.JSONName == "marker" {
+			if !np.Required {
+				t.Errorf("NullProperty %q Required = false, want true", np.JSONName)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("NullProperties missing marker; got %+v", typ.NullProperties)
+	}
+}
+
 func TestDerive_AdditionalPropertiesFalse(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -1,0 +1,81 @@
+go-jsonschema generate --schema meta/core.json --out ./model --package model --type Core
+
+exec go vet ./model
+exec go test -count=1 ./model
+
+-- meta/core.json --
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://json-schema.org/draft/2020-12/meta/core",
+    "$dynamicAnchor": "meta",
+    "title": "Core vocabulary meta-schema",
+    "type": ["object", "boolean"],
+    "properties": {
+        "$id": {
+            "$ref": "#/$defs/uriReferenceString",
+            "$comment": "Non-empty fragments not allowed.",
+            "pattern": "^[^#]*#?$"
+        },
+        "$schema": { "$ref": "#/$defs/uriString" },
+        "$ref": { "$ref": "#/$defs/uriReferenceString" },
+        "$anchor": { "$ref": "#/$defs/anchorString" },
+        "$dynamicRef": { "$ref": "#/$defs/uriReferenceString" },
+        "$dynamicAnchor": { "$ref": "#/$defs/anchorString" },
+        "$comment": { "type": "string" }
+    },
+    "$defs": {
+        "anchorString": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][-A-Za-z0-9._]*$"
+        },
+        "uriString": {
+            "type": "string"
+        },
+        "uriReferenceString": {
+            "type": "string"
+        }
+    }
+}
+-- go.mod --
+module example.com/metacore
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"strings"
+	"testing"
+)
+
+func TestAnchorString_MatchesPattern(t *testing.T) {
+	var a anchorString
+	if err := json.Unmarshal([]byte(`"good_name"`), &a); err != nil {
+		t.Errorf("Unmarshal: %v", err)
+	}
+	err := json.Unmarshal([]byte(`"123-bad"`), &a)
+	if err == nil || !strings.Contains(err.Error(), "does not match pattern") {
+		t.Errorf("err = %v, want pattern rejection", err)
+	}
+}
+
+func TestCore_BooleanVariant(t *testing.T) {
+	var c Core
+	if err := json.Unmarshal([]byte(`true`), &c); err != nil {
+		t.Fatalf("Unmarshal(true): %v", err)
+	}
+	if got, ok := c.TypeBoolean(); !ok || got != true {
+		t.Errorf("TypeBoolean = (%v, %v), want (true, true)", got, ok)
+	}
+}
+
+func TestCore_ObjectVariant(t *testing.T) {
+	var c Core
+	if err := json.Unmarshal([]byte(`{"$id":"https://example.com/x"}`), &c); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if _, ok := c.TypeObject(); !ok {
+		t.Errorf("TypeObject ok=false, want true")
+	}
+}

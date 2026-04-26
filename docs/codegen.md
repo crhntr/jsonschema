@@ -403,7 +403,23 @@ Each phase lands as its own commit.
     `t.TempDir()`. Run `go vet` + `go build` + `go doc` and log
     output for manual side-by-side comparison with the hand-rolled
     `Schema`. The vocabulary files collapse into a single `Schema`
-    type via the Phase 10 dynamic-scope merge.
+    type via the Phase 10 dynamic-scope merge. A preview fixture
+    (`testdata/generate/metaschema_core.txt`) already feeds
+    `meta/core.json` through the CLI and verifies the resulting
+    package compiles, the `anchorString` pattern is enforced, and
+    both branches of the composite root round-trip. The remaining
+    blockers for the full meta-schema:
+
+    - Composite root with `properties`: when the root is
+      `type:["object","boolean"]` and properties are declared,
+      the object variant should be a typed struct rather than the
+      current `map[string]any` fallback.
+    - Cross-document `$ref` resolution: the root meta-schema's
+      `allOf: [{$ref: "meta/core"}, …]` and `$dynamicRef "#meta"`
+      need the existing package `Resolver` integrated into
+      `GenerateFromSchema` so allOf can fold the vocabulary
+      siblings.
+    - `anyOf` validation in marshalers (Phase 11 part 2).
 
 15. **Replace hand-rolled `Schema`** (separate, opt-in commit). Run
     the full conformance suite against the generated types.

@@ -6,10 +6,13 @@ emission), 6 (scalar root with length / range / enum / pattern
 constraints), 7 (slice + map roots), 8 (composite multi-type
 roots — generic over any subset of array / boolean / integer /
 null / number / object / string), 9 ($defs + $ref — including
-self-recursive structures), and 10 (resolved-input + allOf
-merge) implemented in `internal/generate/`. End-to-end CLI is
-wired and covered by scripttest fixtures under
-`cmd/go-jsonschema/testdata/generate/`. Phases 11–15 pending.
+self-recursive structures), 10 (resolved-input + allOf merge),
+11 (dependentRequired enforcement — oneOf/anyOf still pending),
+and 12 (per-property goType / goIdent / goJSONTags annotations —
+document-level goOverrides still pending) implemented in
+`internal/generate/`. End-to-end CLI is wired and covered by
+scripttest fixtures under `cmd/go-jsonschema/testdata/generate/`.
+Phases 13–15 pending.
 
 ## Context
 

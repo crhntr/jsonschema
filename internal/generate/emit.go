@@ -36,11 +36,15 @@ func Emit(t Type) *ast.GenDecl {
 }
 
 func emitStructType(t Type) *ast.StructType {
-	fields := &ast.FieldList{}
+	fields := new(ast.FieldList)
 	for _, f := range t.Fields {
 		tagValue := f.JSONName
-		if !f.Required {
-			tagValue += ",omitzero"
+		extras := f.JSONTags
+		if !f.Required && len(extras) == 0 {
+			extras = []string{"omitzero"}
+		}
+		for _, e := range extras {
+			tagValue += "," + e
 		}
 		fields.List = append(fields.List, &ast.Field{
 			Names: []*ast.Ident{{Name: f.GoName}},

@@ -3,6 +3,7 @@ package generate
 import (
 	"fmt"
 	"go/ast"
+	"go/parser"
 	"slices"
 	"sort"
 	"strconv"
@@ -125,18 +126,36 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 			continue
 		}
 
-		fieldType, err := derivePropertyType(&propObj, refs)
+		propAnnotations, err := ParseAnnotations(propObj.Extra)
 		if err != nil {
-			return Type{}, fmt.Errorf("property %q: %w", jsonName, err)
+			return Type{}, fmt.Errorf("property %q annotations: %w", jsonName, err)
+		}
+
+		var fieldType ast.Expr
+		if propAnnotations.GoType != "" {
+			fieldType, err = parser.ParseExpr(propAnnotations.GoType)
+			if err != nil {
+				return Type{}, fmt.Errorf("property %q goType %q: %w", jsonName, propAnnotations.GoType, err)
+			}
+		} else {
+			fieldType, err = derivePropertyType(&propObj, refs)
+			if err != nil {
+				return Type{}, fmt.Errorf("property %q: %w", jsonName, err)
+			}
 		}
 		if !required && needsPointerForOptional(fieldType) {
 			fieldType = &ast.StarExpr{X: fieldType}
 		}
+		goName := exportedIdent(jsonName)
+		if propAnnotations.GoIdent != "" {
+			goName = propAnnotations.GoIdent
+		}
 		t.Fields = append(t.Fields, Field{
-			GoName:   exportedIdent(jsonName),
+			GoName:   goName,
 			JSONName: jsonName,
 			TypeExpr: fieldType,
 			Required: required,
+			JSONTags: propAnnotations.GoJSONTags,
 		})
 	}
 	return t, nil

@@ -9,12 +9,16 @@ import (
 
 // Emit turns an IR Type into a top-level *ast.GenDecl ready for
 // printing. Scalar types emit `type Name <expr>`; struct types emit
-// `type Name struct { … }`.
+// `type Name struct { … }`; composite types emit a discriminated
+// union struct.
 func Emit(t Type) *ast.GenDecl {
 	var typExpr ast.Expr
-	if t.Underlying != nil {
+	switch {
+	case len(t.Variants) > 0:
+		typExpr = emitCompositeStructType(t)
+	case t.Underlying != nil:
 		typExpr = t.Underlying
-	} else {
+	default:
 		typExpr = emitStructType(t)
 	}
 	spec := &ast.TypeSpec{

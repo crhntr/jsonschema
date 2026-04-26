@@ -77,11 +77,21 @@ func Generate(schema *jsonschema.SchemaObject, typeName, packageName string) ([]
 	if pat := EmitPatternVar(typ); pat != nil {
 		decls = append(decls, pat)
 	}
-	decls = append(decls,
-		EmitMarshal(typ),
-		EmitUnmarshal(typ),
-		interfaceAssertions(typ),
-	)
+	if len(typ.Variants) > 0 {
+		decls = append(decls, emitCompositeAccessors(typ)...)
+		decls = append(decls, emitCompositeMarshal(typ))
+		um, err := emitCompositeUnmarshal(typ)
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, um)
+	} else {
+		decls = append(decls,
+			EmitMarshal(typ),
+			EmitUnmarshal(typ),
+		)
+	}
+	decls = append(decls, interfaceAssertions(typ))
 	file := &ast.File{
 		Name:  &ast.Ident{Name: packageName},
 		Decls: decls,

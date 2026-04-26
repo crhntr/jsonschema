@@ -1,0 +1,103 @@
+go-jsonschema generate --schema schema.json --out ./model --package model --type Value
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": ["string", "integer", "boolean", "null"]
+}
+-- go.mod --
+module example.com/valuepkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"strings"
+	"testing"
+)
+
+func TestValue_RoundTripString(t *testing.T) {
+	var v Value
+	if err := json.Unmarshal([]byte(`"hi"`), &v); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	got, ok := v.TypeString()
+	if !ok || got != "hi" {
+		t.Errorf("TypeString = (%q, %v), want (hi, true)", got, ok)
+	}
+	out, err := json.Marshal(v)
+	if err != nil || string(out) != `"hi"` {
+		t.Errorf("Marshal = (%s, %v)", out, err)
+	}
+}
+
+func TestValue_RoundTripInteger(t *testing.T) {
+	var v Value
+	if err := json.Unmarshal([]byte(`42`), &v); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	got, ok := v.TypeInteger()
+	if !ok || got != 42 {
+		t.Errorf("TypeInteger = (%d, %v), want (42, true)", got, ok)
+	}
+	out, err := json.Marshal(v)
+	if err != nil || string(out) != "42" {
+		t.Errorf("Marshal = (%s, %v)", out, err)
+	}
+}
+
+func TestValue_RoundTripBoolean(t *testing.T) {
+	var v Value
+	if err := json.Unmarshal([]byte(`true`), &v); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	got, ok := v.TypeBoolean()
+	if !ok || got != true {
+		t.Errorf("TypeBoolean = (%v, %v), want (true, true)", got, ok)
+	}
+}
+
+func TestValue_RoundTripNull(t *testing.T) {
+	var v Value
+	if err := json.Unmarshal([]byte(`null`), &v); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !v.TypeNull() {
+		t.Errorf("TypeNull = false, want true")
+	}
+	out, err := json.Marshal(v)
+	if err != nil || string(out) != "null" {
+		t.Errorf("Marshal = (%s, %v)", out, err)
+	}
+}
+
+func TestValue_Setters(t *testing.T) {
+	var v Value
+	v.SetInteger(7)
+	out, err := json.Marshal(v)
+	if err != nil || string(out) != "7" {
+		t.Errorf("after SetInteger: Marshal = (%s, %v)", out, err)
+	}
+	v.SetString("done")
+	out, err = json.Marshal(v)
+	if err != nil || string(out) != `"done"` {
+		t.Errorf("after SetString: Marshal = (%s, %v)", out, err)
+	}
+	if _, ok := v.TypeInteger(); ok {
+		t.Errorf("TypeInteger ok after SetString, want false")
+	}
+}
+
+func TestValue_RejectArray(t *testing.T) {
+	var v Value
+	err := json.Unmarshal([]byte(`[1,2]`), &v)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want kind rejection")
+	}
+	if !strings.Contains(err.Error(), "unexpected JSON kind") {
+		t.Errorf("err = %q, want kind-rejection message", err)
+	}
+}

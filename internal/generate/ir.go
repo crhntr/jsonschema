@@ -27,6 +27,27 @@ type Type struct {
 	// Constraints carries assertion keywords from the schema that
 	// the generated UnmarshalJSONFrom must enforce.
 	Constraints Constraints
+
+	// Variants is set when the schema declares a multi-type
+	// composite (e.g. type:["string","boolean"]). Each variant
+	// represents one allowed JSON shape. Mutually exclusive with
+	// Underlying and Fields.
+	Variants []Variant
+}
+
+// Variant is one branch of a composite type. The generated Go shape
+// is a discriminated struct holding one boolean is<Kind> flag plus
+// one value field for each variant.
+type Variant struct {
+	// Kind is the JSON Schema simple-type label
+	// ("string", "integer", "number", "boolean", "null",
+	// "array", "object").
+	Kind string
+
+	// GoTypeExpr is the Go type expression carrying the value when
+	// this variant is active. Nil for the "null" variant (which is
+	// represented by a presence-only flag).
+	GoTypeExpr ast.Expr
 }
 
 // Constraints holds the JSON Schema assertion keywords that the

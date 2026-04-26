@@ -35,6 +35,19 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 		RejectUnknown: rejectsAdditionalProperties(obj),
 	}
 
+	// Composite root: type is a multi-element array of simple
+	// kinds. Emit a discriminated-union struct.
+	if obj.Type != nil {
+		if kinds, ok := obj.Type.TypeArray(); ok && len(kinds) > 1 {
+			variants, err := deriveVariants(kinds, obj)
+			if err != nil {
+				return Type{}, fmt.Errorf("composite root: %w", err)
+			}
+			t.Variants = variants
+			return t, nil
+		}
+	}
+
 	// Scalar root: schema's type is a single primitive and there
 	// are no properties. Emit `type Name <primitive>` with optional
 	// constraint enforcement.
@@ -193,6 +206,72 @@ func jsontextInt(v []byte) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// deriveVariants turns a JSON Schema type array (e.g.
+// ["string","integer"]) into the IR Variant slice. Each kind picks
+// up its Go representation; for "array" and "object" the items /
+// properties on obj inform the chosen Go type.
+func deriveVariants(kinds []jsonschema.SimpleType, obj *jsonschema.SchemaObject) ([]Variant, error) {
+	out := make([]Variant, 0, len(kinds))
+	for _, k := range kinds {
+		s := string(k)
+		v := Variant{Kind: s}
+		switch s {
+		case "string":
+			v.GoTypeExpr = ident("string")
+		case "integer":
+			v.GoTypeExpr = ident("int")
+		case "number":
+			v.GoTypeExpr = ident("float64")
+		case "boolean":
+			v.GoTypeExpr = ident("bool")
+		case "null":
+			v.GoTypeExpr = nil
+		case "array":
+			elem, err := deriveItemsType(obj)
+			if err != nil {
+				return nil, fmt.Errorf("array variant: %w", err)
+			}
+			v.GoTypeExpr = &ast.ArrayType{Elt: elem}
+		case "object":
+			val, err := deriveAdditionalPropertiesType(obj)
+			if err != nil {
+				return nil, fmt.Errorf("object variant: %w", err)
+			}
+			v.GoTypeExpr = &ast.MapType{Key: ident("string"), Value: val}
+		default:
+			return nil, fmt.Errorf("unknown simple type %q", s)
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// deriveItemsType returns the Go type expression for obj.Items, or
+// `any` when items is missing or not a primitive object schema.
+func deriveItemsType(obj *jsonschema.SchemaObject) (ast.Expr, error) {
+	if obj.Items == nil {
+		return ident("any"), nil
+	}
+	itemObj, ok := obj.Items.TypeObject()
+	if !ok {
+		return ident("any"), nil
+	}
+	return derivePrimitive(&itemObj)
+}
+
+// deriveAdditionalPropertiesType returns the Go type expression for
+// obj.AdditionalProperties, or `any` when missing / non-primitive.
+func deriveAdditionalPropertiesType(obj *jsonschema.SchemaObject) (ast.Expr, error) {
+	if obj.AdditionalProperties == nil {
+		return ident("any"), nil
+	}
+	apObj, ok := obj.AdditionalProperties.TypeObject()
+	if !ok {
+		return ident("any"), nil
+	}
+	return derivePrimitive(&apObj)
 }
 
 // isArrayRoot reports whether obj describes a homogeneous array.

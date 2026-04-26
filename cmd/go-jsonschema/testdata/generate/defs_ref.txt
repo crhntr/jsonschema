@@ -1,0 +1,68 @@
+go-jsonschema generate --schema schema.json --out ./model --package model --type User
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "$defs": {
+    "Address": {
+      "type": "object",
+      "properties": {
+        "street": {"type": "string"},
+        "city":   {"type": "string"}
+      },
+      "required": ["street", "city"]
+    }
+  },
+  "properties": {
+    "name":    {"type": "string"},
+    "home":    {"$ref": "#/$defs/Address"}
+  },
+  "required": ["name", "home"]
+}
+-- go.mod --
+module example.com/refpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+func TestUser_RoundTrip(t *testing.T) {
+	in := []byte(`{"name":"alice","home":{"street":"1 Main","city":"Smallville"}}`)
+	var u User
+	if err := json.Unmarshal(in, &u); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if u.Name != "alice" {
+		t.Errorf("Name = %q, want alice", u.Name)
+	}
+	if u.Home.Street != "1 Main" {
+		t.Errorf("Home.Street = %q, want 1 Main", u.Home.Street)
+	}
+	if u.Home.City != "Smallville" {
+		t.Errorf("Home.City = %q, want Smallville", u.Home.City)
+	}
+	out, err := json.Marshal(u)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != `{"home":{"city":"Smallville","street":"1 Main"},"name":"alice"}` {
+		t.Errorf("Marshal = %s", out)
+	}
+}
+
+func TestAddress_DirectUse(t *testing.T) {
+	var a Address
+	if err := json.Unmarshal([]byte(`{"street":"x","city":"y"}`), &a); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if a.Street != "x" || a.City != "y" {
+		t.Errorf("got %+v, want {x y}", a)
+	}
+}

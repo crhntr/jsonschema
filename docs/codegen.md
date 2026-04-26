@@ -3,12 +3,13 @@
 Status: design — Phases 1 (vocabulary parsing), 2 (type resolver),
 3 (struct IR + emit), 4 (required vs optional), 5 (marshaler
 emission), 6 (scalar root with length / range / enum / pattern
-constraints), 7 (slice + map roots), and 8 (composite multi-type
+constraints), 7 (slice + map roots), 8 (composite multi-type
 roots — generic over any subset of array / boolean / integer /
-null / number / object / string) implemented in
+null / number / object / string), and 9 ($defs + $ref —
+including self-recursive structures) implemented in
 `internal/generate/`. End-to-end CLI is wired and covered by
 scripttest fixtures under `cmd/go-jsonschema/testdata/generate/`.
-Phases 9–15 pending.
+Phases 10–15 pending.
 
 ## Context
 

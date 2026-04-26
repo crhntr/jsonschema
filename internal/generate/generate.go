@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/format"
 	"go/token"
+	"sort"
 	"strconv"
 
 	"golang.org/x/tools/imports"
@@ -56,13 +57,31 @@ func importDecl(paths ...string) *ast.GenDecl {
 	return d
 }
 
-// Generate emits a complete Go source file for the given schema. The
-// resulting bytes have been run through goimports so unused imports
-// from the generation templates are pruned and used ones added.
+// Generate emits a complete Go source file for the given schema. It
+// produces one Go type per $defs entry plus the root type itself,
+// resolving $ref links between them. The result is run through
+// goimports.
 func Generate(schema *jsonschema.SchemaObject, typeName, packageName string) ([]byte, error) {
-	typ, err := Derive(typeName, schema)
+	refs, defNames, err := buildRefMap(schema, typeName)
+	if err != nil {
+		return nil, err
+	}
+
+	rootT, err := deriveWithRefs(typeName, schema, refs)
 	if err != nil {
 		return nil, fmt.Errorf("derive %s: %w", typeName, err)
+	}
+	types := []Type{rootT}
+	for _, key := range defNames {
+		defObj, ok := schema.Defs[key].TypeObject()
+		if !ok {
+			return nil, fmt.Errorf("$defs/%s is not an object schema", key)
+		}
+		defT, err := deriveWithRefs(refs["#/$defs/"+key], &defObj, refs)
+		if err != nil {
+			return nil, fmt.Errorf("derive $defs/%s: %w", key, err)
+		}
+		types = append(types, defT)
 	}
 
 	decls := []ast.Decl{
@@ -72,26 +91,14 @@ func Generate(schema *jsonschema.SchemaObject, typeName, packageName string) ([]
 			"fmt",
 			"regexp",
 		),
-		Emit(typ),
 	}
-	if pat := EmitPatternVar(typ); pat != nil {
-		decls = append(decls, pat)
-	}
-	if len(typ.Variants) > 0 {
-		decls = append(decls, emitCompositeAccessors(typ)...)
-		decls = append(decls, emitCompositeMarshal(typ))
-		um, err := emitCompositeUnmarshal(typ)
+	for _, t := range types {
+		td, err := emitTypeDecls(t)
 		if err != nil {
 			return nil, err
 		}
-		decls = append(decls, um)
-	} else {
-		decls = append(decls,
-			EmitMarshal(typ),
-			EmitUnmarshal(typ),
-		)
+		decls = append(decls, td...)
 	}
-	decls = append(decls, interfaceAssertions(typ))
 	file := &ast.File{
 		Name:  &ast.Ident{Name: packageName},
 		Decls: decls,
@@ -112,4 +119,57 @@ func Generate(schema *jsonschema.SchemaObject, typeName, packageName string) ([]
 		return nil, fmt.Errorf("goimports: %w\nsrc:\n%s", err, buf.String())
 	}
 	return out, nil
+}
+
+// emitTypeDecls returns all the declarations (type + pattern var +
+// methods + interface asserts) for a single IR Type.
+func emitTypeDecls(t Type) ([]ast.Decl, error) {
+	decls := []ast.Decl{Emit(t)}
+	if pat := EmitPatternVar(t); pat != nil {
+		decls = append(decls, pat)
+	}
+	if len(t.Variants) > 0 {
+		decls = append(decls, emitCompositeAccessors(t)...)
+		decls = append(decls, emitCompositeMarshal(t))
+		um, err := emitCompositeUnmarshal(t)
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, um)
+	} else {
+		decls = append(decls, EmitMarshal(t), EmitUnmarshal(t))
+	}
+	decls = append(decls, interfaceAssertions(t))
+	return decls, nil
+}
+
+// buildRefMap returns a JSON-pointer → Go-identifier map for the
+// root schema and every $defs entry, plus the sorted list of $defs
+// keys so callers can iterate deterministically. goIdent annotations
+// on individual $defs entries override the default name.
+func buildRefMap(schema *jsonschema.SchemaObject, rootName string) (map[string]string, []string, error) {
+	refs := map[string]string{
+		"#": rootName,
+	}
+	keys := make([]string, 0, len(schema.Defs))
+	for k := range schema.Defs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		defObj, ok := schema.Defs[k].TypeObject()
+		if !ok {
+			return nil, nil, fmt.Errorf("$defs/%s is not an object schema", k)
+		}
+		annot, err := ParseAnnotations(defObj.Extra)
+		if err != nil {
+			return nil, nil, fmt.Errorf("$defs/%s annotations: %w", k, err)
+		}
+		name := k
+		if annot.GoIdent != "" {
+			name = annot.GoIdent
+		}
+		refs["#/$defs/"+k] = name
+	}
+	return refs, keys, nil
 }

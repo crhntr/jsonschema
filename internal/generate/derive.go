@@ -14,8 +14,15 @@ import (
 
 // Derive builds an IR Type for the given SchemaObject. name is the
 // exported Go identifier the caller wants on the emitted declaration.
-// Phase 3 only supports object schemas with primitive properties.
 func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
+	return deriveWithRefs(name, obj, nil)
+}
+
+// deriveWithRefs is Derive plus a JSON-pointer → Go-identifier map
+// used to resolve $ref expressions inside property / items /
+// additionalProperties schemas. nil refs is equivalent to no
+// $ref support.
+func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]string) (Type, error) {
 	annotations, err := ParseAnnotations(obj.Extra)
 	if err != nil {
 		return Type{}, err
@@ -117,11 +124,11 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 			continue
 		}
 
-		fieldType, err := derivePrimitive(&propObj)
+		fieldType, err := derivePropertyType(&propObj, refs)
 		if err != nil {
 			return Type{}, fmt.Errorf("property %q: %w", jsonName, err)
 		}
-		if !required {
+		if !required && needsPointerForOptional(fieldType) {
 			fieldType = &ast.StarExpr{X: fieldType}
 		}
 		t.Fields = append(t.Fields, Field{
@@ -325,6 +332,48 @@ func mapKeyTypeFor(a Annotations) ast.Expr {
 		return ident(a.MapKeyType)
 	}
 	return ident("string")
+}
+
+// needsPointerForOptional reports whether an optional field should
+// be wrapped in a pointer to distinguish absent from the zero value.
+// Slices and maps have a natural nil zero value, so the wrap would
+// be redundant.
+func needsPointerForOptional(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.ArrayType, *ast.MapType:
+		return false
+	}
+	return true
+}
+
+// derivePropertyType picks the Go type expression for a property
+// schema. It handles $ref, array-of-T, and primitive shapes. Map and
+// inline-object property shapes will land in later phases.
+func derivePropertyType(obj *jsonschema.SchemaObject, refs map[string]string) (ast.Expr, error) {
+	if obj.Ref != "" {
+		if refs == nil {
+			return nil, fmt.Errorf("$ref %q encountered without a ref map", obj.Ref)
+		}
+		name, ok := refs[obj.Ref]
+		if !ok {
+			return nil, fmt.Errorf("$ref %q has no resolved Go type", obj.Ref)
+		}
+		return ident(name), nil
+	}
+	if obj.Type != nil {
+		if s, ok := obj.Type.TypeString(); ok && s == "array" && obj.Items != nil {
+			itemObj, ok := obj.Items.TypeObject()
+			if !ok {
+				return nil, fmt.Errorf("array items must be an object schema")
+			}
+			elem, err := derivePropertyType(&itemObj, refs)
+			if err != nil {
+				return nil, fmt.Errorf("array items: %w", err)
+			}
+			return &ast.ArrayType{Elt: elem}, nil
+		}
+	}
+	return derivePrimitive(obj)
 }
 
 // isNullPropertySchema reports whether obj is the singleton schema

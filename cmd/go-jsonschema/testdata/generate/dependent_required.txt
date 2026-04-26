@@ -1,0 +1,53 @@
+go-jsonschema generate --schema schema.json --out ./model --package model --type Order
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "properties": {
+    "credit_card":     {"type": "string"},
+    "billing_address": {"type": "string"}
+  },
+  "dependentRequired": {
+    "credit_card": ["billing_address"]
+  }
+}
+-- go.mod --
+module example.com/orderpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"strings"
+	"testing"
+)
+
+func TestOrder_NoDependents(t *testing.T) {
+	var o Order
+	if err := json.Unmarshal([]byte(`{}`), &o); err != nil {
+		t.Errorf("Unmarshal({}): %v", err)
+	}
+}
+
+func TestOrder_WithDependent(t *testing.T) {
+	var o Order
+	in := []byte(`{"credit_card":"4242","billing_address":"1 Main"}`)
+	if err := json.Unmarshal(in, &o); err != nil {
+		t.Errorf("Unmarshal: %v", err)
+	}
+}
+
+func TestOrder_MissingDependent(t *testing.T) {
+	var o Order
+	err := json.Unmarshal([]byte(`{"credit_card":"4242"}`), &o)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want dependentRequired rejection")
+	}
+	if !strings.Contains(err.Error(), "billing_address") {
+		t.Errorf("err = %q, want mention of billing_address", err)
+	}
+}

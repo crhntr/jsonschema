@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -110,6 +111,7 @@ func EmitUnmarshal(t Type) ast.Decl {
 		}
 		fmt.Fprintf(&checks, "\tif len(shadow.%[1]s) != 0 && string(shadow.%[1]s) != \"null\" {\n\t\treturn fmt.Errorf(\"field %%q must be null, got %%s\", %[2]q, shadow.%[1]s)\n\t}\n", field, np.JSONName)
 	}
+	emitDependentRequiredChecks(&checks, t)
 
 	var assigns strings.Builder
 	for _, f := range t.Fields {
@@ -317,6 +319,64 @@ func enumLiteral(raw string) ast.Expr {
 		return ident(raw)
 	}
 	return rawNumLit(raw)
+}
+
+// emitDependentRequiredChecks appends a guard per (parent, dep) pair
+// in t.DependentRequired: if the parent property was present and the
+// dep was not, return an error. Required properties never trigger
+// the check because the missing-required guard above would have
+// fired first.
+func emitDependentRequiredChecks(buf *strings.Builder, t Type) {
+	if len(t.DependentRequired) == 0 {
+		return
+	}
+	parents := make([]string, 0, len(t.DependentRequired))
+	for k := range t.DependentRequired {
+		parents = append(parents, k)
+	}
+	sort.Strings(parents)
+
+	jsonToShadow := map[string]string{}
+	for _, f := range t.Fields {
+		jsonToShadow[f.JSONName] = "shadow." + f.GoName
+	}
+	for _, np := range t.NullProperties {
+		jsonToShadow[np.JSONName] = "shadow." + nullShadowFieldName(np.JSONName)
+	}
+
+	for _, parent := range parents {
+		parentExpr, ok := jsonToShadow[parent]
+		if !ok {
+			continue
+		}
+		parentPresence := parentExpr + " != nil"
+		if isNullShadow(t, parent) {
+			parentPresence = "len(" + parentExpr + ") != 0"
+		}
+		for _, dep := range t.DependentRequired[parent] {
+			depExpr, ok := jsonToShadow[dep]
+			if !ok {
+				continue
+			}
+			depAbsence := depExpr + " == nil"
+			if isNullShadow(t, dep) {
+				depAbsence = "len(" + depExpr + ") == 0"
+			}
+			fmt.Fprintf(buf, "\tif %s && %s {\n\t\treturn fmt.Errorf(\"property %%q requires %%q\", %q, %q)\n\t}\n",
+				parentPresence, depAbsence, parent, dep)
+		}
+	}
+}
+
+// isNullShadow reports whether a JSON property is represented by
+// the jsontext.Value-typed shadow field used for null properties.
+func isNullShadow(t Type, jsonName string) bool {
+	for _, np := range t.NullProperties {
+		if np.JSONName == jsonName {
+			return true
+		}
+	}
+	return false
 }
 
 // nullShadowFieldName is the shadow-struct field name carrying a

@@ -40,6 +40,13 @@ type Type struct {
 	// represents one allowed JSON shape. Mutually exclusive with
 	// Underlying and Fields.
 	Variants []Variant
+
+	// DependentRequired captures the JSON Schema dependentRequired
+	// applicator: when key X is present in the JSON, every
+	// property listed in DependentRequired[X] must also be
+	// present. The generated UnmarshalJSONFrom rejects payloads
+	// that violate any dependency.
+	DependentRequired map[string][]string
 }
 
 // Variant is one branch of a composite type. The generated Go shape

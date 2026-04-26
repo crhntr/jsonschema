@@ -37,9 +37,10 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 	}
 
 	t := Type{
-		Name:          name,
-		Doc:           doc,
-		RejectUnknown: rejectsAdditionalProperties(obj),
+		Name:              name,
+		Doc:               doc,
+		RejectUnknown:     rejectsAdditionalProperties(obj),
+		DependentRequired: copyDependentRequired(obj.DependentRequired),
 	}
 
 	// Composite root: type is a multi-element array of simple
@@ -374,6 +375,19 @@ func derivePropertyType(obj *jsonschema.SchemaObject, refs map[string]string) (a
 		}
 	}
 	return derivePrimitive(obj)
+}
+
+// copyDependentRequired clones the schema's dependentRequired map
+// so later mutations do not bleed back into the parsed schema.
+func copyDependentRequired(in map[string][]string) map[string][]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(in))
+	for k, v := range in {
+		out[k] = append([]string(nil), v...)
+	}
+	return out
 }
 
 // isNullPropertySchema reports whether obj is the singleton schema

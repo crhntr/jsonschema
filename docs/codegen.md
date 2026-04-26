@@ -5,11 +5,11 @@ Status: design — Phases 1 (vocabulary parsing), 2 (type resolver),
 emission), 6 (scalar root with length / range / enum / pattern
 constraints), 7 (slice + map roots), 8 (composite multi-type
 roots — generic over any subset of array / boolean / integer /
-null / number / object / string), and 9 ($defs + $ref —
-including self-recursive structures) implemented in
-`internal/generate/`. End-to-end CLI is wired and covered by
-scripttest fixtures under `cmd/go-jsonschema/testdata/generate/`.
-Phases 10–15 pending.
+null / number / object / string), 9 ($defs + $ref — including
+self-recursive structures), and 10 (resolved-input + allOf
+merge) implemented in `internal/generate/`. End-to-end CLI is
+wired and covered by scripttest fixtures under
+`cmd/go-jsonschema/testdata/generate/`. Phases 11–15 pending.
 
 ## Context
 
@@ -358,11 +358,27 @@ Each phase lands as its own commit.
    `$defs` that reference each other (recursive) compiles and
    round-trips.
 
-10. **`dependentSchemas` + `oneOf`/`anyOf`/`allOf` validation in
-    generated marshalers.** Test: instances that fail the dependent
-    rule are rejected by the generated `UnmarshalJSONFrom`.
+10. **Resolved-input + `allOf` merge.** Switch `Generate`'s root
+    parameter from `*SchemaObject` to a resolved `*Schema` so
+    `$ref` / `$dynamicRef` targets are pre-attached. Add a
+    flatten pass that recursively folds every `allOf` member's
+    `properties` / `required` / `additionalProperties` /
+    `patternProperties` / `$defs` into the parent before
+    derivation, with cycle detection. This is what lets the
+    2020-12 meta-schema (vocab files joined by `$dynamicRef
+    "#meta"`) collapse into a single `Schema` Go type instead of
+    emitting one type per vocabulary file. Test: a schema whose
+    root is purely `allOf` of two object subschemas produces a
+    single struct with the merged field set; a recursive cycle is
+    detected and reported.
 
-11. **Override config and JSON tag flags.** Document-level
+11. **`dependentSchemas` + `oneOf`/`anyOf` validation in generated
+    marshalers.** (`allOf` is now a structural merge done at
+    derive time, see Phase 10, so it does not need runtime
+    enforcement.) Test: instances that fail a dependent rule are
+    rejected by the generated `UnmarshalJSONFrom`.
+
+12. **Override config and JSON tag flags.** Document-level
     `goOverrides` + per-schema `goIdent`/`goType`/`fields`. Add the
     `goJSONTags` annotation (string list of jsonv2 tag flags like
     `omitempty`, `omitzero`, `format:RFC3339`, `string`, `inline`)
@@ -373,30 +389,32 @@ Each phase lands as its own commit.
     `omitempty`, one using `format:RFC3339Nano` on a `time.Time`
     field) — `_test.go` round-trips exercise both.
 
-12. **Constraint/type mismatch warnings.** `goType: int8` +
+13. **Constraint/type mismatch warnings.** `goType: int8` +
     `minimum: 1000` → returns a structured warning the CLI surfaces
     on stderr; generation still produces something compilable. Test:
     capture warnings list. Also reject `goType` values outside the
     allowed import set (stdlib / jsonv2 / golang.org/x).
 
-13. **Self-host the 2020-12 meta-schema.** Generate types from
+14. **Self-host the 2020-12 meta-schema.** Generate types from
     `testdata/schema/json-schema.org/draft/2020-12/*.json` into a
     `t.TempDir()`. Run `go vet` + `go build` + `go doc` and log
     output for manual side-by-side comparison with the hand-rolled
-    `Schema`. (No assertion that it matches yet.)
-
-14. **CLI wiring.** `go-jsonschema generate --schema X --out
-    PKG_DIR [--package NAME] [--overrides FILE]`. Test: scripttest
-    harness invokes the CLI, then `exec go test` on the produced
-    package.
+    `Schema`. The vocabulary files collapse into a single `Schema`
+    type via the Phase 10 dynamic-scope merge.
 
 15. **Replace hand-rolled `Schema`** (separate, opt-in commit). Run
     the full conformance suite against the generated types.
 
+CLI wiring (originally a separate phase) landed alongside the
+end-to-end fixture work: `go-jsonschema generate --schema X --out
+PKG_DIR --package NAME --type Ident` is exercised by every
+fixture under `cmd/go-jsonschema/testdata/generate/`. The
+`--overrides FILE` flag arrives with Phase 12.
+
 Each phase ends with `go test ./...` plus the conformance suite
-green before moving on. Phases 7–9 are the high-risk ones (composite
-types and applicator validation in generated code) — explicitly
-carve extra review time there.
+green before moving on. Phases 8 (composite types) and 10
+(dynamic-scope merge) are the high-risk ones — explicitly carve
+extra review time there.
 
 ## Verification
 

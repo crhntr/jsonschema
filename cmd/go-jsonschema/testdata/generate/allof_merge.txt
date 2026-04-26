@@ -1,0 +1,78 @@
+go-jsonschema generate --schema schema.json --out ./model --package model --type Doc
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "properties": {"id":   {"type": "string"}},
+      "required":   ["id"]
+    },
+    {
+      "properties": {"version": {"type": "integer"}},
+      "required":   ["version"]
+    }
+  ],
+  "properties": {
+    "title": {"type": "string"}
+  }
+}
+-- go.mod --
+module example.com/docpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func TestDoc_AllOfMerged(t *testing.T) {
+	rt := reflect.TypeOf(Doc{})
+	want := map[string]bool{"Id": true, "Version": true, "Title": true}
+	got := make(map[string]bool, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		got[rt.Field(i).Name] = true
+	}
+	for f := range want {
+		if !got[f] {
+			t.Errorf("Doc missing field %q after allOf merge; got %v", f, got)
+		}
+	}
+}
+
+func TestDoc_RoundTrip(t *testing.T) {
+	in := []byte(`{"id":"x","title":"hello","version":7}`)
+	var d Doc
+	if err := json.Unmarshal(in, &d); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if d.Id != "x" || d.Version != 7 || d.Title == nil || *d.Title != "hello" {
+		t.Errorf("got %+v", d)
+	}
+	out, err := json.Marshal(d)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != `{"id":"x","title":"hello","version":7}` {
+		t.Errorf("Marshal = %s", out)
+	}
+}
+
+func TestDoc_RequiredMergedFromAllOf(t *testing.T) {
+	var d Doc
+	err := json.Unmarshal([]byte(`{"id":"x"}`), &d)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want missing-required-field error for version")
+	}
+	if !strings.Contains(err.Error(), `"version"`) {
+		t.Errorf("err = %q, want mention of version", err)
+	}
+}

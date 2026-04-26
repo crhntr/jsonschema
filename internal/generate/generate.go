@@ -61,13 +61,45 @@ func importDecl(paths ...string) *ast.GenDecl {
 // produces one Go type per $defs entry plus the root type itself,
 // resolving $ref links between them. The result is run through
 // goimports.
+//
+// Generate accepts a raw SchemaObject. Callers with a fully
+// resolved *jsonschema.Schema (refs and $dynamicRefs already
+// attached) should prefer GenerateFromSchema so allOf members that
+// are $refs get followed.
 func Generate(schema *jsonschema.SchemaObject, typeName, packageName string) ([]byte, error) {
-	refs, defNames, err := buildRefMap(schema, typeName)
+	flat, err := flatten(*schema)
+	if err != nil {
+		return nil, err
+	}
+	return generateFromObject(flat, typeName, packageName)
+}
+
+// GenerateFromSchema is the resolved-input entry point. The schema
+// must already be Resolve()'d so $ref / $dynamicRef targets are
+// reachable through *jsonschema.Schema.Resolved().
+func GenerateFromSchema(s *jsonschema.Schema, typeName, packageName string) ([]byte, error) {
+	target := s
+	if r := s.Resolved(); r != nil {
+		target = r
+	}
+	obj, ok := target.TypeObject()
+	if !ok {
+		return nil, fmt.Errorf("root schema must be an object schema")
+	}
+	flat, err := flatten(obj)
+	if err != nil {
+		return nil, err
+	}
+	return generateFromObject(flat, typeName, packageName)
+}
+
+func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName string) ([]byte, error) {
+	refs, defNames, err := buildRefMap(&schema, typeName)
 	if err != nil {
 		return nil, err
 	}
 
-	rootT, err := deriveWithRefs(typeName, schema, refs)
+	rootT, err := deriveWithRefs(typeName, &schema, refs)
 	if err != nil {
 		return nil, fmt.Errorf("derive %s: %w", typeName, err)
 	}

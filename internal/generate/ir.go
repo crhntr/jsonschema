@@ -41,6 +41,14 @@ type Type struct {
 	// Underlying and Fields.
 	Variants []Variant
 
+	// AdditionalFields are extra Go struct fields the schema
+	// declared via the goAdditionalFields vocabulary entry. They
+	// are appended to the emitted struct after the JSON-derived
+	// Fields and do not participate in marshaling unless their
+	// GoTag opts in (the alias-delegate marshal path skips
+	// unexported fields automatically).
+	AdditionalFields []GoAdditionalField
+
 	// DependentRequired captures the JSON Schema dependentRequired
 	// applicator: when key X is present in the JSON, every
 	// property listed in DependentRequired[X] must also be

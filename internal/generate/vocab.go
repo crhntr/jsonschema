@@ -2,6 +2,7 @@
 package generate
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/go-json-experiment/json"
@@ -36,6 +37,61 @@ type Annotations struct {
 	// GoJSONTags lists extra struct-tag flags to splice into the
 	// json:"…" tag verbatim after the json name.
 	GoJSONTags []string
+	// GoAdditionalFields declares Go struct fields the generator
+	// should append to the emitted struct in addition to those
+	// derived from JSON properties. Useful for resolution
+	// metadata or other non-wire state that the hand-rolled type
+	// carries alongside the JSON-derived shape.
+	//
+	// The list ordering is preserved on output. An entry whose
+	// GoName is empty is emitted as an embedded field.
+	GoAdditionalFields []GoAdditionalField
+}
+
+// GoAdditionalField describes one Go struct field declared via the
+// goAdditionalFields vocabulary entry. Fields with an empty GoIdent
+// list are emitted as embedded; multiple identifiers declare
+// multiple fields sharing the same type, mirroring Go's
+// `a, b, c T` syntax.
+type GoAdditionalField struct {
+	GoIdent stringList `json:"goIdent,omitempty"`
+	GoType  string     `json:"goType"`
+	GoTag   string     `json:"goTag,omitempty"`
+	GoDoc   string     `json:"goDoc,omitempty"`
+}
+
+// stringList accepts either a single JSON string or a JSON array of
+// strings. The single-string form folds to a one-element list so
+// downstream code can treat both shapes uniformly.
+type stringList []string
+
+func (s *stringList) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	switch dec.PeekKind() {
+	case jsontext.KindString:
+		var v string
+		if err := json.UnmarshalDecode(dec, &v); err != nil {
+			return err
+		}
+		*s = []string{v}
+		return nil
+	case jsontext.KindBeginArray:
+		type alias []string
+		var v alias
+		if err := json.UnmarshalDecode(dec, &v); err != nil {
+			return err
+		}
+		*s = stringList(v)
+		return nil
+	default:
+		return errors.New("goIdent: expected string or array of strings")
+	}
+}
+
+func (s stringList) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if len(s) == 1 {
+		return json.MarshalEncode(enc, s[0])
+	}
+	return json.MarshalEncode(enc, []string(s))
 }
 
 // ParseAnnotations decodes the go-codegen vocabulary entries from a
@@ -53,6 +109,7 @@ func ParseAnnotations(extra map[string]jsontext.Value) (Annotations, error) {
 		{"mapValueType", &a.MapValueType},
 		{"goImports", &a.GoImports},
 		{"goJSONTags", &a.GoJSONTags},
+		{"goAdditionalFields", &a.GoAdditionalFields},
 	} {
 		raw, ok := extra[e.key]
 		if !ok {

@@ -42,6 +42,10 @@ func TestParseAnnotations(t *testing.T) {
 				"mapKeyType":   jsontext.Value(`"string"`),
 				"mapValueType": jsontext.Value(`"int"`),
 				"goJSONTags":   jsontext.Value(`["omitempty","format:RFC3339"]`),
+				"goAdditionalFields": jsontext.Value(`[
+					{"goIdent": "resolved", "goType": "*Schema"},
+					{"goType": "schemaResolution"}
+				]`),
 			},
 			want: Annotations{
 				GoIdent:      "User",
@@ -51,6 +55,23 @@ func TestParseAnnotations(t *testing.T) {
 				MapKeyType:   "string",
 				MapValueType: "int",
 				GoJSONTags:   []string{"omitempty", "format:RFC3339"},
+				GoAdditionalFields: []GoAdditionalField{
+					{GoIdent: stringList{"resolved"}, GoType: "*Schema"},
+					{GoType: "schemaResolution"},
+				},
+			},
+		},
+		{
+			name: "additional fields with goIdent array",
+			extra: map[string]jsontext.Value{
+				"goAdditionalFields": jsontext.Value(`[
+					{"goIdent": ["isBool", "isObject"], "goType": "bool"}
+				]`),
+			},
+			want: Annotations{
+				GoAdditionalFields: []GoAdditionalField{
+					{GoIdent: stringList{"isBool", "isObject"}, GoType: "bool"},
+				},
 			},
 		},
 		{

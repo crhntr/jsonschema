@@ -45,6 +45,7 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps) (Ty
 		Doc:               doc,
 		RejectUnknown:     rejectsAdditionalProperties(obj),
 		DependentRequired: copyDependentRequired(obj.DependentRequired),
+		AdditionalFields:  append([]GoAdditionalField(nil), annotations.GoAdditionalFields...),
 	}
 
 	// Composite root: type is a multi-element array of simple
@@ -141,10 +142,16 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps) (Ty
 // Type. Used both for plain object roots and for the typed object
 // branch of a composite root.
 func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, parentAnnot Annotations) (Type, error) {
+	annot, err := ParseAnnotations(obj.Extra)
+	if err != nil {
+		return Type{}, fmt.Errorf("annotations: %w", err)
+	}
+
 	t := Type{
 		Name:              name,
 		RejectUnknown:     rejectsAdditionalProperties(obj),
 		DependentRequired: copyDependentRequired(obj.DependentRequired),
+		AdditionalFields:  append([]GoAdditionalField(nil), annot.GoAdditionalFields...),
 	}
 
 	jsonNames := make([]string, 0, len(obj.Properties))

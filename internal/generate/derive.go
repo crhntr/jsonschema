@@ -16,17 +16,20 @@ import (
 // Derive builds an IR Type for the given SchemaObject. name is the
 // exported Go identifier the caller wants on the emitted declaration.
 func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
-	return deriveWithRefs(name, obj, nil)
+	t, _, err := deriveWithRefs(name, obj, nil)
+	return t, err
 }
 
 // deriveWithRefs is Derive plus a JSON-pointer → Go-identifier map
 // used to resolve $ref expressions inside property / items /
 // additionalProperties schemas. nil refs is equivalent to no
-// $ref support.
-func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]string) (Type, error) {
+// $ref support. The returned siblings slice carries supplemental
+// types the primary depends on (e.g. the typed object struct
+// produced for a composite root with declared properties).
+func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]string) (Type, []Type, error) {
 	annotations, err := ParseAnnotations(obj.Extra)
 	if err != nil {
-		return Type{}, err
+		return Type{}, nil, err
 	}
 	if annotations.GoIdent != "" {
 		name = annotations.GoIdent
@@ -45,15 +48,35 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 	}
 
 	// Composite root: type is a multi-element array of simple
-	// kinds. Emit a discriminated-union struct.
+	// kinds. Emit a discriminated-union struct. If the object
+	// kind is one of the variants AND properties are declared,
+	// derive a sibling typed-struct so the object branch is more
+	// than map[string]any.
 	if obj.Type != nil {
 		if kinds, ok := obj.Type.TypeArray(); ok && len(kinds) > 1 {
 			variants, err := deriveVariants(kinds, obj)
 			if err != nil {
-				return Type{}, fmt.Errorf("composite root: %w", err)
+				return Type{}, nil, fmt.Errorf("composite root: %w", err)
+			}
+			var siblings []Type
+			if hasObjectKind(kinds) && len(obj.Properties) > 0 {
+				siblingName := name + "Object"
+				branch := *obj
+				branch.Type = nil
+				branch.AllOf = nil
+				siblingT, err := deriveStructShape(siblingName, &branch, refs, annotations)
+				if err != nil {
+					return Type{}, nil, fmt.Errorf("composite object branch: %w", err)
+				}
+				for i := range variants {
+					if variants[i].Kind == "object" {
+						variants[i].GoTypeExpr = ident(siblingName)
+					}
+				}
+				siblings = append(siblings, siblingT)
 			}
 			t.Variants = variants
-			return t, nil
+			return t, siblings, nil
 		}
 	}
 
@@ -63,11 +86,11 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 	if isScalarRoot(obj) {
 		expr, err := derivePrimitive(obj)
 		if err != nil {
-			return Type{}, fmt.Errorf("scalar root: %w", err)
+			return Type{}, nil, fmt.Errorf("scalar root: %w", err)
 		}
 		t.Underlying = expr
 		t.Constraints = deriveConstraints(obj)
-		return t, nil
+		return t, nil, nil
 	}
 
 	// Array root: type=array with items schema. Emit
@@ -75,14 +98,14 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 	if isArrayRoot(obj) {
 		elemObj, ok := obj.Items.TypeObject()
 		if !ok {
-			return Type{}, fmt.Errorf("array root: items must be an object schema")
+			return Type{}, nil, fmt.Errorf("array root: items must be an object schema")
 		}
 		elem, err := derivePrimitive(&elemObj)
 		if err != nil {
-			return Type{}, fmt.Errorf("array root items: %w", err)
+			return Type{}, nil, fmt.Errorf("array root items: %w", err)
 		}
 		t.Underlying = &ast.ArrayType{Elt: elem}
-		return t, nil
+		return t, nil, nil
 	}
 
 	// Map root: type=object with additionalProperties schema and no
@@ -90,15 +113,35 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 	if isMapRoot(obj) {
 		valObj, ok := obj.AdditionalProperties.TypeObject()
 		if !ok {
-			return Type{}, fmt.Errorf("map root: additionalProperties must be an object schema")
+			return Type{}, nil, fmt.Errorf("map root: additionalProperties must be an object schema")
 		}
 		val, err := derivePrimitive(&valObj)
 		if err != nil {
-			return Type{}, fmt.Errorf("map root value: %w", err)
+			return Type{}, nil, fmt.Errorf("map root value: %w", err)
 		}
 		key := mapKeyTypeFor(annotations)
 		t.Underlying = &ast.MapType{Key: key, Value: val}
-		return t, nil
+		return t, nil, nil
+	}
+
+	st, err := deriveStructShape(name, obj, refs, annotations)
+	if err != nil {
+		return Type{}, nil, err
+	}
+	st.Doc = doc
+	return st, nil, nil
+}
+
+// deriveStructShape produces the IR Type for a non-composite,
+// non-scalar object schema. It reads the obj's properties / required
+// / additionalProperties / dependentRequired and returns a struct
+// Type. Used both for plain object roots and for the typed object
+// branch of a composite root.
+func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs map[string]string, parentAnnot Annotations) (Type, error) {
+	t := Type{
+		Name:              name,
+		RejectUnknown:     rejectsAdditionalProperties(obj),
+		DependentRequired: copyDependentRequired(obj.DependentRequired),
 	}
 
 	jsonNames := make([]string, 0, len(obj.Properties))
@@ -111,13 +154,10 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 		propSchema := obj.Properties[jsonName]
 		propObj, ok := propSchema.TypeObject()
 		if !ok {
-			return Type{}, fmt.Errorf("property %q: only object schemas are supported in Phase 3", jsonName)
+			return Type{}, fmt.Errorf("property %q: only object schemas are supported", jsonName)
 		}
 		required := slices.Contains(obj.Required, jsonName)
 
-		// {"type":"null"} carries no useful Go state — record it as
-		// a NullProperty for the marshaler/unmarshaler to enforce on
-		// the wire.
 		if isNullPropertySchema(&propObj) {
 			t.NullProperties = append(t.NullProperties, NullProperty{
 				JSONName: jsonName,
@@ -159,6 +199,17 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 		})
 	}
 	return t, nil
+}
+
+// hasObjectKind reports whether a composite type list contains the
+// "object" simple type.
+func hasObjectKind(kinds []jsonschema.SimpleType) bool {
+	for _, k := range kinds {
+		if string(k) == "object" {
+			return true
+		}
+	}
+	return false
 }
 
 func derivePrimitive(obj *jsonschema.SchemaObject) (ast.Expr, error) {
@@ -371,26 +422,57 @@ func needsPointerForOptional(expr ast.Expr) bool {
 // inline-object property shapes will land in later phases.
 func derivePropertyType(obj *jsonschema.SchemaObject, refs map[string]string) (ast.Expr, error) {
 	if obj.Ref != "" {
-		if refs == nil {
-			return nil, fmt.Errorf("$ref %q encountered without a ref map", obj.Ref)
+		if refs != nil {
+			if name, ok := refs[obj.Ref]; ok {
+				return ident(name), nil
+			}
 		}
-		name, ok := refs[obj.Ref]
-		if !ok {
-			return nil, fmt.Errorf("$ref %q has no resolved Go type", obj.Ref)
-		}
-		return ident(name), nil
+		// Unresolved $ref (cross-document or unknown target) →
+		// fall back to any.
+		return ident("any"), nil
+	}
+	// $dynamicRef without a resolution mechanism is also any.
+	if obj.DynamicRef != "" {
+		return ident("any"), nil
 	}
 	if obj.Type != nil {
-		if s, ok := obj.Type.TypeString(); ok && s == "array" && obj.Items != nil {
-			itemObj, ok := obj.Items.TypeObject()
-			if !ok {
-				return nil, fmt.Errorf("array items must be an object schema")
+		if s, ok := obj.Type.TypeString(); ok {
+			switch s {
+			case "array":
+				if obj.Items == nil {
+					break
+				}
+				itemObj, ok := obj.Items.TypeObject()
+				if !ok {
+					return nil, fmt.Errorf("array items must be an object schema")
+				}
+				elem, err := derivePropertyType(&itemObj, refs)
+				if err != nil {
+					return nil, fmt.Errorf("array items: %w", err)
+				}
+				return &ast.ArrayType{Elt: elem}, nil
+
+			case "object":
+				// Inline object with properties → fallback to any
+				// for now (sibling-type generation for inline
+				// objects is a future phase).
+				if len(obj.Properties) > 0 {
+					return ident("any"), nil
+				}
+				if obj.AdditionalProperties == nil {
+					return ident("any"), nil
+				}
+				apObj, ok := obj.AdditionalProperties.TypeObject()
+				if !ok {
+					// boolean schema (e.g. true / false) → any
+					return &ast.MapType{Key: ident("string"), Value: ident("any")}, nil
+				}
+				val, err := derivePropertyType(&apObj, refs)
+				if err != nil {
+					return nil, fmt.Errorf("additionalProperties: %w", err)
+				}
+				return &ast.MapType{Key: ident("string"), Value: val}, nil
 			}
-			elem, err := derivePropertyType(&itemObj, refs)
-			if err != nil {
-				return nil, fmt.Errorf("array items: %w", err)
-			}
-			return &ast.ArrayType{Elt: elem}, nil
 		}
 	}
 	return derivePrimitive(obj)
@@ -434,13 +516,18 @@ func exportedIdent(jsonName string) string {
 	upper := true
 	for _, r := range jsonName {
 		switch {
-		case r == '_' || r == '-' || r == ' ':
-			upper = true
-		case upper:
-			b.WriteRune(unicode.ToUpper(r))
-			upper = false
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			if upper {
+				b.WriteRune(unicode.ToUpper(r))
+				upper = false
+			} else {
+				b.WriteRune(r)
+			}
 		default:
-			b.WriteRune(r)
+			// Skip punctuation/symbol runes (e.g. "$", "-", "_")
+			// and uppercase the next letter so json names like
+			// "$id" -> "Id" and "long-name" -> "LongName".
+			upper = true
 		}
 	}
 	return b.String()

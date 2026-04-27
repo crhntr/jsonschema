@@ -410,10 +410,11 @@ Each phase lands as its own commit.
     both branches of the composite root round-trip. The remaining
     blockers for the full meta-schema:
 
-    - Composite root with `properties`: when the root is
-      `type:["object","boolean"]` and properties are declared,
-      the object variant should be a typed struct rather than the
-      current `map[string]any` fallback.
+    - ✅ Composite root with `properties`: the object variant
+      now emits a sibling typed struct (`<Root>Object`) instead
+      of `map[string]any`. Property-level `$ref` resolves to the
+      target identifier; unresolved `$ref` / `$dynamicRef`
+      degrade to `any`.
     - Cross-document `$ref` resolution: the root meta-schema's
       `allOf: [{$ref: "meta/core"}, …]` and `$dynamicRef "#meta"`
       need the existing package `Resolver` integrated into

@@ -75,7 +75,11 @@ func TestCore_ObjectVariant(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"$id":"https://example.com/x"}`), &c); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if _, ok := c.TypeObject(); !ok {
-		t.Errorf("TypeObject ok=false, want true")
+	got, ok := c.TypeObject()
+	if !ok {
+		t.Fatalf("TypeObject ok=false, want true")
+	}
+	if got.Id == nil || *got.Id != "https://example.com/x" {
+		t.Errorf("Id = %v, want pointer to 'https://example.com/x'", got.Id)
 	}
 }

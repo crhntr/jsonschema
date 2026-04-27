@@ -99,21 +99,22 @@ func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName st
 		return nil, err
 	}
 
-	rootT, err := deriveWithRefs(typeName, &schema, refs)
+	rootT, rootSiblings, err := deriveWithRefs(typeName, &schema, refs)
 	if err != nil {
 		return nil, fmt.Errorf("derive %s: %w", typeName, err)
 	}
-	types := []Type{rootT}
+	types := append([]Type{rootT}, rootSiblings...)
 	for _, key := range defNames {
 		defObj, ok := schema.Defs[key].TypeObject()
 		if !ok {
 			return nil, fmt.Errorf("$defs/%s is not an object schema", key)
 		}
-		defT, err := deriveWithRefs(refs["#/$defs/"+key], &defObj, refs)
+		defT, defSiblings, err := deriveWithRefs(refs["#/$defs/"+key], &defObj, refs)
 		if err != nil {
 			return nil, fmt.Errorf("derive $defs/%s: %w", key, err)
 		}
 		types = append(types, defT)
+		types = append(types, defSiblings...)
 	}
 
 	decls := []ast.Decl{

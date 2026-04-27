@@ -14,29 +14,32 @@ const VocabURI = "https://crhntr.github.io/jsonschema/vocab/go-codegen"
 
 // Annotations holds the decoded values of go-codegen vocabulary
 // keywords on a single subschema. Zero values mean the keyword was
-// absent.
+// absent. The json tags are used both when an Annotations is parsed
+// from a sidecar overrides file and (via reflect-based field name
+// matching in ParseAnnotations) when individual keys appear in a
+// SchemaObject's Extra map.
 type Annotations struct {
 	// GoIdent overrides the exported Go identifier for the type or
 	// field generated from this subschema.
-	GoIdent string
+	GoIdent string `json:"goIdent,omitempty"`
 	// GoType is an explicit Go type expression that wins over a
 	// derived type. Identifiers must resolve through GoImports.
-	GoType string
+	GoType string `json:"goType,omitempty"`
 	// GoImports lists package paths whose identifiers may appear in
 	// GoType, MapKeyType, or MapValueType.
-	GoImports []string
+	GoImports []string `json:"goImports,omitempty"`
 	// GoDoc is the doc comment to attach to the generated declaration.
 	// Falls back to the schema's `description` when empty.
-	GoDoc string
+	GoDoc string `json:"goDoc,omitempty"`
 	// MapKeyType is the Go type for object map keys when the schema
 	// generates a map.
-	MapKeyType string
+	MapKeyType string `json:"mapKeyType,omitempty"`
 	// MapValueType is the Go type for object map values when the
 	// schema generates a map.
-	MapValueType string
+	MapValueType string `json:"mapValueType,omitempty"`
 	// GoJSONTags lists extra struct-tag flags to splice into the
 	// json:"…" tag verbatim after the json name.
-	GoJSONTags []string
+	GoJSONTags []string `json:"goJSONTags,omitempty"`
 	// GoAdditionalFields declares Go struct fields the generator
 	// should append to the emitted struct in addition to those
 	// derived from JSON properties. Useful for resolution
@@ -44,8 +47,8 @@ type Annotations struct {
 	// carries alongside the JSON-derived shape.
 	//
 	// The list ordering is preserved on output. An entry whose
-	// GoName is empty is emitted as an embedded field.
-	GoAdditionalFields []GoAdditionalField
+	// GoIdent is empty is emitted as an embedded field.
+	GoAdditionalFields []GoAdditionalField `json:"goAdditionalFields,omitempty"`
 }
 
 // GoAdditionalField describes one Go struct field declared via the

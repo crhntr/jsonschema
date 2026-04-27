@@ -191,13 +191,15 @@ func readInstance(wd, arg string, stdin io.Reader) ([]byte, string, error) {
 
 func generate(ctx context.Context, wd string, args []string, stdout, stderr io.Writer, client *http.Client) error {
 	var (
-		schemaPath  string
-		outDir      string
-		packageName string
-		typeName    string
+		schemaPath    string
+		overridesPath string
+		outDir        string
+		packageName   string
+		typeName      string
 	)
 	flagSet := flag.NewFlagSet("generate", flag.ContinueOnError)
 	flagSet.StringVar(&schemaPath, "schema", "", "path or URL of a JSON Schema document (required)")
+	flagSet.StringVar(&overridesPath, "overrides", "", "path to a JSON sidecar file of go-codegen overrides keyed by JSON pointer")
 	flagSet.StringVar(&outDir, "out", ".", "directory to write the generated Go file into")
 	flagSet.StringVar(&packageName, "package", "", "name of the generated package (defaults to the basename of --out)")
 	flagSet.StringVar(&typeName, "type", "Root", "exported Go identifier for the root schema type")
@@ -211,10 +213,21 @@ func generate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 	if err != nil {
 		return err
 	}
+	var overrides gen.Overrides
+	if overridesPath != "" {
+		buf, err := os.ReadFile(filepath.Join(wd, overridesPath))
+		if err != nil {
+			return fmt.Errorf("read overrides: %w", err)
+		}
+		overrides, err = gen.ParseOverrides(buf)
+		if err != nil {
+			return err
+		}
+	}
 	if packageName == "" {
 		packageName = filepath.Base(filepath.Clean(filepath.Join(wd, outDir)))
 	}
-	src, err := gen.GenerateFromSchema(root, typeName, packageName)
+	src, err := gen.GenerateFromSchema(root, typeName, packageName, overrides)
 	if err != nil {
 		return err
 	}

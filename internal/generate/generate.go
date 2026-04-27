@@ -71,13 +71,13 @@ func Generate(schema *jsonschema.SchemaObject, typeName, packageName string) ([]
 	if err != nil {
 		return nil, err
 	}
-	return generateFromObject(flat, typeName, packageName)
+	return generateFromObject(flat, typeName, packageName, Overrides{})
 }
 
 // GenerateFromSchema is the resolved-input entry point. The schema
 // must already be Resolve()'d so $ref / $dynamicRef targets are
 // reachable through *jsonschema.Schema.Resolved().
-func GenerateFromSchema(s *jsonschema.Schema, typeName, packageName string) ([]byte, error) {
+func GenerateFromSchema(s *jsonschema.Schema, typeName, packageName string, overrides Overrides) ([]byte, error) {
 	target := s
 	if r := s.Resolved(); r != nil {
 		target = r
@@ -90,16 +90,16 @@ func GenerateFromSchema(s *jsonschema.Schema, typeName, packageName string) ([]b
 	if err != nil {
 		return nil, err
 	}
-	return generateFromObject(flat, typeName, packageName)
+	return generateFromObject(flat, typeName, packageName, overrides)
 }
 
-func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName string) ([]byte, error) {
+func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName string, overrides Overrides) ([]byte, error) {
 	refs, defNames, err := buildRefMap(&schema, typeName)
 	if err != nil {
 		return nil, err
 	}
 
-	rootT, rootSiblings, err := deriveWithRefs(typeName, &schema, refs)
+	rootT, rootSiblings, err := deriveWithRefs(typeName, &schema, refs, overrides.Refs["#"])
 	if err != nil {
 		return nil, fmt.Errorf("derive %s: %w", typeName, err)
 	}
@@ -109,7 +109,7 @@ func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName st
 		if !ok {
 			return nil, fmt.Errorf("$defs/%s is not an object schema", key)
 		}
-		defT, defSiblings, err := deriveWithRefs(refs.byString["#/$defs/"+key], &defObj, refs)
+		defT, defSiblings, err := deriveWithRefs(refs.byString["#/$defs/"+key], &defObj, refs, overrides.Refs["#/$defs/"+key])
 		if err != nil {
 			return nil, fmt.Errorf("derive $defs/%s: %w", key, err)
 		}

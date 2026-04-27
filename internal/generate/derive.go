@@ -16,7 +16,7 @@ import (
 // Derive builds an IR Type for the given SchemaObject. name is the
 // exported Go identifier the caller wants on the emitted declaration.
 func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
-	t, _, err := deriveWithRefs(name, obj, refMaps{})
+	t, _, err := deriveWithRefs(name, obj, refMaps{}, Annotations{})
 	return t, err
 }
 
@@ -25,12 +25,15 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 // additionalProperties schemas. nil refs is equivalent to no
 // $ref support. The returned siblings slice carries supplemental
 // types the primary depends on (e.g. the typed object struct
-// produced for a composite root with declared properties).
-func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps) (Type, []Type, error) {
+// produced for a composite root with declared properties). The
+// override Annotations are merged onto the schema's inline
+// annotations with the override winning on every set field.
+func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps, override Annotations) (Type, []Type, error) {
 	annotations, err := ParseAnnotations(obj.Extra)
 	if err != nil {
 		return Type{}, nil, err
 	}
+	annotations = mergeAnnotations(annotations, override)
 	if annotations.GoIdent != "" {
 		name = annotations.GoIdent
 	}
@@ -133,6 +136,9 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps) (Ty
 		return Type{}, nil, err
 	}
 	st.Doc = doc
+	if len(annotations.GoAdditionalFields) > 0 {
+		st.AdditionalFields = append([]GoAdditionalField(nil), annotations.GoAdditionalFields...)
+	}
 	return st, nil, nil
 }
 

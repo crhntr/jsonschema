@@ -109,7 +109,7 @@ func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName st
 		if !ok {
 			return nil, fmt.Errorf("$defs/%s is not an object schema", key)
 		}
-		defT, defSiblings, err := deriveWithRefs(refs["#/$defs/"+key], &defObj, refs)
+		defT, defSiblings, err := deriveWithRefs(refs.byString["#/$defs/"+key], &defObj, refs)
 		if err != nil {
 			return nil, fmt.Errorf("derive $defs/%s: %w", key, err)
 		}
@@ -176,20 +176,16 @@ func emitTypeDecls(t Type) ([]ast.Decl, error) {
 	return decls, nil
 }
 
-// buildRefMap returns a JSON-pointer → Go-identifier map for the
-// root schema and every $defs entry, plus the sorted list of $defs
-// keys so callers can iterate deterministically. goIdent annotations
-// on individual $defs entries override the default name.
-//
-// As a side effect it also populates the package-level
-// schemaPointerRefs map so derivePropertyType can fall back to the
-// resolved-target pointer when a $ref string is not an in-scope key
-// (for example, cross-document URLs).
-func buildRefMap(schema *jsonschema.SchemaObject, rootName string) (map[string]string, []string, error) {
-	refs := map[string]string{
-		"#": rootName,
+// buildRefMap returns a refMaps with both the JSON-pointer and the
+// resolved-*Schema lookups for the root schema and every $defs
+// entry, plus the sorted list of $defs keys so callers can iterate
+// deterministically. goIdent annotations on individual $defs
+// entries override the default name.
+func buildRefMap(schema *jsonschema.SchemaObject, rootName string) (refMaps, []string, error) {
+	refs := refMaps{
+		byString:  map[string]string{"#": rootName},
+		byPointer: map[*jsonschema.Schema]string{},
 	}
-	pointers := map[*jsonschema.Schema]string{}
 	keys := make([]string, 0, len(schema.Defs))
 	for k := range schema.Defs {
 		keys = append(keys, k)
@@ -199,22 +195,21 @@ func buildRefMap(schema *jsonschema.SchemaObject, rootName string) (map[string]s
 		defSchema := schema.Defs[k]
 		defObj, ok := defSchema.TypeObject()
 		if !ok {
-			return nil, nil, fmt.Errorf("$defs/%s is not an object schema", k)
+			return refMaps{}, nil, fmt.Errorf("$defs/%s is not an object schema", k)
 		}
 		annot, err := ParseAnnotations(defObj.Extra)
 		if err != nil {
-			return nil, nil, fmt.Errorf("$defs/%s annotations: %w", k, err)
+			return refMaps{}, nil, fmt.Errorf("$defs/%s annotations: %w", k, err)
 		}
 		name := k
 		if annot.GoIdent != "" {
 			name = annot.GoIdent
 		}
-		refs["#/$defs/"+k] = name
-		pointers[defSchema] = name
+		refs.byString["#/$defs/"+k] = name
+		refs.byPointer[defSchema] = name
 		if r := defSchema.Resolved(); r != nil {
-			pointers[r] = name
+			refs.byPointer[r] = name
 		}
 	}
-	schemaPointerRefs = pointers
 	return refs, keys, nil
 }

@@ -8,11 +8,15 @@ roots — generic over any subset of array / boolean / integer /
 null / number / object / string), 9 ($defs + $ref — including
 self-recursive structures), 10 (resolved-input + allOf merge),
 11 (dependentRequired enforcement — oneOf/anyOf still pending),
-and 12 (per-property goType / goIdent / goJSONTags annotations —
-document-level goOverrides still pending) implemented in
-`internal/generate/`. End-to-end CLI is wired and covered by
-scripttest fixtures under `cmd/go-jsonschema/testdata/generate/`.
-Phases 13–15 pending.
+12 (per-property goType / goIdent / goJSONTags annotations —
+document-level goOverrides still pending), and 14 preview
+(2020-12 meta-schema self-hosts: the full root document at
+`https://json-schema.org/draft/2020-12/schema` now generates a
+package that vets, builds, and round-trips real schemas) all
+implemented in `internal/generate/`. End-to-end CLI is wired and
+covered by scripttest fixtures under
+`cmd/go-jsonschema/testdata/generate/`. Phases 13 (warnings)
+and 15 (replace hand-rolled `Schema`) pending.
 
 ## Context
 

@@ -16,7 +16,7 @@ import (
 // Derive builds an IR Type for the given SchemaObject. name is the
 // exported Go identifier the caller wants on the emitted declaration.
 func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
-	t, _, err := deriveWithRefs(name, obj, nil)
+	t, _, err := deriveWithRefs(name, obj, refMaps{})
 	return t, err
 }
 
@@ -26,7 +26,7 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 // $ref support. The returned siblings slice carries supplemental
 // types the primary depends on (e.g. the typed object struct
 // produced for a composite root with declared properties).
-func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]string) (Type, []Type, error) {
+func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps) (Type, []Type, error) {
 	annotations, err := ParseAnnotations(obj.Extra)
 	if err != nil {
 		return Type{}, nil, err
@@ -80,6 +80,17 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 		}
 	}
 
+	// Pure-$ref alias: the schema is just a {"$ref": ...} (with
+	// at most descriptive metadata like default / description).
+	// Emit `type Name <Target>` so the alias compiles to the same
+	// underlying type as its target.
+	if obj.Ref != "" && !hasStructuralContent(obj) {
+		if name, ok := refs.byString[obj.Ref]; ok {
+			t.Underlying = ident(name)
+			return t, nil, nil
+		}
+	}
+
 	// Scalar root: schema's type is a single primitive and there
 	// are no properties. Emit `type Name <primitive>` with optional
 	// constraint enforcement.
@@ -96,11 +107,7 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 	// Array root: type=array with items schema. Emit
 	// `type Name []ElemType`.
 	if isArrayRoot(obj) {
-		elemObj, ok := obj.Items.TypeObject()
-		if !ok {
-			return Type{}, nil, fmt.Errorf("array root: items must be an object schema")
-		}
-		elem, err := derivePrimitive(&elemObj)
+		elem, err := derivePropertyType(obj.Items, refs)
 		if err != nil {
 			return Type{}, nil, fmt.Errorf("array root items: %w", err)
 		}
@@ -111,11 +118,7 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 	// Map root: type=object with additionalProperties schema and no
 	// declared properties. Emit `type Name map[K]V`.
 	if isMapRoot(obj) {
-		valObj, ok := obj.AdditionalProperties.TypeObject()
-		if !ok {
-			return Type{}, nil, fmt.Errorf("map root: additionalProperties must be an object schema")
-		}
-		val, err := derivePrimitive(&valObj)
+		val, err := derivePropertyType(obj.AdditionalProperties, refs)
 		if err != nil {
 			return Type{}, nil, fmt.Errorf("map root value: %w", err)
 		}
@@ -137,7 +140,7 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs map[string]s
 // / additionalProperties / dependentRequired and returns a struct
 // Type. Used both for plain object roots and for the typed object
 // branch of a composite root.
-func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs map[string]string, parentAnnot Annotations) (Type, error) {
+func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, parentAnnot Annotations) (Type, error) {
 	t := Type{
 		Name:              name,
 		RejectUnknown:     rejectsAdditionalProperties(obj),
@@ -152,11 +155,33 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs map[strin
 
 	for _, jsonName := range jsonNames {
 		propSchema := obj.Properties[jsonName]
-		propObj, ok := propSchema.TypeObject()
-		if !ok {
-			return Type{}, fmt.Errorf("property %q: only object schemas are supported", jsonName)
-		}
 		required := slices.Contains(obj.Required, jsonName)
+
+		// Boolean schemas: `true` accepts anything → field type
+		// `any`; `false` rejects everything, which we treat as
+		// "do not emit a Go field" (the marshaler still
+		// validates via RejectUnknownMembers if set).
+		propObj, isObject := propSchema.TypeObject()
+		if !isObject {
+			b, isBool := propSchema.TypeBool()
+			if !isBool {
+				return Type{}, fmt.Errorf("property %q: schema is neither object nor boolean", jsonName)
+			}
+			if !b {
+				continue
+			}
+			fieldType := ast.Expr(ident("any"))
+			if !required {
+				fieldType = &ast.StarExpr{X: fieldType}
+			}
+			t.Fields = append(t.Fields, Field{
+				GoName:   exportedIdent(jsonName),
+				JSONName: jsonName,
+				TypeExpr: fieldType,
+				Required: required,
+			})
+			continue
+		}
 
 		if isNullPropertySchema(&propObj) {
 			t.NullProperties = append(t.NullProperties, NullProperty{
@@ -199,6 +224,29 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs map[strin
 		})
 	}
 	return t, nil
+}
+
+// hasStructuralContent reports whether obj declares its own type /
+// properties / items / additionalProperties (i.e. anything that
+// would shape the generated Go declaration), beyond a $ref and
+// metadata like default / description / deprecated.
+func hasStructuralContent(obj *jsonschema.SchemaObject) bool {
+	if obj.Type != nil {
+		return true
+	}
+	if len(obj.Properties) > 0 || len(obj.PatternProperties) > 0 {
+		return true
+	}
+	if obj.AdditionalProperties != nil || obj.Items != nil {
+		return true
+	}
+	if len(obj.PrefixItems) > 0 {
+		return true
+	}
+	if len(obj.OneOf) > 0 || len(obj.AnyOf) > 0 {
+		return true
+	}
+	return false
 }
 
 // hasObjectKind reports whether a composite type list contains the
@@ -420,29 +468,17 @@ func needsPointerForOptional(expr ast.Expr) bool {
 // derivePropertyType picks the Go type expression for a property
 // schema. It handles $ref (string-keyed and resolved-pointer-keyed),
 // array-of-T, and primitive shapes.
-func derivePropertyType(schema *jsonschema.Schema, refs map[string]string) (ast.Expr, error) {
+func derivePropertyType(schema *jsonschema.Schema, refs refMaps) (ast.Expr, error) {
 	obj, _ := schema.TypeObject()
 	if obj.Ref != "" {
-		if refs != nil {
-			if name, ok := refs[obj.Ref]; ok {
-				return ident(name), nil
-			}
-		}
-		// Try the resolved target — covers cross-document
-		// refs whose absolute URL is not in the string map but
-		// whose target *Schema is one of our generated types.
-		if resolved := schema.Resolved(); resolved != nil {
-			if name := lookupByResolved(resolved, refs); name != "" {
-				return ident(name), nil
-			}
+		if name, ok := refs.lookupRef(schema, obj.Ref); ok {
+			return ident(name), nil
 		}
 		return ident("any"), nil
 	}
 	if obj.DynamicRef != "" {
-		if resolved := schema.Resolved(); resolved != nil {
-			if name := lookupByResolved(resolved, refs); name != "" {
-				return ident(name), nil
-			}
+		if name, ok := refs.lookupRef(schema, obj.DynamicRef); ok {
+			return ident(name), nil
 		}
 		return ident("any"), nil
 	}
@@ -451,10 +487,11 @@ func derivePropertyType(schema *jsonschema.Schema, refs map[string]string) (ast.
 			switch s {
 			case "array":
 				if obj.Items == nil {
-					break
+					return &ast.ArrayType{Elt: ident("any")}, nil
 				}
 				if _, ok := obj.Items.TypeObject(); !ok {
-					return nil, fmt.Errorf("array items must be an object schema")
+					// Boolean items schema (`true`/`false`) -> any.
+					return &ast.ArrayType{Elt: ident("any")}, nil
 				}
 				elem, err := derivePropertyType(obj.Items, refs)
 				if err != nil {
@@ -480,28 +517,42 @@ func derivePropertyType(schema *jsonschema.Schema, refs map[string]string) (ast.
 			}
 		}
 	}
+	if obj.Type == nil {
+		// Schemas with applicator-only constraints (oneOf, anyOf,
+		// allOf members already merged, etc.) and no declared type
+		// are not yet structurally derivable; degrade to any so
+		// the surrounding type still compiles.
+		return ident("any"), nil
+	}
 	return derivePrimitive(&obj)
 }
 
-// schemaRefs is a side-channel mapping from resolved *jsonschema.Schema
-// pointers to their generated Go type identifier. Populated by
-// buildRefMap and stashed in a package-private var so derivePropertyType
-// can consult it through the existing string-only ref map signature.
-//
-// This is intentionally a singleton: GenerateFromSchema rebuilds it on
-// each call before deriving, and derive runs sequentially so there's
-// no concurrent mutation risk.
-var schemaPointerRefs map[*jsonschema.Schema]string
+// refMaps bundles the two ways a $ref target can be located: by its
+// raw $ref string and by the resolved *jsonschema.Schema pointer
+// (the only stable identity for cross-document refs whose URL is
+// not an in-scope key). The zero value is safe to pass.
+type refMaps struct {
+	byString  map[string]string
+	byPointer map[*jsonschema.Schema]string
+}
 
-// lookupByResolved consults the side-channel pointer map after a
-// $ref string lookup misses. The string map is preferred when the
-// raw $ref happens to be an in-scope key, but for cross-document
-// refs the resolved pointer is the only stable identity.
-func lookupByResolved(s *jsonschema.Schema, _ map[string]string) string {
-	if schemaPointerRefs == nil {
-		return ""
+func (r refMaps) lookupRef(s *jsonschema.Schema, ref string) (string, bool) {
+	if r.byString != nil {
+		if name, ok := r.byString[ref]; ok {
+			return name, true
+		}
 	}
-	return schemaPointerRefs[s]
+	if r.byPointer != nil {
+		if resolved := s.Resolved(); resolved != nil {
+			if name, ok := r.byPointer[resolved]; ok {
+				return name, true
+			}
+		}
+		if name, ok := r.byPointer[s]; ok {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // copyDependentRequired clones the schema's dependentRequired map

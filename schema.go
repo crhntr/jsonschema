@@ -30,27 +30,10 @@ package jsonschema
 
 import (
 	"errors"
-	"fmt"
-	"iter"
-	"maps"
-	"slices"
 
 	"github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
 )
-
-// Parse unmarshals a JSON Schema document and retains a reference to buf so
-// callers can recover the original bytes via (*Schema).Source. The returned
-// schema is unresolved — call (*Resolver).Resolve or the package-level
-// Resolve to dereference $ref / $dynamicRef.
-func Parse(buf []byte) (*Schema, error) {
-	var s Schema
-	if err := json.Unmarshal(buf, &s); err != nil {
-		return nil, err
-	}
-	s.source = buf
-	return &s, nil
-}
 
 // Schema is a parsed JSON Schema document or subschema. A Schema
 // holds either a boolean schema (true / false) or an object schema
@@ -82,92 +65,16 @@ type Schema struct {
 	vocabularies map[string]bool
 }
 
-// Resolved returns the lexical-scope target of $ref or $dynamicRef, or nil if
-// this subschema has no reference or the schema has not been resolved.
-func (m *Schema) Resolved() *Schema { return m.resolved }
-
-// IsDynamic reports whether this subschema's $dynamicRef is "bookended" per
-// JSON Schema 2020-12 §8.2.3.2 — i.e., the initial lexical target's resource
-// contains a matching $dynamicAnchor, so a validator must walk the dynamic
-// scope at validation time.
-func (m *Schema) IsDynamic() bool { return m.dynamic }
-
-// BaseURI returns the lexical-scope base URI in effect at this subschema.
-func (m *Schema) BaseURI() string { return m.baseURI }
+func (m *Schema) unsetIs() {
+	m.isBool = false
+	m.isObject = false
+}
 
 // PathInResource returns the RFC 6901 JSON Pointer from this subschema's
 // resource root to itself. Empty for the resource root; reset to empty
 // when an embedded $id opens a new resource. Used to construct
 // absoluteKeywordLocation values for spec-compliant validation output.
 func (m *Schema) PathInResource() string { return m.pathInResource }
-
-// Resource returns the root of the JSON Schema resource (the nearest
-// enclosing schema that defines $id, or the document root) containing this
-// subschema. Returns nil before resolution.
-func (m *Schema) Resource() *Schema { return m.resource }
-
-// Anchor looks up a $anchor by name within this resource. Only meaningful
-// when called on a resource root (m == m.Resource()).
-func (m *Schema) Anchor(name string) *Schema { return m.anchors[name] }
-
-// DynamicAnchor looks up a $dynamicAnchor by name within this resource.
-func (m *Schema) DynamicAnchor(name string) *Schema { return m.dynamicAnchors[name] }
-
-// Subschemas yields each direct subschema child of m. Boolean schemas
-// (and nil) yield nothing. Children are visited in this order: $defs,
-// properties, allOf, anyOf, oneOf, then if / then / else / not / items /
-// additionalProperties / propertyNames. Nil singleton slots are skipped.
-func (m *Schema) Subschemas() iter.Seq[*Schema] {
-	return func(yield func(*Schema) bool) {
-		if m == nil {
-			return
-		}
-		obj, ok := m.TypeObject()
-		if !ok {
-			return
-		}
-		for _, s := range []iter.Seq[*Schema]{
-			maps.Values(obj.Properties),
-			maps.Values(obj.Defs),
-			maps.Values(obj.PatternProperties),
-			maps.Values(obj.DependentSchemas),
-			slices.Values(obj.AllOf),
-			slices.Values(obj.AnyOf),
-			slices.Values(obj.OneOf),
-			slices.Values(obj.PrefixItems),
-			slices.Values([]*Schema{
-				obj.If,
-				obj.Then,
-				obj.Else,
-				obj.Not,
-				obj.Items,
-				obj.Contains,
-				obj.AdditionalProperties,
-				obj.UnevaluatedProperties,
-				obj.UnevaluatedItems,
-				obj.PropertyNames,
-				obj.ContentSchema,
-			}),
-		} {
-			for e := range s {
-				if !yield(e) {
-					return
-				}
-			}
-		}
-	}
-}
-
-// Source returns the original JSON document bytes this Schema was parsed from.
-// Only populated on resource roots (top-level document or embedded $id
-// resources within the same document share the same slice). Returns nil
-// otherwise.
-func (m *Schema) Source() []byte { return m.source }
-
-func (m *Schema) unsetIs() {
-	m.isBool = false
-	m.isObject = false
-}
 
 // SchemaObject is the field-by-field representation of a JSON Schema
 // 2020-12 object schema. Each named keyword is a Go field with the
@@ -310,44 +217,6 @@ func (m *Schema) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	}
 }
 
-// Dependency represents a single entry of the legacy dependencies
-// keyword: either a list of required properties or a subschema.
-type Dependency struct {
-	required []string
-	schema   *Schema
-}
-
-// Required returns the list of required property names and reports
-// whether d was parsed from the array form of dependencies. The
-// schema form returns ok=false.
-func (d *Dependency) Required() ([]string, bool) { return d.required, d.required != nil }
-
-// Schema returns the subschema and is non-nil only when d was parsed
-// from the schema form of dependencies.
-func (d *Dependency) Schema() *Schema { return d.schema }
-
-// UnmarshalJSONFrom implements the encoding/json/v2 protocol.
-// Accepts either an array of property names (legacy required form)
-// or a subschema body.
-func (d *Dependency) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	switch dec.PeekKind() {
-	case jsontext.KindBeginArray:
-		var req []string
-		if err := json.UnmarshalDecode(dec, &req); err != nil {
-			return err
-		}
-		d.required = req
-		return nil
-	default:
-		var m Schema
-		if err := json.UnmarshalDecode(dec, &m); err != nil {
-			return err
-		}
-		d.schema = &m
-		return nil
-	}
-}
-
 // Type is the value of the JSON Schema "type" keyword. Per the spec
 // it may be a single type name (e.g. "string") or an array of names
 // (e.g. ["string","null"]); the two shapes round-trip through
@@ -404,18 +273,6 @@ type TypeString = SimpleType
 // of [SimpleType] values. The instance must match at least one.
 type TypeArray = []SimpleType
 
-func typeEnumStrings() []SimpleType {
-	return []SimpleType{
-		"array",
-		"boolean",
-		"integer",
-		"null",
-		"number",
-		"object",
-		"string",
-	}
-}
-
 // TypeString returns the single-string payload and reports whether
 // m was parsed from a single type name.
 func (m *Type) TypeString() (SimpleType, bool) { return m.string, m.isString }
@@ -424,37 +281,8 @@ func (m *Type) TypeString() (SimpleType, bool) { return m.string, m.isString }
 // parsed from an array of type names.
 func (m *Type) TypeArray() ([]SimpleType, bool) { return m.array, m.isArray }
 
-// Validate reports whether m's contents are valid JSON Schema type
-// values: each entry must be one of the seven SimpleType strings
-// defined by the spec, and an array form must be non-empty.
-func (m *Type) Validate() error {
-	if m.isArray {
-		for _, item := range m.array {
-			if err := item.Validate(); err != nil {
-				return err
-			}
-		}
-		if len(m.array) < 1 {
-			return errors.New("type array must have at least one item")
-		}
-	} else if m.isString {
-		return m.string.Validate()
-	}
-	return nil
-}
-
 // SimpleType is one of the seven JSON Schema primitive type names:
 // "array", "boolean", "integer", "null", "number", "object",
 // "string". Use [SimpleType.Validate] to confirm a value is in that
 // closed set.
 type SimpleType string
-
-// Validate reports whether st is one of the seven JSON Schema
-// primitive type names.
-func (st SimpleType) Validate() error {
-	if !slices.Contains(typeEnumStrings(), st) {
-		exp, _ := json.Marshal(typeEnumStrings())
-		return fmt.Errorf("invalid SimpleType: unexpected enum value %s expected one of %s", string(st), string(exp))
-	}
-	return nil
-}

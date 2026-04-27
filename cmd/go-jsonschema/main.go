@@ -222,7 +222,7 @@ func generate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 	if err := os.MkdirAll(outAbs, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", outAbs, err)
 	}
-	outFile := filepath.Join(outAbs, strings.ToLower(typeName)+".go")
+	outFile := filepath.Join(outAbs, strings.ToLower(typeName)+".gen.go")
 	if err := os.WriteFile(outFile, src, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", outFile, err)
 	}

@@ -208,6 +208,9 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 		if err != nil {
 			return Type{}, fmt.Errorf("property %q annotations: %w", jsonName, err)
 		}
+		if override, ok := parentAnnot.Fields[jsonName]; ok {
+			propAnnotations = mergeAnnotations(propAnnotations, override)
+		}
 
 		var fieldType ast.Expr
 		if propAnnotations.GoType != "" {

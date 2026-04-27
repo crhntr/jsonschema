@@ -58,5 +58,13 @@ func mergeAnnotations(dst Annotations, src Annotations) Annotations {
 	if len(src.GoAdditionalFields) > 0 {
 		dst.GoAdditionalFields = append([]GoAdditionalField(nil), src.GoAdditionalFields...)
 	}
+	if len(src.Fields) > 0 {
+		if dst.Fields == nil {
+			dst.Fields = make(map[string]Annotations, len(src.Fields))
+		}
+		for k, v := range src.Fields {
+			dst.Fields[k] = mergeAnnotations(dst.Fields[k], v)
+		}
+	}
 	return dst
 }

@@ -49,6 +49,13 @@ type Annotations struct {
 	// The list ordering is preserved on output. An entry whose
 	// GoIdent is empty is emitted as an embedded field.
 	GoAdditionalFields []GoAdditionalField `json:"goAdditionalFields,omitempty"`
+	// Fields carries per-property annotations keyed by JSON
+	// property name. Each entry's annotations override (with merge
+	// semantics) the inline annotations on the property's own
+	// schema. Used in sidecar overrides files when the author
+	// can't edit the underlying schema, e.g. to retype a single
+	// field on the merged 2020-12 meta-schema's SchemaObject.
+	Fields map[string]Annotations `json:"fields,omitempty"`
 }
 
 // GoAdditionalField describes one Go struct field declared via the

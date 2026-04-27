@@ -431,6 +431,39 @@ Each phase lands as its own commit.
 15. **Replace hand-rolled `Schema`** (separate, opt-in commit). Run
     the full conformance suite against the generated types.
 
+    The supporting infrastructure has landed:
+
+    - `--overrides FILE` lets a sidecar JSON inject vocab annotations
+      onto schemas the author cannot edit (the published 2020-12
+      meta-schema being the motivating case).
+    - `goAdditionalFields` carries the resolution metadata (resolved,
+      baseURI, anchors, …) onto the emitted `Schema` struct with
+      `json:"-"` so wire encoding is unaffected.
+    - `testdata/codegen/schema_overrides.json` is the canonical
+      sidecar, and
+      `cmd/go-jsonschema/testdata/generate/metaschema_with_resolution_metadata.txt`
+      proves the meta-schema generates with the resolution
+      metadata fields attached and with the right types.
+
+    Remaining gaps before the actual `schema.go` swap:
+
+    - Per-field `goType` overrides on the merged `SchemaObject`
+      (today: `Type *any`; want: `Type *Type`). The shape
+      already exists for inline annotations on properties; extend
+      the overrides file to allow `refs["#"].fields.<jsonName>`
+      entries.
+    - A way to opt the boolean-variant accessor / setter into a
+      legacy name (the package's existing public API is
+      `(*Schema).TypeBool`, the generator emits `TypeBoolean`).
+      Could be a per-variant `goAccessor` annotation on the
+      composite root, or a once-off rename of the package's
+      callers; both are tractable.
+    - A `Type` and `SimpleType` that carry the same accessor
+      contract as the hand-rolled versions
+      (`TypeString` returning `SimpleType`, `Validate()` methods).
+      Either generate them with overrides or keep them
+      hand-rolled in `simpletype_validate.go`.
+
 CLI wiring (originally a separate phase) landed alongside the
 end-to-end fixture work: `go-jsonschema generate --schema X --out
 PKG_DIR --package NAME --type Ident` is exercised by every

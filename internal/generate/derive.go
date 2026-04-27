@@ -178,7 +178,7 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs map[strin
 				return Type{}, fmt.Errorf("property %q goType %q: %w", jsonName, propAnnotations.GoType, err)
 			}
 		} else {
-			fieldType, err = derivePropertyType(&propObj, refs)
+			fieldType, err = derivePropertyType(propSchema, refs)
 			if err != nil {
 				return Type{}, fmt.Errorf("property %q: %w", jsonName, err)
 			}
@@ -418,21 +418,32 @@ func needsPointerForOptional(expr ast.Expr) bool {
 }
 
 // derivePropertyType picks the Go type expression for a property
-// schema. It handles $ref, array-of-T, and primitive shapes. Map and
-// inline-object property shapes will land in later phases.
-func derivePropertyType(obj *jsonschema.SchemaObject, refs map[string]string) (ast.Expr, error) {
+// schema. It handles $ref (string-keyed and resolved-pointer-keyed),
+// array-of-T, and primitive shapes.
+func derivePropertyType(schema *jsonschema.Schema, refs map[string]string) (ast.Expr, error) {
+	obj, _ := schema.TypeObject()
 	if obj.Ref != "" {
 		if refs != nil {
 			if name, ok := refs[obj.Ref]; ok {
 				return ident(name), nil
 			}
 		}
-		// Unresolved $ref (cross-document or unknown target) →
-		// fall back to any.
+		// Try the resolved target — covers cross-document
+		// refs whose absolute URL is not in the string map but
+		// whose target *Schema is one of our generated types.
+		if resolved := schema.Resolved(); resolved != nil {
+			if name := lookupByResolved(resolved, refs); name != "" {
+				return ident(name), nil
+			}
+		}
 		return ident("any"), nil
 	}
-	// $dynamicRef without a resolution mechanism is also any.
 	if obj.DynamicRef != "" {
+		if resolved := schema.Resolved(); resolved != nil {
+			if name := lookupByResolved(resolved, refs); name != "" {
+				return ident(name), nil
+			}
+		}
 		return ident("any"), nil
 	}
 	if obj.Type != nil {
@@ -442,32 +453,26 @@ func derivePropertyType(obj *jsonschema.SchemaObject, refs map[string]string) (a
 				if obj.Items == nil {
 					break
 				}
-				itemObj, ok := obj.Items.TypeObject()
-				if !ok {
+				if _, ok := obj.Items.TypeObject(); !ok {
 					return nil, fmt.Errorf("array items must be an object schema")
 				}
-				elem, err := derivePropertyType(&itemObj, refs)
+				elem, err := derivePropertyType(obj.Items, refs)
 				if err != nil {
 					return nil, fmt.Errorf("array items: %w", err)
 				}
 				return &ast.ArrayType{Elt: elem}, nil
 
 			case "object":
-				// Inline object with properties → fallback to any
-				// for now (sibling-type generation for inline
-				// objects is a future phase).
 				if len(obj.Properties) > 0 {
 					return ident("any"), nil
 				}
 				if obj.AdditionalProperties == nil {
 					return ident("any"), nil
 				}
-				apObj, ok := obj.AdditionalProperties.TypeObject()
-				if !ok {
-					// boolean schema (e.g. true / false) → any
+				if _, ok := obj.AdditionalProperties.TypeObject(); !ok {
 					return &ast.MapType{Key: ident("string"), Value: ident("any")}, nil
 				}
-				val, err := derivePropertyType(&apObj, refs)
+				val, err := derivePropertyType(obj.AdditionalProperties, refs)
 				if err != nil {
 					return nil, fmt.Errorf("additionalProperties: %w", err)
 				}
@@ -475,7 +480,28 @@ func derivePropertyType(obj *jsonschema.SchemaObject, refs map[string]string) (a
 			}
 		}
 	}
-	return derivePrimitive(obj)
+	return derivePrimitive(&obj)
+}
+
+// schemaRefs is a side-channel mapping from resolved *jsonschema.Schema
+// pointers to their generated Go type identifier. Populated by
+// buildRefMap and stashed in a package-private var so derivePropertyType
+// can consult it through the existing string-only ref map signature.
+//
+// This is intentionally a singleton: GenerateFromSchema rebuilds it on
+// each call before deriving, and derive runs sequentially so there's
+// no concurrent mutation risk.
+var schemaPointerRefs map[*jsonschema.Schema]string
+
+// lookupByResolved consults the side-channel pointer map after a
+// $ref string lookup misses. The string map is preferred when the
+// raw $ref happens to be an in-scope key, but for cross-document
+// refs the resolved pointer is the only stable identity.
+func lookupByResolved(s *jsonschema.Schema, _ map[string]string) string {
+	if schemaPointerRefs == nil {
+		return ""
+	}
+	return schemaPointerRefs[s]
 }
 
 // copyDependentRequired clones the schema's dependentRequired map

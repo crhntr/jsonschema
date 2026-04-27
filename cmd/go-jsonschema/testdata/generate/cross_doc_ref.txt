@@ -1,0 +1,41 @@
+go-jsonschema generate --schema https://example.com/refs/embedded.json --out ./model --package model --type Outer
+
+exec go test -count=1 ./model
+
+-- go.mod --
+module example.com/embpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+// embedded.json declares an embedded $id resource and uses
+// $ref to point at it across the document boundary. The
+// generator should follow the resolved Schema and emit a
+// typed Go field for the child property pointing at the
+// inner $defs alias.
+func TestOuter_RoundTrip(t *testing.T) {
+	in := []byte(`{"child":{"label":"hi"}}`)
+	var o Outer
+	if err := json.Unmarshal(in, &o); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if o.Child == nil {
+		t.Fatalf("Child = nil, want pointer to inner")
+	}
+	if o.Child.Label == nil || *o.Child.Label != "hi" {
+		t.Errorf("Child.Label = %v, want pointer to 'hi'", o.Child.Label)
+	}
+	out, err := json.Marshal(o)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != string(in) {
+		t.Errorf("Marshal = %s", out)
+	}
+}

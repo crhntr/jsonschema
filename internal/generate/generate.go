@@ -180,17 +180,24 @@ func emitTypeDecls(t Type) ([]ast.Decl, error) {
 // root schema and every $defs entry, plus the sorted list of $defs
 // keys so callers can iterate deterministically. goIdent annotations
 // on individual $defs entries override the default name.
+//
+// As a side effect it also populates the package-level
+// schemaPointerRefs map so derivePropertyType can fall back to the
+// resolved-target pointer when a $ref string is not an in-scope key
+// (for example, cross-document URLs).
 func buildRefMap(schema *jsonschema.SchemaObject, rootName string) (map[string]string, []string, error) {
 	refs := map[string]string{
 		"#": rootName,
 	}
+	pointers := map[*jsonschema.Schema]string{}
 	keys := make([]string, 0, len(schema.Defs))
 	for k := range schema.Defs {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		defObj, ok := schema.Defs[k].TypeObject()
+		defSchema := schema.Defs[k]
+		defObj, ok := defSchema.TypeObject()
 		if !ok {
 			return nil, nil, fmt.Errorf("$defs/%s is not an object schema", k)
 		}
@@ -203,6 +210,11 @@ func buildRefMap(schema *jsonschema.SchemaObject, rootName string) (map[string]s
 			name = annot.GoIdent
 		}
 		refs["#/$defs/"+k] = name
+		pointers[defSchema] = name
+		if r := defSchema.Resolved(); r != nil {
+			pointers[r] = name
+		}
 	}
+	schemaPointerRefs = pointers
 	return refs, keys, nil
 }

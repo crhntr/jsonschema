@@ -415,11 +415,13 @@ Each phase lands as its own commit.
       of `map[string]any`. Property-level `$ref` resolves to the
       target identifier; unresolved `$ref` / `$dynamicRef`
       degrade to `any`.
-    - Cross-document `$ref` resolution: the root meta-schema's
-      `allOf: [{$ref: "meta/core"}, …]` and `$dynamicRef "#meta"`
-      need the existing package `Resolver` integrated into
-      `GenerateFromSchema` so allOf can fold the vocabulary
-      siblings.
+    - ✅ Cross-document `$ref` resolution: the CLI now feeds
+      `loadSchema` (which runs the package `Resolver`) into
+      `GenerateFromSchema`, and `derivePropertyType` consults a
+      pointer map of resolved targets so refs whose URI is not
+      an in-scope key still find the right Go identifier.
+      `$dynamicRef "#meta"` still degrades to `any` until
+      anchor-based dynamic-scope plumbing lands.
     - `anyOf` validation in marshalers (Phase 11 part 2).
 
 15. **Replace hand-rolled `Schema`** (separate, opt-in commit). Run

@@ -44,7 +44,7 @@ func run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 		}
 		return exitOK
 	case "generate":
-		if err := generate(wd, flagSet.Args()[1:], stdout, stderr); err != nil {
+		if err := generate(ctx, wd, flagSet.Args()[1:], stdout, stderr, client); err != nil {
 			_, _ = io.WriteString(stderr, err.Error()+"\n")
 			return exitError
 		}
@@ -189,7 +189,7 @@ func readInstance(wd, arg string, stdin io.Reader) ([]byte, string, error) {
 	return buf, arg, nil
 }
 
-func generate(wd string, args []string, stdout, stderr io.Writer) error {
+func generate(ctx context.Context, wd string, args []string, stdout, stderr io.Writer, client *http.Client) error {
 	var (
 		schemaPath  string
 		outDir      string
@@ -207,22 +207,14 @@ func generate(wd string, args []string, stdout, stderr io.Writer) error {
 	if schemaPath == "" {
 		return fmt.Errorf("--schema is required")
 	}
-	buf, err := os.ReadFile(filepath.Join(wd, schemaPath))
+	root, err := loadSchema(ctx, wd, schemaPath, false, client)
 	if err != nil {
-		return fmt.Errorf("read schema: %w", err)
-	}
-	root, err := jsonschema.Parse(buf)
-	if err != nil {
-		return fmt.Errorf("parse schema: %w", err)
-	}
-	obj, ok := root.TypeObject()
-	if !ok {
-		return fmt.Errorf("root schema must be an object schema")
+		return err
 	}
 	if packageName == "" {
 		packageName = filepath.Base(filepath.Clean(filepath.Join(wd, outDir)))
 	}
-	src, err := gen.Generate(&obj, typeName, packageName)
+	src, err := gen.GenerateFromSchema(root, typeName, packageName)
 	if err != nil {
 		return err
 	}

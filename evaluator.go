@@ -785,15 +785,19 @@ func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff i
 	}
 	if len(o.Required) > 0 {
 		parent := ctx.atKeyword("required").baseOutput(valOff)
+		var subs []Output
 		for _, req := range o.Required {
-			if _, ok := keys[req]; !ok {
-				parent.Valid = false
-				if parent.Error == "" {
-					parent.Error = fmt.Sprintf("missing required property %q", req)
-				} else {
-					parent.Error += fmt.Sprintf("; missing required property %q", req)
-				}
+			if _, ok := keys[req]; ok {
+				continue
 			}
+			sub := ctx.atKeyword("required").baseOutput(valOff)
+			sub.Valid = false
+			sub.Error = fmt.Sprintf("missing required property %q", req)
+			subs = append(subs, sub)
+			parent.Valid = false
+		}
+		if !parent.Valid {
+			parent.Errors = subs
 		}
 		out = append(out, parent)
 	}
@@ -815,19 +819,24 @@ func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff i
 	}
 	if len(o.DependentRequired) > 0 {
 		parent := ctx.atKeyword("dependentRequired").baseOutput(valOff)
+		var subs []Output
 		for prop, deps := range o.DependentRequired {
 			if _, present := keys[prop]; !present {
 				continue
 			}
 			for _, d := range deps {
-				if _, ok := keys[d]; !ok {
-					parent.Valid = false
-					if parent.Error != "" {
-						parent.Error += "; "
-					}
-					parent.Error += fmt.Sprintf("property %q requires %q", prop, d)
+				if _, ok := keys[d]; ok {
+					continue
 				}
+				sub := ctx.atKeywordKey("dependentRequired", prop).baseOutput(valOff)
+				sub.Valid = false
+				sub.Error = fmt.Sprintf("property %q requires %q", prop, d)
+				subs = append(subs, sub)
+				parent.Valid = false
 			}
+		}
+		if !parent.Valid {
+			parent.Errors = subs
 		}
 		out = append(out, parent)
 	}
@@ -861,18 +870,19 @@ func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff i
 			}
 			if req, ok := dep.Required(); ok {
 				for _, d := range req {
-					if _, ok := keys[d]; !ok {
-						parent.Valid = false
-						if parent.Error != "" {
-							parent.Error += "; "
-						}
-						parent.Error += fmt.Sprintf("dependency: property %q requires %q", prop, d)
+					if _, ok := keys[d]; ok {
+						continue
 					}
+					sub := ctx.atKeywordKey("dependencies", prop).baseOutput(valOff)
+					sub.Valid = false
+					sub.Error = fmt.Sprintf("property %q requires %q", prop, d)
+					subs = append(subs, sub)
+					parent.Valid = false
 				}
 				continue
 			}
-			if sub := dep.Schema(); sub != nil {
-				subOut, subCovered := sub.evaluate(ctx.atKeywordKey("dependencies", prop), val, valOff)
+			if subSchema := dep.Schema(); subSchema != nil {
+				subOut, subCovered := subSchema.evaluate(ctx.atKeywordKey("dependencies", prop), val, valOff)
 				subs = append(subs, subOut)
 				if subOut.Valid {
 					covered.merge(subCovered)
@@ -1010,25 +1020,32 @@ func (o *SchemaObject) checkArrayBody(ctx evalCtx, val jsontext.Value, valOff in
 		out = append(out, c)
 	}
 	if o.UniqueItems {
-		c := ctx.atKeyword("uniqueItems").baseOutput(valOff)
+		parent := ctx.atKeyword("uniqueItems").baseOutput(valOff)
+		var subs []Output
 		for i := range items {
 			for j := i + 1; j < len(items); j++ {
 				eq, err := Equal(items[i].val, items[j].val)
 				if err != nil {
-					c.Valid = false
-					c.Error = err.Error()
+					sub := ctx.atKeyword("uniqueItems").baseOutput(valOff)
+					sub.Valid = false
+					sub.Error = err.Error()
+					subs = append(subs, sub)
+					parent.Valid = false
 					break
 				}
 				if eq {
-					c.Valid = false
-					if c.Error != "" {
-						c.Error += "; "
-					}
-					c.Error += fmt.Sprintf("array items %d and %d are equal", i, j)
+					sub := ctx.atKeyword("uniqueItems").atInstanceIndex(j).baseOutput(items[j].off)
+					sub.Valid = false
+					sub.Error = fmt.Sprintf("array items %d and %d are equal", i, j)
+					subs = append(subs, sub)
+					parent.Valid = false
 				}
 			}
 		}
-		out = append(out, c)
+		if !parent.Valid {
+			parent.Errors = subs
+		}
+		out = append(out, parent)
 	}
 	if !ctx.scope.skipPrefixItems && len(o.PrefixItems) > 0 {
 		parent := ctx.atKeyword("prefixItems").baseOutput(valOff)

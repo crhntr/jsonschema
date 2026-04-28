@@ -233,7 +233,7 @@ func (r *Resolver) indexDocument(doc *Schema, fetchURI string) ([]string, error)
 	idx := indexState{
 		seen: map[string]struct{}{},
 	}
-	if err := r.indexSubtree(doc, fetchURI, doc, &idx); err != nil {
+	if err := r.indexSubtree(doc, fetchURI, doc, "", &idx); err != nil {
 		return nil, err
 	}
 	return idx.external, nil
@@ -265,7 +265,7 @@ type indexState struct {
 	external []string
 }
 
-func (r *Resolver) indexSubtree(m *Schema, base string, resource *Schema, idx *indexState) error {
+func (r *Resolver) indexSubtree(m *Schema, base string, resource *Schema, path string, idx *indexState) error {
 	if m == nil {
 		return nil
 	}
@@ -273,6 +273,7 @@ func (r *Resolver) indexSubtree(m *Schema, base string, resource *Schema, idx *i
 	if !ok {
 		m.baseURI = base
 		m.resource = resource
+		m.pathInResource = path
 		return nil
 	}
 
@@ -281,11 +282,18 @@ func (r *Resolver) indexSubtree(m *Schema, base string, resource *Schema, idx *i
 		if err != nil {
 			return err
 		}
+		if newResource != resource {
+			// Embedded $id opens a new resource; its internal path
+			// resets so descendants are indexed relative to the
+			// embedded resource root rather than the outer one.
+			path = ""
+		}
 		base, resource = newBase, newResource
 	}
 
 	m.baseURI = base
 	m.resource = resource
+	m.pathInResource = path
 
 	if obj.Anchor != "" {
 		resource.anchors[obj.Anchor] = m
@@ -303,8 +311,94 @@ func (r *Resolver) indexSubtree(m *Schema, base string, resource *Schema, idx *i
 		}
 	}
 
-	for c := range m.Subschemas() {
-		if err := r.indexSubtree(c, base, resource, idx); err != nil {
+	return r.indexKeywords(obj, base, resource, path, idx)
+}
+
+// indexKeywords descends through every subschema-bearing keyword of obj,
+// extending path with the keyword name (and key/index) so that each
+// child Schema receives the JSON Pointer of its location within the
+// current resource.
+func (r *Resolver) indexKeywords(obj SchemaObject, base string, resource *Schema, path string, idx *indexState) error {
+	tokenChild := func(token string) string {
+		return jsonptr.NewBuilder(path).Token(token).String()
+	}
+	keyedChild := func(keyword, key string) string {
+		return jsonptr.NewBuilder(path).Token(keyword).Token(key).String()
+	}
+	indexedChild := func(keyword string, i int) string {
+		return jsonptr.NewBuilder(path).Token(keyword).Index(i).String()
+	}
+
+	for k, sub := range obj.Defs {
+		if err := r.indexSubtree(sub, base, resource, keyedChild("$defs", k), idx); err != nil {
+			return err
+		}
+	}
+	for k, sub := range obj.Properties {
+		if err := r.indexSubtree(sub, base, resource, keyedChild("properties", k), idx); err != nil {
+			return err
+		}
+	}
+	for k, sub := range obj.PatternProperties {
+		if err := r.indexSubtree(sub, base, resource, keyedChild("patternProperties", k), idx); err != nil {
+			return err
+		}
+	}
+	for k, sub := range obj.DependentSchemas {
+		if err := r.indexSubtree(sub, base, resource, keyedChild("dependentSchemas", k), idx); err != nil {
+			return err
+		}
+	}
+	for k, dep := range obj.Dependencies {
+		if dep == nil {
+			continue
+		}
+		if sub := dep.Schema(); sub != nil {
+			if err := r.indexSubtree(sub, base, resource, keyedChild("dependencies", k), idx); err != nil {
+				return err
+			}
+		}
+	}
+	for i, sub := range obj.AllOf {
+		if err := r.indexSubtree(sub, base, resource, indexedChild("allOf", i), idx); err != nil {
+			return err
+		}
+	}
+	for i, sub := range obj.AnyOf {
+		if err := r.indexSubtree(sub, base, resource, indexedChild("anyOf", i), idx); err != nil {
+			return err
+		}
+	}
+	for i, sub := range obj.OneOf {
+		if err := r.indexSubtree(sub, base, resource, indexedChild("oneOf", i), idx); err != nil {
+			return err
+		}
+	}
+	for i, sub := range obj.PrefixItems {
+		if err := r.indexSubtree(sub, base, resource, indexedChild("prefixItems", i), idx); err != nil {
+			return err
+		}
+	}
+	singletonKeywords := []struct {
+		keyword string
+		sub     *Schema
+	}{
+		{"if", obj.If},
+		{"then", obj.Then},
+		{"else", obj.Else},
+		{"not", obj.Not},
+		{"items", obj.Items},
+		{"contains", obj.Contains},
+		{"additionalProperties", obj.AdditionalProperties},
+		{"unevaluatedProperties", obj.UnevaluatedProperties},
+		{"unevaluatedItems", obj.UnevaluatedItems},
+		{"propertyNames", obj.PropertyNames},
+	}
+	for _, sk := range singletonKeywords {
+		if sk.sub == nil {
+			continue
+		}
+		if err := r.indexSubtree(sk.sub, base, resource, tokenChild(sk.keyword), idx); err != nil {
 			return err
 		}
 	}

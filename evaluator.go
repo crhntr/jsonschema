@@ -293,6 +293,13 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		addChild(mc)
 	}
 
+	// Unknown keywords (spec §3.5.4): collected as annotations so
+	// downstream consumers — schema generators, linters, custom
+	// vocabularies — can see them in the verbose output.
+	for _, uc := range o.unknownKeywordAnnotations(ctx, valOff) {
+		addChild(uc)
+	}
+
 	// Per spec verbose: when the parent is valid, all child evaluations
 	// go in Annotations; when invalid, all (regardless of their own
 	// validity) go in Errors. This matches §12.4.7's example output.
@@ -304,6 +311,23 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		}
 	}
 	return out, covered
+}
+
+// unknownKeywordAnnotations emits one valid:true Output per entry in
+// SchemaObject.Extra (i.e. keywords the schema declared that this
+// library doesn't recognize). Per spec §3.5.4 implementations should
+// collect such keywords as annotations.
+func (o *SchemaObject) unknownKeywordAnnotations(ctx evalCtx, valOff int64) []Output {
+	if len(o.Extra) == 0 {
+		return nil
+	}
+	out := make([]Output, 0, len(o.Extra))
+	for k, v := range o.Extra {
+		c := ctx.atKeyword(k).baseOutput(valOff)
+		c.Annotation = jsontext.Value(v).Clone()
+		out = append(out, c)
+	}
+	return out
 }
 
 // metadataAnnotations returns valid:true Outputs for the spec's

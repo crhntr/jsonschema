@@ -247,6 +247,39 @@ func TestAnnotationNotHasNoAnnotationChildren(t *testing.T) {
 	}
 }
 
+func TestAnnotationUnknownKeyword(t *testing.T) {
+	// "x-mycustom" isn't a known keyword; per spec §3.5.4 it should
+	// surface as an annotation in verbose output.
+	doc := resolveBytes(t, "https://example.com/ann/unk", []byte(`{
+		"$id": "https://example.com/ann/unk",
+		"type": "string",
+		"x-mycustom": "hello",
+		"x-other": [1, 2]
+	}`))
+	out := doc.Validate("inst", []byte(`"abc"`))
+	if !out.Valid {
+		t.Fatalf("expected valid; tree: %+v", out)
+	}
+	custom := findValidKeyword(out, "/x-mycustom")
+	if custom == nil {
+		t.Fatalf("missing /x-mycustom annotation; tree: %+v", out)
+	}
+	if !strings.Contains(string(custom.Annotation), `"hello"`) {
+		t.Errorf("/x-mycustom.Annotation = %s, want \"hello\"", custom.Annotation)
+	}
+	other := findValidKeyword(out, "/x-other")
+	if other == nil {
+		t.Fatalf("missing /x-other annotation; tree: %+v", out)
+	}
+	var arr []int
+	if err := json.Unmarshal(other.Annotation, &arr); err != nil {
+		t.Fatalf("Unmarshal /x-other.Annotation: %v (%s)", err, other.Annotation)
+	}
+	if len(arr) != 2 || arr[0] != 1 || arr[1] != 2 {
+		t.Errorf("/x-other.Annotation = %v, want [1 2]", arr)
+	}
+}
+
 func TestVerboseTreeMarshalsCleanly(t *testing.T) {
 	// A schema that exercises a few annotation-producing keywords and
 	// always passes; the marshaled output must be a spec-valid Output

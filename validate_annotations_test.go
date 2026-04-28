@@ -104,7 +104,7 @@ func TestAnnotationFormatNotAsserting(t *testing.T) {
 	}
 }
 
-func TestAnnotationFormatAssertingPassesAnnotates(t *testing.T) {
+func TestAnnotationFormatAssertingDoesNotAnnotate(t *testing.T) {
 	doc := resolveBytes(t, "https://example.com/ann/fmta", []byte(`{
 		"$id": "https://example.com/ann/fmta",
 		"format": "uuid"
@@ -113,9 +113,14 @@ func TestAnnotationFormatAssertingPassesAnnotates(t *testing.T) {
 	if !out.Valid {
 		t.Fatalf("expected valid uuid; tree: %+v", out)
 	}
+	// Spec §F.2: under format-assertion, /format is an assertion and
+	// must not emit an annotation.
 	fmt := findValidKeyword(out, "/format")
-	if fmt == nil || len(fmt.Annotation) == 0 {
-		t.Errorf("expected /format with annotation when valid; got %+v", fmt)
+	if fmt == nil {
+		t.Fatalf("expected /format unit; tree: %+v", out)
+	}
+	if len(fmt.Annotation) != 0 {
+		t.Errorf("/format should have no annotation under assertion; got %s", fmt.Annotation)
 	}
 }
 
@@ -156,6 +161,89 @@ func TestAnnotationItemsTrue(t *testing.T) {
 	}
 	if string(items.Annotation) != "true" {
 		t.Errorf("/items.Annotation = %s, want true", items.Annotation)
+	}
+}
+
+func TestAnnotationIfAlwaysEmits(t *testing.T) {
+	doc := resolveBytes(t, "https://example.com/ann/if", []byte(`{
+		"$id": "https://example.com/ann/if",
+		"if":   { "type": "string" },
+		"then": { "minLength": 1 }
+	}`))
+	for _, body := range []string{`"x"`, `42`} {
+		out := doc.Validate("inst", []byte(body))
+		if !out.Valid {
+			t.Fatalf("expected valid for %s; tree: %+v", body, out)
+		}
+		ifUnit := findValidKeyword(out, "/if")
+		if ifUnit == nil {
+			t.Fatalf("expected /if unit for body %s; tree: %+v", body, out)
+		}
+		if string(ifUnit.Annotation) != "true" {
+			t.Errorf("/if.Annotation = %s, want true (per spec §10.2.2.1)", ifUnit.Annotation)
+		}
+	}
+}
+
+func TestAnnotationAnyOfOnlyMatching(t *testing.T) {
+	doc := resolveBytes(t, "https://example.com/ann/anyof", []byte(`{
+		"$id": "https://example.com/ann/anyof",
+		"anyOf": [
+			{ "type": "string" },
+			{ "type": "integer" }
+		]
+	}`))
+	out := doc.Validate("inst", []byte(`"hi"`))
+	if !out.Valid {
+		t.Fatal("expected valid")
+	}
+	any := findValidKeyword(out, "/anyOf")
+	if any == nil {
+		t.Fatalf("missing /anyOf; tree: %+v", out)
+	}
+	// Only one branch matched; spec says only that branch's
+	// annotations propagate.
+	if len(any.Annotations) != 1 {
+		t.Errorf("/anyOf.Annotations len = %d, want 1 (matching branch only)", len(any.Annotations))
+	}
+}
+
+func TestAnnotationOneOfOnlyMatching(t *testing.T) {
+	doc := resolveBytes(t, "https://example.com/ann/oneof", []byte(`{
+		"$id": "https://example.com/ann/oneof",
+		"oneOf": [
+			{ "type": "string" },
+			{ "type": "integer" }
+		]
+	}`))
+	out := doc.Validate("inst", []byte(`42`))
+	if !out.Valid {
+		t.Fatal("expected valid")
+	}
+	one := findValidKeyword(out, "/oneOf")
+	if one == nil {
+		t.Fatalf("missing /oneOf; tree: %+v", out)
+	}
+	if len(one.Annotations) != 1 {
+		t.Errorf("/oneOf.Annotations len = %d, want 1 (matching branch only)", len(one.Annotations))
+	}
+}
+
+func TestAnnotationNotHasNoAnnotationChildren(t *testing.T) {
+	doc := resolveBytes(t, "https://example.com/ann/not", []byte(`{
+		"$id": "https://example.com/ann/not",
+		"not": { "type": "string" }
+	}`))
+	out := doc.Validate("inst", []byte(`42`))
+	if !out.Valid {
+		t.Fatal("expected valid (42 is not a string)")
+	}
+	not := findValidKeyword(out, "/not")
+	if not == nil {
+		t.Fatalf("missing /not; tree: %+v", out)
+	}
+	if len(not.Annotations) != 0 {
+		t.Errorf("/not.Annotations should be empty (spec §10.2.1.4 — annotation undefined); got %+v", not.Annotations)
 	}
 }
 

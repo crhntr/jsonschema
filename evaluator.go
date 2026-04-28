@@ -504,14 +504,15 @@ func (o *SchemaObject) checkStringKeywords(ctx evalCtx, val jsontext.Value, valO
 	if o.Format != "" {
 		c := ctx.atKeyword("format").baseOutput(valOff)
 		if ctx.scope.assertFormat {
+			// Spec §F.2: under format-assertion, format is an
+			// assertion and produces no annotation.
 			if err := validateFormat(o.Format, s); err != nil {
 				c.Valid = false
 				c.Error = err.Error()
-			} else {
-				v, _ := json.Marshal(o.Format)
-				c.Annotation = jsontext.Value(v)
 			}
 		} else {
+			// Spec §F.2: under format-annotation, format is
+			// annotation-only.
 			v, _ := json.Marshal(o.Format)
 			c.Annotation = jsontext.Value(v)
 		}
@@ -544,43 +545,54 @@ func (o *SchemaObject) checkComposition(ctx evalCtx, val jsontext.Value, valOff 
 	}
 	if len(o.AnyOf) > 0 {
 		parent := ctx.atKeyword("anyOf").baseOutput(valOff)
-		var subs []Output
+		var allSubs []Output
+		var validSubs []Output
 		matched := false
 		for i, sub := range o.AnyOf {
 			subOut, subCovered := sub.evaluate(ctx.atKeywordIndex("anyOf", i), val, valOff)
-			subs = append(subs, subOut)
+			allSubs = append(allSubs, subOut)
 			if subOut.Valid {
 				matched = true
+				validSubs = append(validSubs, subOut)
 				covered.merge(subCovered)
 			}
 		}
 		if !matched {
 			parent.Valid = false
 			parent.Error = "no anyOf subschema matched"
+			parent.Errors = allSubs
+		} else {
+			// Spec §10.2.1.2: annotations come only from the matching
+			// sub-schemas.
+			parent.Annotations = validSubs
 		}
-		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if len(o.OneOf) > 0 {
 		parent := ctx.atKeyword("oneOf").baseOutput(valOff)
 		matches := 0
 		var matchedCovered coveredKeys
-		var subs []Output
+		var matchedSub Output
+		var allSubs []Output
 		for i, sub := range o.OneOf {
 			subOut, subCovered := sub.evaluate(ctx.atKeywordIndex("oneOf", i), val, valOff)
-			subs = append(subs, subOut)
+			allSubs = append(allSubs, subOut)
 			if subOut.Valid {
 				matches++
 				matchedCovered = subCovered
+				matchedSub = subOut
 			}
 		}
 		if matches != 1 {
 			parent.Valid = false
 			parent.Error = fmt.Sprintf("oneOf: %d subschemas matched, want exactly 1", matches)
+			parent.Errors = allSubs
 		} else {
+			// Spec §10.2.1.3: annotations come from the single matching
+			// sub-schema only.
+			parent.Annotations = []Output{matchedSub}
 			covered.merge(matchedCovered)
 		}
-		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if o.Not != nil {
@@ -589,16 +601,23 @@ func (o *SchemaObject) checkComposition(ctx evalCtx, val jsontext.Value, valOff 
 		if subOut.Valid {
 			parent.Valid = false
 			parent.Error = "not: subschema unexpectedly matched"
+			parent.Errors = []Output{subOut}
 		}
-		assignChildren(&parent, []Output{subOut})
+		// Spec §10.2.1.4: not's annotation result is undefined; when
+		// /not is valid (sub failed), do not surface the failing sub
+		// as an annotation.
 		out = append(out, parent)
 	}
 	if o.If != nil {
-		ifOut, ifCovered := o.If.evaluate(ctx.atKeyword("if"), val, valOff)
-		// "if" itself never fails the parent; we report nothing for
-		// it as a separate Output here. then/else are evaluated based
-		// on its outcome, and their Outputs become the parent's.
-		if ifOut.Valid {
+		ifSubOut, ifCovered := o.If.evaluate(ctx.atKeyword("if"), val, valOff)
+		// Spec §10.2.2.1: /if always validates. Its annotation result
+		// is the boolean true to mark that the keyword was processed,
+		// independent of whether the sub-schema validated.
+		ifOut := ctx.atKeyword("if").baseOutput(valOff)
+		ifOut.Annotation = jsontext.Value("true")
+		ifOut.Annotations = []Output{ifSubOut}
+		out = append(out, ifOut)
+		if ifSubOut.Valid {
 			covered.merge(ifCovered)
 			if o.Then != nil {
 				thenOut, thenCovered := o.Then.evaluate(ctx.atKeyword("then"), val, valOff)

@@ -116,3 +116,54 @@ func TestValidateStdinInvalid(t *testing.T) {
 		t.Errorf("stderr = %q, want type-mismatch message", stderr.String())
 	}
 }
+
+func TestValidateOutputFlag(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "schema.json"), []byte(`{"type":"string"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		format  string
+		body    string
+		wantOK  bool
+		wantSub string // substring required in stdout
+	}{
+		{"flag valid", "flag", `"x"`, true, `"valid":true`},
+		{"flag invalid", "flag", `42`, false, `"valid":false`},
+		{"basic invalid carries error", "basic", `42`, false, `"errors"`},
+		{"detailed invalid", "detailed", `42`, false, `"keywordLocation":"/type"`},
+		{"verbose invalid", "verbose", `42`, false, `"keywordLocation":"/type"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			args := []string{"validate", "--schema", "schema.json", "--output", tc.format, "-"}
+			code := run(t.Context(), dir, args, &stdout, &stderr, strings.NewReader(tc.body), http.DefaultClient)
+			if tc.wantOK && code != 0 {
+				t.Fatalf("exit=%d, want 0; stderr=%s", code, stderr.String())
+			}
+			if !tc.wantOK && code == 0 {
+				t.Fatalf("exit=0, want non-zero; stdout=%s", stdout.String())
+			}
+			if !strings.Contains(stdout.String(), tc.wantSub) {
+				t.Errorf("stdout missing %q; got %s", tc.wantSub, stdout.String())
+			}
+		})
+	}
+}
+
+func TestValidateOutputUnknownFormatRejected(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "schema.json"), []byte(`{"type":"string"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(t.Context(), dir, []string{"validate", "--schema", "schema.json", "--output", "bogus", "-"},
+		&stdout, &stderr, strings.NewReader(`"x"`), http.DefaultClient)
+	if code == 0 {
+		t.Fatalf("exit=0, want non-zero for unknown --output value")
+	}
+	if !strings.Contains(stderr.String(), "bogus") {
+		t.Errorf("stderr should mention the bad value; got %s", stderr.String())
+	}
+}

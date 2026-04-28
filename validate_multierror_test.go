@@ -145,18 +145,21 @@ func TestMultiErrorItemsManyBad(t *testing.T) {
 	if items == nil {
 		t.Fatalf("missing /items unit; tree: %+v", out)
 	}
-	// Three failing items at /1, /2, /3.
-	if len(items.Errors) != 3 {
-		t.Errorf("/items.Errors len = %d, want 3", len(items.Errors))
+	// Per spec verbose: an invalid parent's Errors carries every child
+	// evaluation (valid:true and valid:false alike), so all four items
+	// appear with /1 /2 /3 invalid and /0 valid.
+	if len(items.Errors) != 4 {
+		t.Errorf("/items.Errors len = %d, want 4 (one per item)", len(items.Errors))
 	}
-	wantInst := map[string]bool{"/1": true, "/2": true, "/3": true}
+	failedAt := map[string]bool{}
 	for _, e := range items.Errors {
-		if !wantInst[e.InstanceLocation] {
-			t.Errorf("unexpected InstanceLocation %q", e.InstanceLocation)
+		if !e.Valid {
+			failedAt[e.InstanceLocation] = true
 		}
-		delete(wantInst, e.InstanceLocation)
 	}
-	if len(wantInst) > 0 {
-		t.Errorf("missing InstanceLocations: %v", wantInst)
+	for _, want := range []string{"/1", "/2", "/3"} {
+		if !failedAt[want] {
+			t.Errorf("missing failure at InstanceLocation %q", want)
+		}
 	}
 }

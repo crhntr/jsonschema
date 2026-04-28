@@ -306,6 +306,49 @@ func TestAnnotationContentVocabulary(t *testing.T) {
 	}
 }
 
+func TestAnnotationDollarSchema(t *testing.T) {
+	doc := resolveBytes(t, "https://example.com/ann/dialect", []byte(`{
+		"$id": "https://example.com/ann/dialect",
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"type": "string"
+	}`))
+	out := doc.Validate("inst", []byte(`"x"`))
+	if !out.Valid {
+		t.Fatalf("expected valid; tree: %+v", out)
+	}
+	dialect := findValidKeyword(out, "/$schema")
+	if dialect == nil {
+		t.Fatalf("missing /$schema annotation; tree: %+v", out)
+	}
+	if !strings.Contains(string(dialect.Annotation), "json-schema.org/draft/2020-12/schema") {
+		t.Errorf("/$schema.Annotation = %s, want the dialect URI", dialect.Annotation)
+	}
+}
+
+func TestAnnotationDollarSchemaLegacyDraftReported(t *testing.T) {
+	// Pre-2020 dialects validate best-effort; the /$schema annotation
+	// reports the declared URI so consumers can detect the legacy
+	// dialect themselves. Use an example.com URL containing "draft-07"
+	// so the network metaschema isn't consulted (the test asserts
+	// surface behavior, not actual draft-07 conformance).
+	doc := resolveBytes(t, "https://example.com/ann/legacy", []byte(`{
+		"$id": "https://example.com/ann/legacy",
+		"$schema": "https://example.com/meta/draft-07/schema",
+		"type": "string"
+	}`))
+	out := doc.Validate("inst", []byte(`"x"`))
+	if !out.Valid {
+		t.Fatalf("expected valid (legacy draft, basic type still works); tree: %+v", out)
+	}
+	dialect := findValidKeyword(out, "/$schema")
+	if dialect == nil {
+		t.Fatalf("missing /$schema annotation; tree: %+v", out)
+	}
+	if !strings.Contains(string(dialect.Annotation), "draft-07") {
+		t.Errorf("/$schema.Annotation = %s, want draft-07 URI", dialect.Annotation)
+	}
+}
+
 func TestVerboseTreeMarshalsCleanly(t *testing.T) {
 	// A schema that exercises a few annotation-producing keywords and
 	// always passes; the marshaled output must be a spec-valid Output

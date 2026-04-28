@@ -280,6 +280,32 @@ func TestAnnotationUnknownKeyword(t *testing.T) {
 	}
 }
 
+func TestAnnotationContentVocabulary(t *testing.T) {
+	doc := resolveBytes(t, "https://example.com/ann/content", []byte(`{
+		"$id": "https://example.com/ann/content",
+		"type": "string",
+		"contentMediaType": "application/json",
+		"contentEncoding": "base64",
+		"contentSchema": { "type": "object" }
+	}`))
+	out := doc.Validate("inst", []byte(`"eyJhIjoxfQ=="`))
+	if !out.Valid {
+		t.Fatalf("expected valid (content keywords are annotation-only); tree: %+v", out)
+	}
+	mt := findValidKeyword(out, "/contentMediaType")
+	if mt == nil || !strings.Contains(string(mt.Annotation), `"application/json"`) {
+		t.Errorf("missing or wrong /contentMediaType; got %+v", mt)
+	}
+	enc := findValidKeyword(out, "/contentEncoding")
+	if enc == nil || !strings.Contains(string(enc.Annotation), `"base64"`) {
+		t.Errorf("missing or wrong /contentEncoding; got %+v", enc)
+	}
+	cs := findValidKeyword(out, "/contentSchema")
+	if cs == nil || !strings.Contains(string(cs.Annotation), `"type"`) {
+		t.Errorf("missing or wrong /contentSchema; got %+v", cs)
+	}
+}
+
 func TestVerboseTreeMarshalsCleanly(t *testing.T) {
 	// A schema that exercises a few annotation-producing keywords and
 	// always passes; the marshaled output must be a spec-valid Output

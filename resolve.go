@@ -393,6 +393,7 @@ func (r *Resolver) indexKeywords(obj SchemaObject, base string, resource *Schema
 		{"unevaluatedProperties", obj.UnevaluatedProperties},
 		{"unevaluatedItems", obj.UnevaluatedItems},
 		{"propertyNames", obj.PropertyNames},
+		{"contentSchema", obj.ContentSchema},
 	}
 	for _, sk := range singletonKeywords {
 		if sk.sub == nil {

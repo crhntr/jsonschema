@@ -244,7 +244,8 @@ func TestSubschemasYieldsEachChildExactlyOnce(t *testing.T) {
 		"additionalProperties":   {"description": "additionalProperties"},
 		"unevaluatedProperties": {"description": "unevaluatedProperties"},
 		"unevaluatedItems":      {"description": "unevaluatedItems"},
-		"propertyNames":         {"description": "propertyNames"}
+		"propertyNames":         {"description": "propertyNames"},
+		"contentSchema":         {"description": "contentSchema"}
 	}`)
 	schema, err := jsonschema.Parse(body)
 	if err != nil {
@@ -264,6 +265,7 @@ func TestSubschemasYieldsEachChildExactlyOnce(t *testing.T) {
 		"items", "contains",
 		"additionalProperties", "unevaluatedProperties", "unevaluatedItems",
 		"propertyNames",
+		"contentSchema",
 	}
 
 	counts := make(map[string]int)

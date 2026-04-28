@@ -1,3 +1,31 @@
+// Package jsonschema is a JSON Schema 2020-12 toolkit for Go.
+//
+// The package provides three concentric layers:
+//
+//   - Parse turns raw JSON Schema bytes into a [*Schema] without
+//     resolving any references. The returned tree exposes every
+//     keyword as a Go field on [SchemaObject] (or as an opaque value
+//     under SchemaObject.Extra for keywords this library does not
+//     recognize).
+//
+//   - [Resolver] fetches and links a transitive closure of schema
+//     resources, populating $ref / $dynamicRef / $anchor /
+//     $dynamicAnchor pointers and applying the metaschema's
+//     $vocabulary declaration.
+//
+//   - [*Schema.Validate] runs an instance through a resolved schema
+//     and returns an [Output] tree shaped per JSON Schema 2020-12
+//     §12.4 (Output). Output is a structural superset of the spec's
+//     outputUnit — same fields plus a [Source] byte-position
+//     extension — and can be projected to any of the four spec
+//     formats via [Output.Flag], [Output.Basic], [Output.Detailed],
+//     and [Output.Verbose].
+//
+// Validate targets JSON Schema 2020-12 specifically. Pre-2020-12
+// dialects are best-effort: the declared $schema URI surfaces in
+// the /$schema annotation, prefixItems is skipped, but other dialect
+// differences (draft-07 lacks unevaluatedProperties, draft-04 lacks
+// const, etc.) are not emulated.
 package jsonschema
 
 import (
@@ -24,6 +52,15 @@ func Parse(buf []byte) (*Schema, error) {
 	return &s, nil
 }
 
+// Schema is a parsed JSON Schema document or subschema. A Schema
+// holds either a boolean schema (true / false) or an object schema
+// ([SchemaObject]); use [*Schema.TypeBool] and [*Schema.TypeObject]
+// to discriminate. The zero value is invalid; obtain a Schema from
+// [Parse] or by walking another Schema.
+//
+// Resolution metadata (resolved $ref target, base URI, owning
+// resource, anchor maps) is populated by [*Resolver.Resolve] and is
+// nil on freshly-parsed values.
 type Schema struct {
 	isBool, isObject bool
 	bool             bool
@@ -132,6 +169,13 @@ func (m *Schema) unsetIs() {
 	m.isObject = false
 }
 
+// SchemaObject is the field-by-field representation of a JSON Schema
+// 2020-12 object schema. Each named keyword is a Go field with the
+// matching json tag; keywords this library does not recognize are
+// captured by Extra so JSON-pointer navigation still reaches them
+// and round-tripping preserves them.
+//
+// SchemaObject is the body type behind [*Schema.TypeObject].
 type SchemaObject struct {
 	ID     string `json:"$id,omitempty"`
 	Schema string `json:"$schema,omitempty"`
@@ -224,9 +268,18 @@ type SchemaObject struct {
 	Extra map[string]jsontext.Value `json:",inline"`
 }
 
-func (m *Schema) TypeBool() (bool, bool)           { return m.bool, m.isBool }
+// TypeBool returns the boolean payload and reports whether m is a
+// boolean schema. For object schemas the second return is false.
+func (m *Schema) TypeBool() (bool, bool) { return m.bool, m.isBool }
+
+// TypeObject returns the [SchemaObject] payload and reports whether
+// m is an object schema. For boolean schemas the second return is
+// false.
 func (m *Schema) TypeObject() (SchemaObject, bool) { return m.object, m.isObject }
 
+// MarshalJSONTo implements the encoding/json/v2 protocol. It emits
+// either the boolean payload, the [SchemaObject] body, or an empty
+// object — whichever shape m was parsed from.
 func (m *Schema) MarshalJSONTo(encoder *jsontext.Encoder) error {
 	switch {
 	case m.isBool:
@@ -238,6 +291,10 @@ func (m *Schema) MarshalJSONTo(encoder *jsontext.Encoder) error {
 	}
 }
 
+// UnmarshalJSONFrom implements the encoding/json/v2 protocol.
+// Accepts either a boolean (true / false) or an object body and
+// records which shape was parsed for [*Schema.TypeBool] and
+// [*Schema.TypeObject] to dispatch on.
 func (m *Schema) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	switch dec.PeekKind() {
 	case jsontext.KindFalse, jsontext.KindTrue:
@@ -260,9 +317,18 @@ type Dependency struct {
 	schema   *Schema
 }
 
+// Required returns the list of required property names and reports
+// whether d was parsed from the array form of dependencies. The
+// schema form returns ok=false.
 func (d *Dependency) Required() ([]string, bool) { return d.required, d.required != nil }
-func (d *Dependency) Schema() *Schema            { return d.schema }
 
+// Schema returns the subschema and is non-nil only when d was parsed
+// from the schema form of dependencies.
+func (d *Dependency) Schema() *Schema { return d.schema }
+
+// UnmarshalJSONFrom implements the encoding/json/v2 protocol.
+// Accepts either an array of property names (legacy required form)
+// or a subschema body.
 func (d *Dependency) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	switch dec.PeekKind() {
 	case jsontext.KindBeginArray:
@@ -282,6 +348,10 @@ func (d *Dependency) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	}
 }
 
+// Type is the value of the JSON Schema "type" keyword. Per the spec
+// it may be a single type name (e.g. "string") or an array of names
+// (e.g. ["string","null"]); the two shapes round-trip through
+// [Type.TypeString] and [Type.TypeArray] respectively.
 type Type struct {
 	isString, isArray bool
 	string            TypeString
@@ -293,6 +363,9 @@ func (t *Type) unsetIs() {
 	t.isArray = false
 }
 
+// MarshalJSONTo implements the encoding/json/v2 protocol. Emits
+// either the single-string form or the array form, depending on how
+// t was parsed; an unset Type marshals as null.
 func (t *Type) MarshalJSONTo(enc *jsontext.Encoder) error {
 	switch {
 	case t.isString:
@@ -304,6 +377,9 @@ func (t *Type) MarshalJSONTo(enc *jsontext.Encoder) error {
 	}
 }
 
+// UnmarshalJSONFrom implements the encoding/json/v2 protocol.
+// Accepts either a single string ("string", "object", …) or an array
+// of such strings.
 func (t *Type) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	switch dec.PeekKind() {
 	case jsontext.KindBeginArray:
@@ -319,8 +395,13 @@ func (t *Type) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	}
 }
 
+// TypeString is the single-string form of the "type" keyword, an
+// alias for [SimpleType] so that callers branching on Type's two
+// shapes can be explicit about which they expect.
 type TypeString = SimpleType
 
+// TypeArray is the array form of the "type" keyword: an ordered list
+// of [SimpleType] values. The instance must match at least one.
 type TypeArray = []SimpleType
 
 func typeEnumStrings() []SimpleType {
@@ -335,9 +416,17 @@ func typeEnumStrings() []SimpleType {
 	}
 }
 
-func (m *Type) TypeString() (SimpleType, bool)  { return m.string, m.isString }
+// TypeString returns the single-string payload and reports whether
+// m was parsed from a single type name.
+func (m *Type) TypeString() (SimpleType, bool) { return m.string, m.isString }
+
+// TypeArray returns the array payload and reports whether m was
+// parsed from an array of type names.
 func (m *Type) TypeArray() ([]SimpleType, bool) { return m.array, m.isArray }
 
+// Validate reports whether m's contents are valid JSON Schema type
+// values: each entry must be one of the seven SimpleType strings
+// defined by the spec, and an array form must be non-empty.
 func (m *Type) Validate() error {
 	if m.isArray {
 		for _, item := range m.array {
@@ -354,8 +443,14 @@ func (m *Type) Validate() error {
 	return nil
 }
 
+// SimpleType is one of the seven JSON Schema primitive type names:
+// "array", "boolean", "integer", "null", "number", "object",
+// "string". Use [SimpleType.Validate] to confirm a value is in that
+// closed set.
 type SimpleType string
 
+// Validate reports whether st is one of the seven JSON Schema
+// primitive type names.
 func (st SimpleType) Validate() error {
 	if !slices.Contains(typeEnumStrings(), st) {
 		exp, _ := json.Marshal(typeEnumStrings())

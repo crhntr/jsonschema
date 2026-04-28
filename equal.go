@@ -10,6 +10,13 @@ import (
 	"github.com/go-json-experiment/json/jsontext"
 )
 
+// Equal reports whether two JSON values are structurally equivalent
+// under JSON Schema's "equal" relation: numbers compare by mathematical
+// value (1 == 1.0), objects ignore key order, arrays preserve order,
+// and string / bool / null compare as their JSON values. Used by the
+// const, enum, and uniqueItems keywords. Empty inputs (both empty)
+// compare equal; mixed-empty compares unequal. A non-nil error
+// indicates malformed JSON.
 func Equal(a, b []byte) (bool, error) {
 	if len(a) == 0 && len(b) == 0 {
 		return true, nil

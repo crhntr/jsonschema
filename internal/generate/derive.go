@@ -176,7 +176,7 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 		// validates via RejectUnknownMembers if set).
 		propObj, isObject := propSchema.TypeObject()
 		if !isObject {
-			b, isBool := propSchema.TypeBool()
+			b, isBool := propSchema.TypeBoolean()
 			if !isBool {
 				return Type{}, fmt.Errorf("property %q: schema is neither object nor boolean", jsonName)
 			}
@@ -212,19 +212,26 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 			propAnnotations = mergeAnnotations(propAnnotations, override)
 		}
 
-		var fieldType ast.Expr
+		var (
+			fieldType   ast.Expr
+			explicitGoType bool
+		)
 		if propAnnotations.GoType != "" {
 			fieldType, err = parser.ParseExpr(propAnnotations.GoType)
 			if err != nil {
 				return Type{}, fmt.Errorf("property %q goType %q: %w", jsonName, propAnnotations.GoType, err)
 			}
+			explicitGoType = true
 		} else {
 			fieldType, err = derivePropertyType(propSchema, refs)
 			if err != nil {
 				return Type{}, fmt.Errorf("property %q: %w", jsonName, err)
 			}
 		}
-		if !required && needsPointerForOptional(fieldType) {
+		// goType wins as-is — the user has spelled the exact Go
+		// type they want and the optional-pointer wrap would
+		// silently double-indirect it.
+		if !explicitGoType && !required && needsPointerForOptional(fieldType) {
 			fieldType = &ast.StarExpr{X: fieldType}
 		}
 		goName := exportedIdent(jsonName)
@@ -600,7 +607,7 @@ func rejectsAdditionalProperties(obj *jsonschema.SchemaObject) bool {
 	if obj.AdditionalProperties == nil {
 		return false
 	}
-	b, ok := obj.AdditionalProperties.TypeBool()
+	b, ok := obj.AdditionalProperties.TypeBoolean()
 	return ok && !b
 }
 

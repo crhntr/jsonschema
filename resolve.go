@@ -762,7 +762,7 @@ func (m *Schema) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (js
 		return "", live, nil
 	}
 	if ptr == "" {
-		b, _ := m.TypeBool()
+		b, _ := m.TypeBoolean()
 		return "", b, nil
 	}
 	return ptr, nil, fmt.Errorf("cannot descend into boolean schema at %q", ptr)

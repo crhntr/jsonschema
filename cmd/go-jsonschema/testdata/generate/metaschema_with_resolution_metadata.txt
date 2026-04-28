@@ -17,7 +17,10 @@ exec go test -count=1 ./model
         {"goIdent": "dynamicAnchors", "goType": "map[string]*Schema"},
         {"goIdent": "source", "goType": "[]byte"},
         {"goIdent": "skipValidation", "goType": "bool"}
-      ]
+      ],
+      "fields": {
+        "type": {"goType": "*any"}
+      }
     }
   }
 }

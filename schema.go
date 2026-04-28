@@ -37,7 +37,7 @@ import (
 
 // Schema is a parsed JSON Schema document or subschema. A Schema
 // holds either a boolean schema (true / false) or an object schema
-// ([SchemaObject]); use [*Schema.TypeBool] and [*Schema.TypeObject]
+// ([SchemaObject]); use [*Schema.TypeBoolean] and [*Schema.TypeObject]
 // to discriminate. The zero value is invalid; obtain a Schema from
 // [Parse] or by walking another Schema.
 //
@@ -175,9 +175,9 @@ type SchemaObject struct {
 	Extra map[string]jsontext.Value `json:",inline"`
 }
 
-// TypeBool returns the boolean payload and reports whether m is a
+// TypeBoolean returns the boolean payload and reports whether m is a
 // boolean schema. For object schemas the second return is false.
-func (m *Schema) TypeBool() (bool, bool) { return m.bool, m.isBool }
+func (m *Schema) TypeBoolean() (bool, bool) { return m.bool, m.isBool }
 
 // TypeObject returns the [SchemaObject] payload and reports whether
 // m is an object schema. For boolean schemas the second return is
@@ -200,7 +200,7 @@ func (m *Schema) MarshalJSONTo(encoder *jsontext.Encoder) error {
 
 // UnmarshalJSONFrom implements the encoding/json/v2 protocol.
 // Accepts either a boolean (true / false) or an object body and
-// records which shape was parsed for [*Schema.TypeBool] and
+// records which shape was parsed for [*Schema.TypeBoolean] and
 // [*Schema.TypeObject] to dispatch on.
 func (m *Schema) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	switch dec.PeekKind() {
@@ -217,72 +217,3 @@ func (m *Schema) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	}
 }
 
-// Type is the value of the JSON Schema "type" keyword. Per the spec
-// it may be a single type name (e.g. "string") or an array of names
-// (e.g. ["string","null"]); the two shapes round-trip through
-// [Type.TypeString] and [Type.TypeArray] respectively.
-type Type struct {
-	isString, isArray bool
-	string            TypeString
-	array             TypeArray
-}
-
-func (t *Type) unsetIs() {
-	t.isString = false
-	t.isArray = false
-}
-
-// MarshalJSONTo implements the encoding/json/v2 protocol. Emits
-// either the single-string form or the array form, depending on how
-// t was parsed; an unset Type marshals as null.
-func (t *Type) MarshalJSONTo(enc *jsontext.Encoder) error {
-	switch {
-	case t.isString:
-		return json.MarshalEncode(enc, t.string)
-	case t.isArray:
-		return json.MarshalEncode(enc, t.array)
-	default:
-		return enc.WriteToken(jsontext.Null)
-	}
-}
-
-// UnmarshalJSONFrom implements the encoding/json/v2 protocol.
-// Accepts either a single string ("string", "object", …) or an array
-// of such strings.
-func (t *Type) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	switch dec.PeekKind() {
-	case jsontext.KindBeginArray:
-		t.unsetIs()
-		t.isArray = true
-		return json.UnmarshalDecode(dec, &t.array)
-	case jsontext.KindString:
-		t.unsetIs()
-		t.isString = true
-		return json.UnmarshalDecode(dec, &t.string)
-	default:
-		return errors.New("expected type to be either a string or array of strings")
-	}
-}
-
-// TypeString is the single-string form of the "type" keyword, an
-// alias for [SimpleType] so that callers branching on Type's two
-// shapes can be explicit about which they expect.
-type TypeString = SimpleType
-
-// TypeArray is the array form of the "type" keyword: an ordered list
-// of [SimpleType] values. The instance must match at least one.
-type TypeArray = []SimpleType
-
-// TypeString returns the single-string payload and reports whether
-// m was parsed from a single type name.
-func (m *Type) TypeString() (SimpleType, bool) { return m.string, m.isString }
-
-// TypeArray returns the array payload and reports whether m was
-// parsed from an array of type names.
-func (m *Type) TypeArray() ([]SimpleType, bool) { return m.array, m.isArray }
-
-// SimpleType is one of the seven JSON Schema primitive type names:
-// "array", "boolean", "integer", "null", "number", "object",
-// "string". Use [SimpleType.Validate] to confirm a value is in that
-// closed set.
-type SimpleType string

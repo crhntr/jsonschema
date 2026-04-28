@@ -17,6 +17,26 @@ type Overrides struct {
 	// Annotations before derivation, with the override winning on
 	// any field collision.
 	Refs map[string]Annotations `json:"refs,omitempty"`
+	// JSONPackage selects which json/jsontext import paths the
+	// emitter should use. Empty defaults to the stdlib jsonv2
+	// path. "experiment" uses
+	// github.com/go-json-experiment/json (and its jsontext
+	// subpackage), which lets the output drop into projects that
+	// haven't enabled GOEXPERIMENT=jsonv2.
+	JSONPackage string `json:"jsonPackage,omitempty"`
+}
+
+// jsonImports returns the import paths the generator should emit
+// for the json and jsontext packages.
+func (o Overrides) jsonImports() (jsonPath, jsontextPath string) {
+	switch o.JSONPackage {
+	case "", "stdlib":
+		return "encoding/json/v2", "encoding/json/jsontext"
+	case "experiment":
+		return "github.com/go-json-experiment/json", "github.com/go-json-experiment/json/jsontext"
+	default:
+		return o.JSONPackage, o.JSONPackage + "/jsontext"
+	}
 }
 
 // ParseOverrides decodes JSON-encoded sidecar overrides.

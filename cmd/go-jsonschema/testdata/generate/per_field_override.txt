@@ -50,11 +50,14 @@ func TestDoc_PerFieldOverrides(t *testing.T) {
 		t.Errorf("Tags type = %s, want []model.Tag", got)
 	}
 
+	// Explicit goType wins as-is: the override said "int64" so
+	// the field is bare int64, not the *int64 the optional-wrap
+	// would otherwise produce.
 	count, ok := rt.FieldByName("Count")
 	if !ok {
 		t.Fatalf("Doc has no Count field")
 	}
-	if got := count.Type.String(); got != "*int64" {
-		t.Errorf("Count type = %s, want *int64", got)
+	if got := count.Type.String(); got != "int64" {
+		t.Errorf("Count type = %s, want int64", got)
 	}
 }

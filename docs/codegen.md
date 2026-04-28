@@ -445,24 +445,42 @@ Each phase lands as its own commit.
       proves the meta-schema generates with the resolution
       metadata fields attached and with the right types.
 
-    Remaining gaps before the actual `schema.go` swap:
+    Closed gaps:
 
-    - Per-field `goType` overrides on the merged `SchemaObject`
-      (today: `Type *any`; want: `Type *Type`). The shape
-      already exists for inline annotations on properties; extend
-      the overrides file to allow `refs["#"].fields.<jsonName>`
-      entries.
-    - A way to opt the boolean-variant accessor / setter into a
-      legacy name (the package's existing public API is
-      `(*Schema).TypeBool`, the generator emits `TypeBoolean`).
-      Could be a per-variant `goAccessor` annotation on the
-      composite root, or a once-off rename of the package's
-      callers; both are tractable.
-    - A `Type` and `SimpleType` that carry the same accessor
-      contract as the hand-rolled versions
-      (`TypeString` returning `SimpleType`, `Validate()` methods).
-      Either generate them with overrides or keep them
-      hand-rolled in `simpletype_validate.go`.
+    - ✅ Per-field `goType` overrides via
+      `refs["#"].fields.<jsonName>: {goType: …}` (mergeAnnotations
+      now folds the per-property map). Explicit `goType` skips the
+      optional-pointer wrap so the override appears verbatim.
+    - ✅ Boolean-variant accessor name reconciled by renaming the
+      package's two `TypeBool` callers to `TypeBoolean`, the
+      generator's default. The hand-rolled `Schema.TypeBool`
+      method is now `TypeBoolean`.
+    - ✅ `Type` / `SimpleType` split into `type.go` so the
+      generator's emit doesn't have to reproduce their
+      hand-rolled accessor contract; `simpletype_validate.go`
+      retains the validation methods.
+    - ✅ `--overrides` shape gains `jsonPackage` ("stdlib" |
+      "experiment" | custom path) so the generator can target
+      `github.com/go-json-experiment/json` for projects that
+      can't enable `GOEXPERIMENT=jsonv2`.
+
+    Remaining gaps:
+
+    - Field-name initialism handling: the meta-schema's `$id`
+      becomes `Id` in the generated struct, but the package's
+      hand-rolled API uses `ID`. Overridable per-field via
+      `goIdent: "ID"`, but a smarter exportedIdent that
+      recognises common initialisms (ID/URL/HTTP/…) would scale
+      better.
+    - Reconciling `SchemaObject` field types with the hand-rolled
+      shape: the merged meta-schema treats e.g. `allOf` as
+      `*schemaArray` (a typed alias of `[]any` in the generator's
+      output) while the hand-rolled API uses `[]*Schema`. Closing
+      this requires either richer overrides on the auxiliary
+      `$defs` aliases or post-generation type substitution.
+    - Once those are closed, the swap is mechanical: generate
+      `schema.gen.go`, delete the structural definitions from
+      `schema.go`, and run the conformance suite.
 
 CLI wiring (originally a separate phase) landed alongside the
 end-to-end fixture work: `go-jsonschema generate --schema X --out

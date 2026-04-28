@@ -1,5 +1,6 @@
 {
-  "_comment": "Sidecar overrides used by Phase 15 to replace the hand-rolled Schema with the generator's output. Drives the resolution metadata onto the emitted Schema struct via goAdditionalFields. Pending gaps before this can fully replace schema.go: per-property goType overrides for SchemaObject.Type (currently emits *any, need *Type), and a way to opt the boolean variant accessor into the existing TypeBool() name.",
+  "_comment": "Sidecar overrides used by Phase 15 to replace the hand-rolled Schema with the generator's output. Drives resolution metadata onto Schema via goAdditionalFields and retypes selected SchemaObject fields whose semantics the generator can't infer (e.g. type as *Type rather than *any).",
+  "jsonPackage": "experiment",
   "refs": {
     "#": {
       "goIdent": "Schema",
@@ -12,7 +13,10 @@
         {"goIdent": "dynamicAnchors", "goType": "map[string]*Schema"},
         {"goIdent": "source", "goType": "[]byte"},
         {"goIdent": "skipValidation", "goType": "bool"}
-      ]
+      ],
+      "fields": {
+        "type": {"goType": "*Type"}
+      }
     }
   }
 }

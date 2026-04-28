@@ -117,13 +117,9 @@ func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName st
 		types = append(types, defSiblings...)
 	}
 
+	jsonPath, jsontextPath := overrides.jsonImports()
 	decls := []ast.Decl{
-		importDecl(
-			"encoding/json/v2",
-			"encoding/json/jsontext",
-			"fmt",
-			"regexp",
-		),
+		importDecl(jsonPath, jsontextPath, "fmt", "regexp"),
 	}
 	for _, t := range types {
 		td, err := emitTypeDecls(t)

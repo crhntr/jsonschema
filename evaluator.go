@@ -202,7 +202,7 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		}
 	}
 
-	if b, ok := m.TypeBool(); ok {
+	if b, ok := m.TypeBoolean(); ok {
 		if !b {
 			out.Valid = false
 			out.Error = "nothing allowed here"

@@ -87,18 +87,18 @@ func validate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		if err != nil {
 			return err
 		}
-		var verr error
+		var out jsonschema.Output
 		if formatAssert {
-			verr = m.EvaluateWithFormatAssertion(name, buf)
+			out = m.ValidateWithFormatAssertion(name, buf)
 		} else {
-			verr = m.Evaluate(name, buf)
+			out = m.Validate(name, buf)
 		}
-		if verr != nil {
+		if !out.Valid {
 			failed++
 			if quiet {
 				fmt.Fprintln(stderr, name+": invalid")
 			} else {
-				fmt.Fprintln(stderr, verr)
+				fmt.Fprintln(stderr, out.AsError())
 			}
 			continue
 		}

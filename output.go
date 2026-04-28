@@ -28,6 +28,12 @@ type Output struct {
 	Annotation              jsontext.Value `json:"annotation,omitempty"`
 	Annotations             []Output       `json:"annotations,omitempty"`
 	Source                  Source         `json:"-"`
+
+	// flag, when true, marks this Output as the spec's flag format
+	// (§12.4.4). MarshalJSONTo emits only {"valid": bool} in that case
+	// and skips the outputUnit invariants, since flag is a distinct
+	// shape — not an outputUnit — in the 2020-12 output schema.
+	flag bool
 }
 
 // Source records where in the validated document the failing or
@@ -40,11 +46,25 @@ type Source struct {
 	Offset int64
 }
 
-// MarshalJSONTo emits a spec-conformant outputUnit. It enforces two
-// invariants required by the 2020-12 output schema and returns an error
-// when either is violated, so a buggy validator surfaces at the marshal
-// boundary rather than producing silently invalid output.
+// MarshalJSONTo emits the appropriate output shape for o: the spec's
+// flag form when o was produced by Flag (just {"valid": bool}), and
+// otherwise an outputUnit. The outputUnit path enforces the two
+// conditional invariants from the 2020-12 output schema and returns
+// an error when either is violated, so a buggy validator surfaces at
+// the marshal boundary rather than producing silently invalid output.
 func (o Output) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if o.flag {
+		if err := enc.WriteToken(jsontext.BeginObject); err != nil {
+			return err
+		}
+		if err := enc.WriteToken(jsontext.String("valid")); err != nil {
+			return err
+		}
+		if err := enc.WriteToken(jsontext.Bool(o.Valid)); err != nil {
+			return err
+		}
+		return enc.WriteToken(jsontext.EndObject)
+	}
 	if err := o.checkOutputInvariants(); err != nil {
 		return err
 	}
@@ -133,5 +153,89 @@ func (o Output) AsError() error {
 	}
 	return &ValidationError{Output: o}
 }
+
+// Flag returns the spec's flag output format: an Output containing
+// only Valid. Per §12.4.4 "Flag" the result is the most compact form
+// of a validation result — pass/fail and nothing else. The returned
+// Output marshals to {"valid": bool}.
+func (o Output) Flag() Output {
+	return Output{Valid: o.Valid, flag: true}
+}
+
+// Basic returns the spec's basic output format: a single root unit
+// whose Errors (when invalid) or Annotations (when valid) holds every
+// descendant from the verbose tree, flattened into siblings with their
+// own children stripped. The root keeps its KeywordLocation /
+// InstanceLocation / Source.
+func (o Output) Basic() Output {
+	root := o
+	root.Errors = nil
+	root.Annotations = nil
+	var children []Output
+	collectDescendants(o, &children)
+	if root.Valid {
+		root.Annotations = children
+	} else {
+		root.Errors = children
+	}
+	return root
+}
+
+// collectDescendants walks o and appends every descendant unit
+// (from both Errors and Annotations) to into, stripping each one's
+// own children so the result is a flat list of leaves.
+func collectDescendants(o Output, into *[]Output) {
+	for _, c := range o.Errors {
+		leaf := c
+		leaf.Errors = nil
+		leaf.Annotations = nil
+		*into = append(*into, leaf)
+		collectDescendants(c, into)
+	}
+	for _, c := range o.Annotations {
+		leaf := c
+		leaf.Errors = nil
+		leaf.Annotations = nil
+		*into = append(*into, leaf)
+		collectDescendants(c, into)
+	}
+}
+
+// Detailed returns the spec's detailed output format: the verbose
+// hierarchy with valid:true subtrees pruned when they carry no
+// annotation data. Failure paths are preserved intact.
+func (o Output) Detailed() Output {
+	return o.detailed()
+}
+
+func (o Output) detailed() Output {
+	out := o
+	if out.Valid {
+		var keep []Output
+		for _, c := range out.Annotations {
+			cd := c.detailed()
+			if cd.Valid && len(cd.Annotation) == 0 && len(cd.Annotations) == 0 {
+				continue
+			}
+			keep = append(keep, cd)
+		}
+		out.Annotations = keep
+	} else {
+		var keep []Output
+		for _, c := range out.Errors {
+			cd := c.detailed()
+			if cd.Valid && len(cd.Annotation) == 0 && len(cd.Annotations) == 0 {
+				continue
+			}
+			keep = append(keep, cd)
+		}
+		out.Errors = keep
+	}
+	return out
+}
+
+// Verbose returns o unchanged. Validate already returns the verbose
+// form; this method is provided for symmetry with Flag/Basic/Detailed.
+func (o Output) Verbose() Output { return o }
 
 var _ error = (*ValidationError)(nil)

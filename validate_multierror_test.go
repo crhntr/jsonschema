@@ -78,10 +78,21 @@ func TestMultiErrorUniqueItemsAllPairs(t *testing.T) {
 	if uniq == nil {
 		t.Fatalf("missing /uniqueItems unit; tree: %+v", out)
 	}
-	// Should report both duplicate pairs (0,1) and (2,3).
-	for _, want := range []string{"items 0 and 1 are equal", "items 2 and 3 are equal"} {
-		if !strings.Contains(uniq.Error, want) {
-			t.Errorf("/uniqueItems.Error missing %q; got %q", want, uniq.Error)
+	// Each duplicate pair gets its own sub-Output in Errors.
+	wantPairs := map[string]bool{
+		"items 0 and 1 are equal": false,
+		"items 2 and 3 are equal": false,
+	}
+	for _, e := range uniq.Errors {
+		for k := range wantPairs {
+			if strings.Contains(e.Error, k) {
+				wantPairs[k] = true
+			}
+		}
+	}
+	for k, found := range wantPairs {
+		if !found {
+			t.Errorf("/uniqueItems.Errors missing entry containing %q (got %+v)", k, uniq.Errors)
 		}
 	}
 }

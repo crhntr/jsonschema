@@ -138,6 +138,15 @@ func byteSource(name string, in []byte, offset int64) Source {
 // Validate validates in against m and returns the Output tree. Any
 // failure surfaces as a tree of Outputs with Valid:false; pass
 // out.AsError() to bridge into Go's error-returning idioms.
+//
+// Validate targets JSON Schema 2020-12. When a schema declares a
+// pre-2020-12 dialect via $schema, evaluation is best-effort: the
+// /$schema annotation reports the declared dialect URI (so callers
+// can detect it) and prefixItems is skipped because it does not
+// exist before 2020-12, but other dialect differences (e.g. draft-07
+// has no unevaluatedProperties; draft-04 has no const) are not
+// emulated. For correctness on legacy drafts, migrate the schema to
+// 2020-12 or use a draft-specific validator.
 func (m *Schema) Validate(name string, in []byte) Output {
 	return m.validateRoot(evalCtx{sourceName: name, in: in}, in)
 }
@@ -292,6 +301,13 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		}
 	}
 
+	// Core-vocabulary annotations (currently /$schema). Always emitted
+	// when present; the core vocabulary is required by the standard
+	// and not subject to the metadata skip flag.
+	for _, cc := range o.coreAnnotations(ctx, valOff) {
+		addChild(cc)
+	}
+
 	// Pure-annotation (meta-data) keywords. These never affect Valid;
 	// they exist to surface schema metadata in verbose output.
 	if !ctx.scope.skipMetaData {
@@ -377,6 +393,27 @@ func (o *SchemaObject) unknownKeywordAnnotations(ctx evalCtx, valOff int64) []Ou
 		out = append(out, c)
 	}
 	return out
+}
+
+// coreAnnotations emits valid:true Outputs for core-vocabulary
+// keywords whose annotation result is defined by the spec. Today
+// that's just /$schema (spec §8.1.1: annotation result is the
+// declared dialect URI), but the helper exists so future additions
+// — e.g. /$comment — slot in cleanly.
+//
+// When the declared dialect is older than 2020-12, the annotation is
+// still emitted; a downstream consumer can detect the legacy draft
+// from the URI and choose to warn or fall back. This library
+// validates legacy drafts on a best-effort basis (see the package
+// doc and evaluator.skipPrefixItems for what is actually skipped).
+func (o *SchemaObject) coreAnnotations(ctx evalCtx, valOff int64) []Output {
+	if o.Schema == "" {
+		return nil
+	}
+	c := ctx.atKeyword("$schema").baseOutput(valOff)
+	v, _ := json.Marshal(o.Schema)
+	c.Annotation = jsontext.Value(v)
+	return []Output{c}
 }
 
 // metadataAnnotations returns valid:true Outputs for the spec's

@@ -1,0 +1,18 @@
+go-jsonschema validate --schema schema.json --output verbose good.json
+# /properties annotates with the list of matched keys.
+stdout '"keywordLocation":"/properties"'
+stdout '"annotation":\["[ab]","[ab]"\]'
+# /title surfaces as an annotation in verbose output.
+stdout '"keywordLocation":"/title"'
+stdout '"annotation":"Sample"'
+
+-- schema.json --
+{
+  "title": "Sample",
+  "properties": {
+    "a": { "type": "string" },
+    "b": { "type": "integer" }
+  }
+}
+-- good.json --
+{"a":"x","b":1}

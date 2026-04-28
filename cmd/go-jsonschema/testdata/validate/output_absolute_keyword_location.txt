@@ -1,0 +1,18 @@
+! go-jsonschema validate --schema schema.json --output detailed instance.json
+# Crossing /$ref must populate absoluteKeywordLocation per the spec
+# output schema's conditional rule.
+stdout '"absoluteKeywordLocation":'
+stdout '#/\$defs/positive'
+
+-- schema.json --
+{
+  "$id": "https://example.com/abs",
+  "$defs": {
+    "positive": { "type": "integer", "minimum": 1 }
+  },
+  "properties": {
+    "n": { "$ref": "#/$defs/positive" }
+  }
+}
+-- instance.json --
+{"n": 0}

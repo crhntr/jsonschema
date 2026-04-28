@@ -1,0 +1,7 @@
+! go-jsonschema validate --schema schema.json --output bogus instance.json
+stderr '--output: "bogus" not in \{flag, basic, detailed, verbose\}'
+
+-- schema.json --
+{"type": "string"}
+-- instance.json --
+"hello"

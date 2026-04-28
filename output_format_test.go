@@ -77,6 +77,40 @@ func TestOutputBasicFlattens(t *testing.T) {
 	}
 }
 
+func TestOutputBasicValidFlattensAnnotations(t *testing.T) {
+	doc := resolveBytes(t, "https://example.com/f/basic-valid", []byte(`{
+		"$id": "https://example.com/f/basic-valid",
+		"title": "T",
+		"properties": {
+			"a": { "type": "string" }
+		}
+	}`))
+	verbose := doc.Validate("inst", []byte(`{"a":"hi"}`))
+	if !verbose.Valid {
+		t.Fatal("expected valid")
+	}
+	basic := verbose.Basic()
+	if !basic.Valid {
+		t.Fatal("Basic should preserve Valid")
+	}
+	for _, c := range basic.Annotations {
+		if len(c.Errors) != 0 || len(c.Annotations) != 0 {
+			t.Errorf("Basic Annotation entry should be a leaf; got %+v", c)
+		}
+	}
+	// Two leaves we know should appear: /title (annotation-only) and
+	// the recursive /properties/a/type leaf.
+	found := map[string]bool{}
+	for _, c := range basic.Annotations {
+		found[c.KeywordLocation] = true
+	}
+	for _, want := range []string{"/title", "/properties/a/type"} {
+		if !found[want] {
+			t.Errorf("Basic.Annotations missing %q (have %v)", want, found)
+		}
+	}
+}
+
 func TestOutputDetailedPrunesQuietSuccess(t *testing.T) {
 	doc := resolveBytes(t, "https://example.com/f/detailed", []byte(`{
 		"$id": "https://example.com/f/detailed",

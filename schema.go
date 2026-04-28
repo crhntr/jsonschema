@@ -109,6 +109,7 @@ func (m *Schema) Subschemas() iter.Seq[*Schema] {
 				obj.UnevaluatedProperties,
 				obj.UnevaluatedItems,
 				obj.PropertyNames,
+				obj.ContentSchema,
 			}),
 		} {
 			for e := range s {
@@ -207,6 +208,14 @@ type SchemaObject struct {
 
 	Format  string `json:"format,omitempty"`
 	Pattern string `json:"pattern,omitempty"`
+
+	// Content vocabulary (spec §8). Annotation-only by default in
+	// 2020-12; populated and surfaced in verbose Output but not used
+	// to fail validation unless a future content-assertion mode is
+	// added.
+	ContentMediaType string  `json:"contentMediaType,omitempty"`
+	ContentEncoding  string  `json:"contentEncoding,omitempty"`
+	ContentSchema    *Schema `json:"contentSchema,omitempty"`
 
 	// Extra captures schema members that don't correspond to any known
 	// keyword. JSON Pointers may legitimately reference these (per

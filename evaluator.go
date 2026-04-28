@@ -293,6 +293,13 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		addChild(mc)
 	}
 
+	// Content vocabulary (spec §8). Annotation-only by default in
+	// 2020-12; emitted whenever the keyword is set so consumers
+	// applying their own decode/validate logic can pick it up.
+	for _, cc := range o.contentAnnotations(ctx, valOff) {
+		addChild(cc)
+	}
+
 	// Unknown keywords (spec §3.5.4): collected as annotations so
 	// downstream consumers — schema generators, linters, custom
 	// vocabularies — can see them in the verbose output.
@@ -311,6 +318,39 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		}
 	}
 	return out, covered
+}
+
+// contentAnnotations emits valid:true Outputs for the spec's content
+// vocabulary keywords (contentMediaType, contentEncoding,
+// contentSchema). All three are annotation-only by default in 2020-12
+// per spec §8; consumers that need to actually decode or validate
+// content do so out-of-band using these annotations as input.
+func (o *SchemaObject) contentAnnotations(ctx evalCtx, valOff int64) []Output {
+	var out []Output
+	if o.ContentMediaType != "" {
+		c := ctx.atKeyword("contentMediaType").baseOutput(valOff)
+		v, _ := json.Marshal(o.ContentMediaType)
+		c.Annotation = jsontext.Value(v)
+		out = append(out, c)
+	}
+	if o.ContentEncoding != "" {
+		c := ctx.atKeyword("contentEncoding").baseOutput(valOff)
+		v, _ := json.Marshal(o.ContentEncoding)
+		c.Annotation = jsontext.Value(v)
+		out = append(out, c)
+	}
+	if o.ContentSchema != nil {
+		c := ctx.atKeyword("contentSchema").baseOutput(valOff)
+		// Emit the contentSchema literal as the annotation value so
+		// callers can recover the decoded-content schema and apply it
+		// themselves.
+		v, err := json.Marshal(o.ContentSchema)
+		if err == nil {
+			c.Annotation = jsontext.Value(v)
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // unknownKeywordAnnotations emits one valid:true Output per entry in

@@ -81,18 +81,47 @@ func keywordLocationCrossedReference(kw string) bool {
 // validation results can flow through Go's idiomatic error returns.
 type ValidationError struct{ Output }
 
-// Error returns a short human-readable description: the Output's Error
-// message if set, otherwise a fallback that names the keyword and
-// instance locations so callers always see something actionable.
+// Error returns a human-readable description by walking the Output
+// tree and joining every leaf failure message it finds. When the
+// Output's Source.Name is non-empty, the message is prefixed with
+// `<name>:<line>:<column>: ` so failures from a named document carry
+// position context (the same shape the previous ErrorWithPosition
+// type produced). When no leaf has a message, falls back to a
+// synthetic summary so callers always see something actionable.
 func (e *ValidationError) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
-	if e.Output.Error != "" {
-		return e.Output.Error
+	msgs := collectErrorMessages(e.Output)
+	if len(msgs) == 0 {
+		msgs = []string{fmt.Sprintf("validation failed at keywordLocation=%q instanceLocation=%q",
+			e.Output.KeywordLocation, e.Output.InstanceLocation)}
 	}
-	return fmt.Sprintf("validation failed at keywordLocation=%q instanceLocation=%q",
-		e.Output.KeywordLocation, e.Output.InstanceLocation)
+	body := strings.Join(msgs, "; ")
+	if e.Output.Source.Name != "" {
+		return fmt.Sprintf("%s:%d:%d: %s", e.Output.Source.Name, e.Output.Source.Line, e.Output.Source.Column, body)
+	}
+	return body
+}
+
+// collectErrorMessages returns every Error string found in the failure
+// tree rooted at o (preorder). Ignores valid:true subtrees.
+func collectErrorMessages(o Output) []string {
+	if o.Valid {
+		return nil
+	}
+	var msgs []string
+	if o.Error != "" {
+		if o.InstanceLocation != "" {
+			msgs = append(msgs, fmt.Sprintf("%s: %s", o.InstanceLocation, o.Error))
+		} else {
+			msgs = append(msgs, o.Error)
+		}
+	}
+	for _, c := range o.Errors {
+		msgs = append(msgs, collectErrorMessages(c)...)
+	}
+	return msgs
 }
 
 // AsError returns a *ValidationError wrapping o when o.Valid is false,

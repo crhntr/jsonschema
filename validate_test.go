@@ -193,23 +193,22 @@ func (rt *remotesTransport) RoundTrip(req *http.Request) (*http.Response, error)
 
 func runSuiteCase(t *testing.T, schema *jsonschema.Schema, g suiteGroup, c suiteCase, passed, failed *atomic.Int64) {
 	t.Helper()
-	var err error
+	var out jsonschema.Output
 	if shouldAssertFormat(t.Name(), g.Schema) {
-		err = schema.EvaluateWithFormatAssertion(t.Name(), c.Data)
+		out = schema.ValidateWithFormatAssertion(t.Name(), c.Data)
 	} else {
-		err = schema.Evaluate(t.Name(), c.Data)
+		out = schema.Validate(t.Name(), c.Data)
 	}
-	got := err == nil
-	if got == c.Valid {
+	if out.Valid == c.Valid {
 		passed.Add(1)
 		if *suiteVerbose {
-			t.Logf("ok: want valid=%v got valid=%v", c.Valid, got)
+			t.Logf("ok: want valid=%v got valid=%v", c.Valid, out.Valid)
 		}
 		return
 	}
 	failed.Add(1)
 	t.Errorf("validation mismatch: want valid=%v got valid=%v\nschema: %s\ndata: %s\nerr: %v",
-		c.Valid, got, g.Schema, c.Data, err)
+		c.Valid, out.Valid, g.Schema, c.Data, out.AsError())
 }
 
 // shouldAssertFormat reports whether the given schema/test should be

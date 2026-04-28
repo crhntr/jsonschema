@@ -33,6 +33,7 @@ type Schema struct {
 	resolved       *Schema
 	dynamic        bool
 	baseURI        string
+	pathInResource string // RFC 6901 pointer from resource root to this schema; "" for the resource root
 	resource       *Schema
 	anchors        map[string]*Schema
 	dynamicAnchors map[string]*Schema
@@ -56,6 +57,12 @@ func (m *Schema) IsDynamic() bool { return m.dynamic }
 
 // BaseURI returns the lexical-scope base URI in effect at this subschema.
 func (m *Schema) BaseURI() string { return m.baseURI }
+
+// PathInResource returns the RFC 6901 JSON Pointer from this subschema's
+// resource root to itself. Empty for the resource root; reset to empty
+// when an embedded $id opens a new resource. Used to construct
+// absoluteKeywordLocation values for spec-compliant validation output.
+func (m *Schema) PathInResource() string { return m.pathInResource }
 
 // Resource returns the root of the JSON Schema resource (the nearest
 // enclosing schema that defines $id, or the document root) containing this

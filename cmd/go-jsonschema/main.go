@@ -11,8 +11,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/go-json-experiment/json"
+
 	"github.com/crhntr/jsonschema"
 )
+
+// jsonMarshal is a tiny indirection so the test for emitOutput can
+// share marshal style with the rest of the CLI.
+func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
 
 func main() {
 	ctx := context.Background()
@@ -59,17 +65,22 @@ func validate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		formatAssert bool
 		strict       bool
 		quiet        bool
+		outputFmt    string
 	)
 	flagSet := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flagSet.StringVar(&schema, "schema", "", "path or URL of a JSON Schema document (required)")
 	flagSet.BoolVar(&formatAssert, "format-assert", false, "treat the format keyword as an assertion (per the format-assertion vocabulary)")
 	flagSet.BoolVar(&strict, "strict", false, "fail on unknown schema keywords or unresolvable external $refs")
 	flagSet.BoolVar(&quiet, "quiet", false, "do not print success messages; failures still go to stderr")
+	flagSet.StringVar(&outputFmt, "output", "", "emit a JSON Schema 2020-12 output document per instance: flag, basic, detailed, or verbose")
 	if err := flagSet.Parse(args); err != nil {
 		return err
 	}
 	if schema == "" {
 		return fmt.Errorf("--schema is required")
+	}
+	if err := validateOutputFormat(outputFmt); err != nil {
+		return err
 	}
 
 	m, err := loadSchema(ctx, wd, schema, strict, client)
@@ -93,6 +104,15 @@ func validate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		} else {
 			out = m.Validate(name, buf)
 		}
+		if outputFmt != "" {
+			if err := emitOutput(stdout, outputFmt, out); err != nil {
+				return err
+			}
+			if !out.Valid {
+				failed++
+			}
+			continue
+		}
 		if !out.Valid {
 			failed++
 			if quiet {
@@ -110,6 +130,39 @@ func validate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		return fmt.Errorf("%d of %d instance(s) failed validation", failed, len(instances))
 	}
 	return nil
+}
+
+// validateOutputFormat returns an error when name is non-empty but
+// not one of the four spec output formats.
+func validateOutputFormat(name string) error {
+	switch name {
+	case "", "flag", "basic", "detailed", "verbose":
+		return nil
+	}
+	return fmt.Errorf("--output: %q not in {flag, basic, detailed, verbose}", name)
+}
+
+// emitOutput writes a single Output to w as JSON in the requested
+// spec format, terminated with a newline. Unknown formats are
+// rejected by validateOutputFormat earlier.
+func emitOutput(w io.Writer, format string, out jsonschema.Output) error {
+	var picked jsonschema.Output
+	switch format {
+	case "flag":
+		picked = out.Flag()
+	case "basic":
+		picked = out.Basic()
+	case "detailed":
+		picked = out.Detailed()
+	case "verbose":
+		picked = out.Verbose()
+	}
+	body, err := jsonMarshal(picked)
+	if err != nil {
+		return fmt.Errorf("marshal output: %w", err)
+	}
+	_, err = fmt.Fprintln(w, string(body))
+	return err
 }
 
 // loadSchema parses arg as either an absolute URL or a local file path

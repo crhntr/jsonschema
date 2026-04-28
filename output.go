@@ -164,40 +164,43 @@ func (o Output) Flag() Output {
 
 // Basic returns the spec's basic output format: a single root unit
 // whose Errors (when invalid) or Annotations (when valid) holds every
-// descendant from the verbose tree, flattened into siblings with their
-// own children stripped. The root keeps its KeywordLocation /
-// InstanceLocation / Source.
+// leaf unit from the verbose tree. Compound intermediates (like
+// /properties or /allOf — units that exist only to group their
+// children) are skipped because they carry no Error or Annotation of
+// their own and would violate the outputUnit conditional rules if
+// emitted as standalone leaves.
 func (o Output) Basic() Output {
 	root := o
 	root.Errors = nil
 	root.Annotations = nil
-	var children []Output
-	collectDescendants(o, &children)
+	var leaves []Output
+	collectLeaves(o, &leaves)
 	if root.Valid {
-		root.Annotations = children
+		root.Annotations = leaves
 	} else {
-		root.Errors = children
+		root.Errors = leaves
 	}
 	return root
 }
 
-// collectDescendants walks o and appends every descendant unit
-// (from both Errors and Annotations) to into, stripping each one's
-// own children so the result is a flat list of leaves.
-func collectDescendants(o Output, into *[]Output) {
+// collectLeaves walks o and appends every descendant that has no
+// children of its own (i.e. carries its own Error or Annotation
+// inline) to into. Compound intermediates are skipped; the recursion
+// flattens past them.
+func collectLeaves(o Output, into *[]Output) {
 	for _, c := range o.Errors {
-		leaf := c
-		leaf.Errors = nil
-		leaf.Annotations = nil
-		*into = append(*into, leaf)
-		collectDescendants(c, into)
+		if len(c.Errors) == 0 && len(c.Annotations) == 0 {
+			*into = append(*into, c)
+			continue
+		}
+		collectLeaves(c, into)
 	}
 	for _, c := range o.Annotations {
-		leaf := c
-		leaf.Errors = nil
-		leaf.Annotations = nil
-		*into = append(*into, leaf)
-		collectDescendants(c, into)
+		if len(c.Errors) == 0 && len(c.Annotations) == 0 {
+			*into = append(*into, c)
+			continue
+		}
+		collectLeaves(c, into)
 	}
 }
 

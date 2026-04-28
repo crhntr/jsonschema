@@ -142,13 +142,14 @@ func (m *Schema) Validate(name string, in []byte) Output {
 	return m.validateRoot(evalCtx{sourceName: name, in: in}, in)
 }
 
-// ValidateWithFormatAssertion behaves like Validate but enforces format
-// keywords as assertions (per the format-assertion vocabulary). Use
-// this when the schema's $vocabulary opts in, or when a caller wants
-// strict format checking regardless of vocabulary.
+// ValidateWithFormatAssertion behaves like Validate but forces
+// /format to act as an assertion regardless of the schema's
+// $vocabulary declaration. Use it when a caller wants strict format
+// checking unconditionally; otherwise prefer Validate, which honors
+// the metaschema's format-annotation / format-assertion choice.
 func (m *Schema) ValidateWithFormatAssertion(name string, in []byte) Output {
 	ctx := evalCtx{sourceName: name, in: in}
-	ctx.scope.assertFormat = true
+	ctx.scope.forceAssertFormat = true
 	return m.validateRoot(ctx, in)
 }
 
@@ -185,8 +186,8 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 	out := ctx.baseOutput(valOff)
 
 	ctx.scope = ctx.scope.push(m.resource)
+	ctx.scope.applyResourceVocabularies(m)
 	if m.resource != nil {
-		ctx.scope.skipValidation = m.resource.skipValidation
 		if mObj, ok := m.resource.TypeObject(); ok {
 			ctx.scope.skipPrefixItems = isPre2020Schema(mObj.Schema)
 		}
@@ -250,11 +251,13 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		covered.merge(bodyCovered)
 	}
 
-	compChildren, compCovered := o.checkComposition(ctx, val, valOff)
-	for _, c := range compChildren {
-		addChild(c)
+	if !ctx.scope.skipApplicator {
+		compChildren, compCovered := o.checkComposition(ctx, val, valOff)
+		for _, c := range compChildren {
+			addChild(c)
+		}
+		covered.merge(compCovered)
 	}
-	covered.merge(compCovered)
 
 	// $ref / $dynamicRef. Per spec the ref result must see the same
 	// instance and contributes to coverage.
@@ -276,28 +279,34 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		covered.merge(refCovered)
 	}
 
-	if kind == jsontext.KindBeginObject && o.UnevaluatedProperties != nil {
-		c, addCovered := o.checkUnevaluatedProperties(ctx, val, valOff, covered.properties)
-		addChild(c)
-		covered.merge(addCovered)
-	}
-	if kind == jsontext.KindBeginArray && o.UnevaluatedItems != nil {
-		c, addCovered := o.checkUnevaluatedItems(ctx, val, valOff, covered.items)
-		addChild(c)
-		covered.merge(addCovered)
+	if !ctx.scope.skipUnevaluated {
+		if kind == jsontext.KindBeginObject && o.UnevaluatedProperties != nil {
+			c, addCovered := o.checkUnevaluatedProperties(ctx, val, valOff, covered.properties)
+			addChild(c)
+			covered.merge(addCovered)
+		}
+		if kind == jsontext.KindBeginArray && o.UnevaluatedItems != nil {
+			c, addCovered := o.checkUnevaluatedItems(ctx, val, valOff, covered.items)
+			addChild(c)
+			covered.merge(addCovered)
+		}
 	}
 
 	// Pure-annotation (meta-data) keywords. These never affect Valid;
 	// they exist to surface schema metadata in verbose output.
-	for _, mc := range o.metadataAnnotations(ctx, valOff) {
-		addChild(mc)
+	if !ctx.scope.skipMetaData {
+		for _, mc := range o.metadataAnnotations(ctx, valOff) {
+			addChild(mc)
+		}
 	}
 
 	// Content vocabulary (spec §8). Annotation-only by default in
 	// 2020-12; emitted whenever the keyword is set so consumers
 	// applying their own decode/validate logic can pick it up.
-	for _, cc := range o.contentAnnotations(ctx, valOff) {
-		addChild(cc)
+	if !ctx.scope.skipContent {
+		for _, cc := range o.contentAnnotations(ctx, valOff) {
+			addChild(cc)
+		}
 	}
 
 	// Unknown keywords (spec §3.5.4): collected as annotations so
@@ -521,11 +530,15 @@ func (o *SchemaObject) checkNumberKeywords(ctx evalCtx, val jsontext.Value, valO
 	return out
 }
 
-// checkStringKeywords implements minLength, maxLength, pattern, and
-// format. When the format-assertion vocabulary is off, format produces
-// an annotation-only Output (per spec §F.2) carrying the format name.
+// checkStringKeywords implements the validation-vocabulary string
+// keywords (minLength, maxLength, pattern) plus /format. The
+// validation-vocab keywords are gated by skipValidation; /format is
+// emitted only when at least one of format-annotation or
+// format-assertion vocabularies is in effect.
 func (o *SchemaObject) checkStringKeywords(ctx evalCtx, val jsontext.Value, valOff int64) []Output {
-	if len(o.MinLength) == 0 && len(o.MaxLength) == 0 && o.Pattern == "" && o.Format == "" {
+	emitFormat := o.Format != "" && (!ctx.scope.skipFormatAnnotation || ctx.scope.assertFormat)
+	stringValidation := !ctx.scope.skipValidation && (len(o.MinLength) > 0 || len(o.MaxLength) > 0 || o.Pattern != "")
+	if !stringValidation && !emitFormat {
 		return nil
 	}
 	s, err := decodeJSONString(val)
@@ -537,45 +550,47 @@ func (o *SchemaObject) checkStringKeywords(ctx evalCtx, val jsontext.Value, valO
 	}
 	count := utf8.RuneCountInString(s)
 	var out []Output
-	if cmp, ok := compareRat(o.MinLength, big.NewRat(int64(count), 1)); ok {
-		c := ctx.atKeyword("minLength").baseOutput(valOff)
-		if cmp > 0 {
-			c.Valid = false
-			c.Error = fmt.Sprintf("string length %d less than minLength %s", count, o.MinLength)
+	if !ctx.scope.skipValidation {
+		if cmp, ok := compareRat(o.MinLength, big.NewRat(int64(count), 1)); ok {
+			c := ctx.atKeyword("minLength").baseOutput(valOff)
+			if cmp > 0 {
+				c.Valid = false
+				c.Error = fmt.Sprintf("string length %d less than minLength %s", count, o.MinLength)
+			}
+			out = append(out, c)
 		}
-		out = append(out, c)
-	}
-	if cmp, ok := compareRat(o.MaxLength, big.NewRat(int64(count), 1)); ok {
-		c := ctx.atKeyword("maxLength").baseOutput(valOff)
-		if cmp < 0 {
-			c.Valid = false
-			c.Error = fmt.Sprintf("string length %d greater than maxLength %s", count, o.MaxLength)
+		if cmp, ok := compareRat(o.MaxLength, big.NewRat(int64(count), 1)); ok {
+			c := ctx.atKeyword("maxLength").baseOutput(valOff)
+			if cmp < 0 {
+				c.Valid = false
+				c.Error = fmt.Sprintf("string length %d greater than maxLength %s", count, o.MaxLength)
+			}
+			out = append(out, c)
 		}
-		out = append(out, c)
-	}
-	if o.Pattern != "" {
-		c := ctx.atKeyword("pattern").baseOutput(valOff)
-		re, err := compileECMA262(o.Pattern)
-		if err != nil {
-			c.Valid = false
-			c.Error = fmt.Sprintf("invalid pattern %q: %s", o.Pattern, err)
-		} else if !re.MatchString(s) {
-			c.Valid = false
-			c.Error = fmt.Sprintf("string does not match pattern %q", o.Pattern)
+		if o.Pattern != "" {
+			c := ctx.atKeyword("pattern").baseOutput(valOff)
+			re, err := compileECMA262(o.Pattern)
+			if err != nil {
+				c.Valid = false
+				c.Error = fmt.Sprintf("invalid pattern %q: %s", o.Pattern, err)
+			} else if !re.MatchString(s) {
+				c.Valid = false
+				c.Error = fmt.Sprintf("string does not match pattern %q", o.Pattern)
+			}
+			out = append(out, c)
 		}
-		out = append(out, c)
 	}
-	if o.Format != "" {
+	if emitFormat {
 		c := ctx.atKeyword("format").baseOutput(valOff)
 		if ctx.scope.assertFormat {
-			// Spec §F.2: under format-assertion, format is an
+			// Spec §F.2: under format-assertion, /format is an
 			// assertion and produces no annotation.
 			if err := validateFormat(o.Format, s); err != nil {
 				c.Valid = false
 				c.Error = err.Error()
 			}
 		} else {
-			// Spec §F.2: under format-annotation, format is
+			// Spec §F.2: under format-annotation, /format is
 			// annotation-only.
 			v, _ := json.Marshal(o.Format)
 			c.Annotation = jsontext.Value(v)

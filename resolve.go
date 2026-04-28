@@ -553,12 +553,11 @@ func (r *Resolver) fetchMetaschemas(ctx context.Context) error {
 }
 
 // applyVocabularies walks every cached resource, resolves the
-// metaschema declared by $schema, and propagates its vocabulary
-// settings — currently the JSON Schema validation vocabulary's
-// presence is mirrored on the resource as skipValidation when absent.
+// metaschema declared by $schema, and copies the metaschema's
+// $vocabulary declaration onto the resource. The evaluator reads
+// resource.vocabularies to gate per-vocabulary keyword evaluation
+// (validation, applicator, format-assertion, content, etc.).
 func (r *Resolver) applyVocabularies() {
-	const validationVocab = "https://json-schema.org/draft/2020-12/vocab/validation"
-
 	r.mu.Lock()
 	resources := make([]*Schema, 0, len(r.cache))
 	seen := map[*Schema]struct{}{}
@@ -590,37 +589,35 @@ func (r *Resolver) applyVocabularies() {
 		if !ok {
 			continue
 		}
-		// $vocabulary is only meaningful on the declared metaschema.
 		if mObj.Vocabulary == nil {
 			continue
 		}
-		// If the metaschema explicitly declares its $vocabulary set
-		// and the validation vocab isn't in it, validation keywords
-		// are inactive for schemas using this metaschema.
-		if _, has := mObj.Vocabulary[validationVocab]; !has {
-			r.markSkipValidation(m)
-		}
+		// Copy the metaschema's $vocabulary declaration onto every
+		// schema using it (the resource root and its non-resource
+		// descendants — nested resources inherit their own metaschema
+		// independently).
+		r.markVocabularies(m, mObj.Vocabulary)
 	}
 }
 
-// markSkipValidation sets skipValidation on m and every nested
-// subschema in its tree (subschemas inherit the outer resource's
-// vocabulary set unless they declare their own $schema).
-func (r *Resolver) markSkipValidation(m *Schema) {
+// markVocabularies sets m.vocabularies to vocabs and recurses into
+// non-resource descendants. A descendant that declares its own
+// $schema becomes its own resource and is not modified here; it gets
+// its own vocabularies from its own iteration of applyVocabularies.
+func (r *Resolver) markVocabularies(m *Schema, vocabs map[string]bool) {
 	if m == nil {
 		return
 	}
-	m.skipValidation = true
+	m.vocabularies = vocabs
 	obj, ok := m.TypeObject()
 	if !ok {
 		return
 	}
 	if obj.Schema != "" && m != m.resource {
-		// Nested resource declared its own $schema — leave it alone.
 		return
 	}
 	for c := range m.Subschemas() {
-		r.markSkipValidation(c)
+		r.markVocabularies(c, vocabs)
 	}
 }
 

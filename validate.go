@@ -18,13 +18,45 @@ import (
 )
 
 // evalScope carries dynamic-scope state through validation: the chain
-// of resource roots being evaluated (for $dynamicRef per §8.2.3.2) plus
-// configuration like whether format keywords assert.
+// of resource roots being evaluated (for $dynamicRef per §8.2.3.2),
+// the set of vocabulary flags derived from the current resource's
+// $vocabulary declaration, and a few transient toggles.
 type evalScope struct {
 	resources       []*Schema
-	assertFormat    bool
-	skipValidation  bool
 	skipPrefixItems bool
+
+	// forceAssertFormat is set by ValidateWithFormatAssertion to make
+	// /format an assertion regardless of $vocabulary.
+	forceAssertFormat bool
+
+	// Per-vocabulary gates. These are recomputed from the current
+	// resource's vocabularies whenever evaluation crosses into a new
+	// resource. Default values (zero / false) match the implicit
+	// 2020-12 defaults: every gate active except format-assertion.
+	skipValidation       bool
+	skipApplicator       bool
+	skipFormatAnnotation bool
+	assertFormat         bool
+	skipMetaData         bool
+	skipContent          bool
+	skipUnevaluated      bool
+}
+
+// applyResourceVocabularies updates the per-vocabulary gates on s
+// from m's resource-level $vocabulary declaration. forceAssertFormat
+// (set by ValidateWithFormatAssertion) wins regardless.
+func (s *evalScope) applyResourceVocabularies(m *Schema) {
+	var vocabs map[string]bool
+	if m != nil && m.resource != nil {
+		vocabs = m.resource.vocabularies
+	}
+	s.skipValidation = !vocabEnabled(vocabs, VocabValidation)
+	s.skipApplicator = !vocabEnabled(vocabs, VocabApplicator)
+	s.skipFormatAnnotation = !vocabEnabled(vocabs, VocabFormatAnnotation)
+	s.assertFormat = vocabEnabled(vocabs, VocabFormatAssertion) || s.forceAssertFormat
+	s.skipMetaData = !vocabEnabled(vocabs, VocabMetaData)
+	s.skipContent = !vocabEnabled(vocabs, VocabContent)
+	s.skipUnevaluated = !vocabEnabled(vocabs, VocabUnevaluated)
 }
 
 func (s evalScope) push(resource *Schema) evalScope {

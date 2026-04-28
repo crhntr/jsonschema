@@ -268,8 +268,6 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		covered.merge(compCovered)
 	}
 
-	// $ref / $dynamicRef. Per spec the ref result must see the same
-	// instance and contributes to coverage.
 	if m.resolved != nil {
 		target := m.resolved
 		refKeyword := "$ref"
@@ -332,16 +330,9 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		addChild(uc)
 	}
 
-	// Per spec verbose: when the parent is valid, all child evaluations
-	// go in Annotations; when invalid, all (regardless of their own
-	// validity) go in Errors. This matches §12.4.7's example output.
-	for _, c := range children {
-		if out.Valid {
-			out.Annotations = append(out.Annotations, c)
-		} else {
-			out.Errors = append(out.Errors, c)
-		}
-	}
+	// Per spec §12.4.7's verbose example, a parent's children-array
+	// name follows the parent's own validity.
+	assignChildren(&out, children)
 	return out, covered
 }
 
@@ -397,15 +388,9 @@ func (o *SchemaObject) unknownKeywordAnnotations(ctx evalCtx, valOff int64) []Ou
 
 // coreAnnotations emits valid:true Outputs for core-vocabulary
 // keywords whose annotation result is defined by the spec. Today
-// that's just /$schema (spec §8.1.1: annotation result is the
-// declared dialect URI), but the helper exists so future additions
-// — e.g. /$comment — slot in cleanly.
-//
-// When the declared dialect is older than 2020-12, the annotation is
-// still emitted; a downstream consumer can detect the legacy draft
-// from the URI and choose to warn or fall back. This library
-// validates legacy drafts on a best-effort basis (see the package
-// doc and evaluator.skipPrefixItems for what is actually skipped).
+// that is just /$schema (§8.1.1: the annotation is the declared
+// dialect URI), which Validate's docstring describes for legacy
+// drafts.
 func (o *SchemaObject) coreAnnotations(ctx evalCtx, valOff int64) []Output {
 	if o.Schema == "" {
 		return nil
@@ -457,7 +442,6 @@ func (o *SchemaObject) metadataAnnotations(ctx evalCtx, valOff int64) []Output {
 	return out
 }
 
-// checkType implements the "type" keyword.
 func (o *SchemaObject) checkType(ctx evalCtx, val jsontext.Value, valOff int64, kind jsontext.Kind) Output {
 	out := ctx.baseOutput(valOff)
 	for _, t := range typeNames(o.Type) {
@@ -470,7 +454,6 @@ func (o *SchemaObject) checkType(ctx evalCtx, val jsontext.Value, valOff int64, 
 	return out
 }
 
-// checkEnum implements the "enum" keyword.
 func (o *SchemaObject) checkEnum(ctx evalCtx, val jsontext.Value, valOff int64) Output {
 	out := ctx.baseOutput(valOff)
 	for _, e := range o.Enum {
@@ -489,7 +472,6 @@ func (o *SchemaObject) checkEnum(ctx evalCtx, val jsontext.Value, valOff int64) 
 	return out
 }
 
-// checkConst implements the "const" keyword.
 func (o *SchemaObject) checkConst(ctx evalCtx, val jsontext.Value, valOff int64) Output {
 	out := ctx.baseOutput(valOff)
 	eq, err := Equal(val, o.Const)
@@ -637,8 +619,9 @@ func (o *SchemaObject) checkStringKeywords(ctx evalCtx, val jsontext.Value, valO
 	return out
 }
 
-// checkComposition implements allOf / anyOf / oneOf / not /
-// if-then-else. Returns one parent Output per keyword present.
+// checkComposition runs the applicator-vocabulary compound keywords
+// (allOf, anyOf, oneOf, not, if/then/else) against val and returns
+// one parent Output per keyword that was present on o.
 func (o *SchemaObject) checkComposition(ctx evalCtx, val jsontext.Value, valOff int64) ([]Output, coveredKeys) {
 	var covered coveredKeys
 	var out []Output
@@ -753,11 +736,10 @@ func (o *SchemaObject) checkComposition(ctx evalCtx, val jsontext.Value, valOff 
 	return out, covered
 }
 
-// checkObjectBody implements properties, patternProperties,
-// additionalProperties, propertyNames, required, minProperties,
-// maxProperties, dependentRequired, dependentSchemas, dependencies.
-// Returns one Output per applicable keyword and the set of covered
-// property names.
+// checkObjectBody runs every object-shaped keyword on val and
+// returns one Output per applicable keyword plus the set of property
+// names that this schema covered (so a sibling unevaluatedProperties
+// can skip them).
 func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff int64) ([]Output, coveredKeys) {
 	var covered coveredKeys
 	var out []Output
@@ -1028,13 +1010,11 @@ func assignChildren(parent *Output, subs []Output) {
 	}
 }
 
-// atInstanceKey extends instanceLocation with key (RFC 6901 escaped).
 func (c evalCtx) atInstanceKey(key string) evalCtx {
 	c.instanceLocation = jsonptr.NewBuilder(c.instanceLocation).Token(key).String()
 	return c
 }
 
-// atInstanceIndex extends instanceLocation with i.
 func (c evalCtx) atInstanceIndex(i int) evalCtx {
 	c.instanceLocation = jsonptr.NewBuilder(c.instanceLocation).Index(i).String()
 	return c
@@ -1088,9 +1068,9 @@ func (o *SchemaObject) checkUnevaluatedProperties(ctx evalCtx, val jsontext.Valu
 	return parent, newCovered
 }
 
-// checkArrayBody implements minItems, maxItems, uniqueItems,
-// prefixItems, items, contains. Returns per-keyword Outputs and the
-// set of covered indices.
+// checkArrayBody runs every array-shaped keyword on val and returns
+// one Output per applicable keyword plus the set of indices that
+// this schema covered (so a sibling unevaluatedItems can skip them).
 func (o *SchemaObject) checkArrayBody(ctx evalCtx, val jsontext.Value, valOff int64) ([]Output, coveredKeys) {
 	var covered coveredKeys
 	var out []Output

@@ -18,6 +18,14 @@ import (
 // Validate / ValidateWithFormatAssertion always return the verbose tree
 // (one node per evaluated keyword). Use Flag, Basic, Detailed, or Verbose
 // to derive the other spec output formats.
+//
+// Note on the unexported flag field: Flag returns an Output with a
+// private marker that switches MarshalJSONTo to the {"valid": bool}
+// shape. The marker survives struct copies, so a Flag-shaped Output
+// stays flag-shaped when passed around — but the verbose payload is
+// dropped at Flag-call time and is not recoverable from the result.
+// Construct Outputs from validation, not as Go literals, to avoid
+// running into the flag marker.
 type Output struct {
 	Valid                   bool           `json:"valid"`
 	KeywordLocation         string         `json:"keywordLocation"`
@@ -204,9 +212,17 @@ func collectLeaves(o Output, into *[]Output) {
 	}
 }
 
-// Detailed returns the spec's detailed output format: the verbose
-// hierarchy with valid:true subtrees pruned when they carry no
-// annotation data. Failure paths are preserved intact.
+// Detailed returns a less-noisy view of the verbose tree: every
+// failure path is preserved, and valid:true subtrees that carry no
+// Annotation and no Annotations of their own are dropped.
+//
+// The 2020-12 spec (§12.4.6) describes a different reduction —
+// "if a parent reports a unit with 0 or 1 children, it is replaced
+// by its child" — i.e. structural collapse rather than annotation-
+// based pruning. The two converge for typical failure trees but
+// diverge on schemas with deeply nested single-child intermediates.
+// We keep the simpler annotation-driven prune for now; tighten to
+// the spec's collapse rule if a consumer needs the exact shape.
 func (o Output) Detailed() Output {
 	return o.detailed()
 }

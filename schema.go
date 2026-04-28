@@ -38,11 +38,11 @@ type Schema struct {
 	anchors        map[string]*Schema
 	dynamicAnchors map[string]*Schema
 	source         []byte
-	// skipValidation is set on resource roots when their declared
-	// metaschema's $vocabulary does not include the JSON Schema
-	// validation vocabulary; when true, keywords from that vocabulary
-	// (type, enum, const, minimum, …) are treated as no-ops.
-	skipValidation bool
+	// vocabularies is populated on resource roots by applyVocabularies
+	// from the metaschema's $vocabulary declaration. nil means the
+	// resource takes the default 2020-12 set. A non-nil map gates
+	// keywords from each vocabulary independently.
+	vocabularies map[string]bool
 }
 
 // Resolved returns the lexical-scope target of $ref or $dynamicRef, or nil if

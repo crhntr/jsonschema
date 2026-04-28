@@ -287,12 +287,64 @@ func (m *Schema) evaluate(ctx evalCtx, val jsontext.Value, valOff int64) (Output
 		covered.merge(addCovered)
 	}
 
+	// Pure-annotation (meta-data) keywords. These never affect Valid;
+	// they exist to surface schema metadata in verbose output.
+	for _, mc := range o.metadataAnnotations(ctx, valOff) {
+		addChild(mc)
+	}
+
+	// Per spec verbose: when the parent is valid, all child evaluations
+	// go in Annotations; when invalid, all (regardless of their own
+	// validity) go in Errors. This matches §12.4.7's example output.
 	for _, c := range children {
-		if !c.Valid {
+		if out.Valid {
+			out.Annotations = append(out.Annotations, c)
+		} else {
 			out.Errors = append(out.Errors, c)
 		}
 	}
 	return out, covered
+}
+
+// metadataAnnotations returns valid:true Outputs for the spec's
+// annotation-only keywords: title, description, default, examples,
+// readOnly, writeOnly, deprecated. The Annotation field carries the
+// keyword's value as raw JSON.
+func (o *SchemaObject) metadataAnnotations(ctx evalCtx, valOff int64) []Output {
+	var out []Output
+	addAnn := func(keyword string, value any) {
+		c := ctx.atKeyword(keyword).baseOutput(valOff)
+		v, _ := json.Marshal(value)
+		c.Annotation = v
+		out = append(out, c)
+	}
+	if o.Title != "" {
+		addAnn("title", o.Title)
+	}
+	if o.Description != "" {
+		addAnn("description", o.Description)
+	}
+	if len(o.Default) > 0 {
+		c := ctx.atKeyword("default").baseOutput(valOff)
+		c.Annotation = jsontext.Value(o.Default).Clone()
+		out = append(out, c)
+	}
+	if len(o.Examples) > 0 {
+		c := ctx.atKeyword("examples").baseOutput(valOff)
+		v, _ := json.Marshal(o.Examples)
+		c.Annotation = v
+		out = append(out, c)
+	}
+	if o.ReadOnly {
+		addAnn("readOnly", true)
+	}
+	if o.WriteOnly {
+		addAnn("writeOnly", true)
+	}
+	if o.Deprecated {
+		addAnn("deprecated", true)
+	}
+	return out
 }
 
 // checkType implements the "type" keyword.
@@ -406,9 +458,10 @@ func (o *SchemaObject) checkNumberKeywords(ctx evalCtx, val jsontext.Value, valO
 }
 
 // checkStringKeywords implements minLength, maxLength, pattern, and
-// (when format-assertion is on) format.
+// format. When the format-assertion vocabulary is off, format produces
+// an annotation-only Output (per spec §F.2) carrying the format name.
 func (o *SchemaObject) checkStringKeywords(ctx evalCtx, val jsontext.Value, valOff int64) []Output {
-	if len(o.MinLength) == 0 && len(o.MaxLength) == 0 && o.Pattern == "" && (o.Format == "" || !ctx.scope.assertFormat) {
+	if len(o.MinLength) == 0 && len(o.MaxLength) == 0 && o.Pattern == "" && o.Format == "" {
 		return nil
 	}
 	s, err := decodeJSONString(val)
@@ -448,11 +501,19 @@ func (o *SchemaObject) checkStringKeywords(ctx evalCtx, val jsontext.Value, valO
 		}
 		out = append(out, c)
 	}
-	if o.Format != "" && ctx.scope.assertFormat {
+	if o.Format != "" {
 		c := ctx.atKeyword("format").baseOutput(valOff)
-		if err := validateFormat(o.Format, s); err != nil {
-			c.Valid = false
-			c.Error = err.Error()
+		if ctx.scope.assertFormat {
+			if err := validateFormat(o.Format, s); err != nil {
+				c.Valid = false
+				c.Error = err.Error()
+			} else {
+				v, _ := json.Marshal(o.Format)
+				c.Annotation = jsontext.Value(v)
+			}
+		} else {
+			v, _ := json.Marshal(o.Format)
+			c.Annotation = jsontext.Value(v)
 		}
 		out = append(out, c)
 	}
@@ -467,46 +528,47 @@ func (o *SchemaObject) checkComposition(ctx evalCtx, val jsontext.Value, valOff 
 
 	if len(o.AllOf) > 0 {
 		parent := ctx.atKeyword("allOf").baseOutput(valOff)
+		var subs []Output
 		for i, sub := range o.AllOf {
 			subOut, subCovered := sub.evaluate(ctx.atKeywordIndex("allOf", i), val, valOff)
+			subs = append(subs, subOut)
 			if !subOut.Valid {
 				parent.Valid = false
-				parent.Errors = append(parent.Errors, subOut)
 			}
 			if subOut.Valid {
 				covered.merge(subCovered)
 			}
 		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if len(o.AnyOf) > 0 {
 		parent := ctx.atKeyword("anyOf").baseOutput(valOff)
-		var failed []Output
+		var subs []Output
 		matched := false
 		for i, sub := range o.AnyOf {
 			subOut, subCovered := sub.evaluate(ctx.atKeywordIndex("anyOf", i), val, valOff)
+			subs = append(subs, subOut)
 			if subOut.Valid {
 				matched = true
 				covered.merge(subCovered)
-			} else {
-				failed = append(failed, subOut)
 			}
 		}
 		if !matched {
 			parent.Valid = false
 			parent.Error = "no anyOf subschema matched"
-			parent.Errors = failed
 		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if len(o.OneOf) > 0 {
 		parent := ctx.atKeyword("oneOf").baseOutput(valOff)
 		matches := 0
 		var matchedCovered coveredKeys
-		var perBranch []Output
+		var subs []Output
 		for i, sub := range o.OneOf {
 			subOut, subCovered := sub.evaluate(ctx.atKeywordIndex("oneOf", i), val, valOff)
-			perBranch = append(perBranch, subOut)
+			subs = append(subs, subOut)
 			if subOut.Valid {
 				matches++
 				matchedCovered = subCovered
@@ -515,10 +577,10 @@ func (o *SchemaObject) checkComposition(ctx evalCtx, val jsontext.Value, valOff 
 		if matches != 1 {
 			parent.Valid = false
 			parent.Error = fmt.Sprintf("oneOf: %d subschemas matched, want exactly 1", matches)
-			parent.Errors = perBranch
 		} else {
 			covered.merge(matchedCovered)
 		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if o.Not != nil {
@@ -528,6 +590,7 @@ func (o *SchemaObject) checkComposition(ctx evalCtx, val jsontext.Value, valOff 
 			parent.Valid = false
 			parent.Error = "not: subschema unexpectedly matched"
 		}
+		assignChildren(&parent, []Output{subOut})
 		out = append(out, parent)
 	}
 	if o.If != nil {
@@ -611,6 +674,8 @@ func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff i
 
 	if len(o.Properties) > 0 {
 		parent := ctx.atKeyword("properties").baseOutput(valOff)
+		var subs []Output
+		var matchedKeys []string
 		for _, e := range entries {
 			sub, ok := o.Properties[e.key]
 			if !ok || sub == nil {
@@ -618,15 +683,23 @@ func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff i
 			}
 			subOut, _ := sub.evaluate(ctx.atKeywordKey("properties", e.key).atInstanceKey(e.key), e.val, e.off)
 			covered.addProperty(e.key)
+			matchedKeys = append(matchedKeys, e.key)
+			subs = append(subs, subOut)
 			if !subOut.Valid {
 				parent.Valid = false
-				parent.Errors = append(parent.Errors, subOut)
 			}
 		}
+		if parent.Valid && len(matchedKeys) > 0 {
+			v, _ := json.Marshal(matchedKeys)
+			parent.Annotation = jsontext.Value(v)
+		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if len(patternRes) > 0 {
 		parent := ctx.atKeyword("patternProperties").baseOutput(valOff)
+		var subs []Output
+		var matchedKeys []string
 		for _, e := range entries {
 			for _, pp := range patternRes {
 				if !pp.re.MatchString(e.key) {
@@ -634,44 +707,61 @@ func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff i
 				}
 				if pp.schema == nil {
 					covered.addProperty(e.key)
+					matchedKeys = append(matchedKeys, e.key)
 					continue
 				}
 				ppCtx := ctx.atKeywordKey("patternProperties", pp.pattern).atInstanceKey(e.key)
 				subOut, _ := pp.schema.evaluate(ppCtx, e.val, e.off)
 				covered.addProperty(e.key)
+				matchedKeys = append(matchedKeys, e.key)
+				subs = append(subs, subOut)
 				if !subOut.Valid {
 					parent.Valid = false
-					parent.Errors = append(parent.Errors, subOut)
 				}
 			}
 		}
+		if parent.Valid && len(matchedKeys) > 0 {
+			v, _ := json.Marshal(matchedKeys)
+			parent.Annotation = jsontext.Value(v)
+		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if o.AdditionalProperties != nil {
 		parent := ctx.atKeyword("additionalProperties").baseOutput(valOff)
+		var subs []Output
+		var matchedKeys []string
 		for _, e := range entries {
 			if _, ok := covered.properties[e.key]; ok {
 				continue
 			}
 			subOut, _ := o.AdditionalProperties.evaluate(ctx.atKeyword("additionalProperties").atInstanceKey(e.key), e.val, e.off)
 			covered.addProperty(e.key)
+			matchedKeys = append(matchedKeys, e.key)
+			subs = append(subs, subOut)
 			if !subOut.Valid {
 				parent.Valid = false
-				parent.Errors = append(parent.Errors, subOut)
 			}
 		}
+		if parent.Valid && len(matchedKeys) > 0 {
+			v, _ := json.Marshal(matchedKeys)
+			parent.Annotation = jsontext.Value(v)
+		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if o.PropertyNames != nil {
 		parent := ctx.atKeyword("propertyNames").baseOutput(valOff)
+		var subs []Output
 		for _, e := range entries {
 			keyBytes, _ := json.Marshal(e.key)
 			subOut, _ := o.PropertyNames.evaluate(ctx.atKeyword("propertyNames"), keyBytes, e.off)
+			subs = append(subs, subOut)
 			if !subOut.Valid {
 				parent.Valid = false
-				parent.Errors = append(parent.Errors, subOut)
 			}
 		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if len(o.Required) > 0 {
@@ -724,22 +814,25 @@ func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff i
 	}
 	if len(o.DependentSchemas) > 0 {
 		parent := ctx.atKeyword("dependentSchemas").baseOutput(valOff)
+		var subs []Output
 		for prop, sub := range o.DependentSchemas {
 			if _, present := keys[prop]; !present || sub == nil {
 				continue
 			}
 			subOut, subCovered := sub.evaluate(ctx.atKeywordKey("dependentSchemas", prop), val, valOff)
+			subs = append(subs, subOut)
 			if subOut.Valid {
 				covered.merge(subCovered)
 			} else {
 				parent.Valid = false
-				parent.Errors = append(parent.Errors, subOut)
 			}
 		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if len(o.Dependencies) > 0 {
 		parent := ctx.atKeyword("dependencies").baseOutput(valOff)
+		var subs []Output
 		for prop, dep := range o.Dependencies {
 			if dep == nil {
 				continue
@@ -761,17 +854,33 @@ func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff i
 			}
 			if sub := dep.Schema(); sub != nil {
 				subOut, subCovered := sub.evaluate(ctx.atKeywordKey("dependencies", prop), val, valOff)
+				subs = append(subs, subOut)
 				if subOut.Valid {
 					covered.merge(subCovered)
 				} else {
 					parent.Valid = false
-					parent.Errors = append(parent.Errors, subOut)
 				}
 			}
 		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	return out, covered
+}
+
+// assignChildren places subs into parent.Errors when parent.Valid is
+// false and into parent.Annotations when it's true. This matches the
+// 2020-12 verbose output convention where a parent's child-array name
+// is determined by its own validity.
+func assignChildren(parent *Output, subs []Output) {
+	if len(subs) == 0 {
+		return
+	}
+	if parent.Valid {
+		parent.Annotations = append(parent.Annotations, subs...)
+	} else {
+		parent.Errors = append(parent.Errors, subs...)
+	}
 }
 
 // atInstanceKey extends instanceLocation with key (RFC 6901 escaped).
@@ -791,6 +900,8 @@ func (c evalCtx) atInstanceIndex(i int) evalCtx {
 func (o *SchemaObject) checkUnevaluatedProperties(ctx evalCtx, val jsontext.Value, valOff int64, covered map[string]struct{}) (Output, coveredKeys) {
 	parent := ctx.atKeyword("unevaluatedProperties").baseOutput(valOff)
 	var newCovered coveredKeys
+	var subs []Output
+	var matchedKeys []string
 	dec := jsontext.NewDecoder(bytes.NewReader(val))
 	if _, err := dec.ReadToken(); err != nil {
 		parent.Valid = false
@@ -818,11 +929,17 @@ func (o *SchemaObject) checkUnevaluatedProperties(ctx evalCtx, val jsontext.Valu
 		subCtx := ctx.atKeyword("unevaluatedProperties").atInstanceKey(key)
 		subOut, _ := o.UnevaluatedProperties.evaluate(subCtx, bytes.Clone(propVal), propOff)
 		newCovered.addProperty(key)
+		matchedKeys = append(matchedKeys, key)
+		subs = append(subs, subOut)
 		if !subOut.Valid {
 			parent.Valid = false
-			parent.Errors = append(parent.Errors, subOut)
 		}
 	}
+	if parent.Valid && len(matchedKeys) > 0 {
+		v, _ := json.Marshal(matchedKeys)
+		parent.Annotation = jsontext.Value(v)
+	}
+	assignChildren(&parent, subs)
 	return parent, newCovered
 }
 
@@ -896,46 +1013,71 @@ func (o *SchemaObject) checkArrayBody(ctx evalCtx, val jsontext.Value, valOff in
 	}
 	if !ctx.scope.skipPrefixItems && len(o.PrefixItems) > 0 {
 		parent := ctx.atKeyword("prefixItems").baseOutput(valOff)
+		var subs []Output
+		highest := -1
 		for i, sub := range o.PrefixItems {
 			if i >= len(items) {
 				break
 			}
 			subOut, _ := sub.evaluate(ctx.atKeywordIndex("prefixItems", i).atInstanceIndex(i), items[i].val, items[i].off)
+			subs = append(subs, subOut)
 			covered.addItem(i)
+			highest = i
 			if !subOut.Valid {
 				parent.Valid = false
-				parent.Errors = append(parent.Errors, subOut)
 			}
 		}
+		if parent.Valid && highest >= 0 {
+			// Spec §10.3.1.1: annotation is largest index covered, or
+			// true when prefixItems applied to every item.
+			if highest+1 == len(items) {
+				v, _ := json.Marshal(true)
+				parent.Annotation = jsontext.Value(v)
+			} else {
+				v, _ := json.Marshal(highest)
+				parent.Annotation = jsontext.Value(v)
+			}
+		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if o.Items != nil {
 		parent := ctx.atKeyword("items").baseOutput(valOff)
+		var subs []Output
 		startIdx := len(o.PrefixItems)
 		if ctx.scope.skipPrefixItems {
 			startIdx = 0
 		}
+		applied := false
 		for i := startIdx; i < len(items); i++ {
 			subCtx := ctx.atKeyword("items").atInstanceIndex(i)
 			subOut, _ := o.Items.evaluate(subCtx, items[i].val, items[i].off)
+			subs = append(subs, subOut)
 			covered.addItem(i)
+			applied = true
 			if !subOut.Valid {
 				parent.Valid = false
-				parent.Errors = append(parent.Errors, subOut)
 			}
 		}
+		if parent.Valid && applied {
+			v, _ := json.Marshal(true)
+			parent.Annotation = jsontext.Value(v)
+		}
+		assignChildren(&parent, subs)
 		out = append(out, parent)
 	}
 	if o.Contains != nil {
 		parent := ctx.atKeyword("contains").baseOutput(valOff)
 		matched := 0
 		var perBranch []Output
+		var matchedIdx []int
 		for i, it := range items {
 			subOut, _ := o.Contains.evaluate(ctx.atKeyword("contains").atInstanceIndex(i), it.val, it.off)
 			perBranch = append(perBranch, subOut)
 			if subOut.Valid {
 				matched++
 				covered.addItem(i)
+				matchedIdx = append(matchedIdx, i)
 			}
 		}
 		minRequired := 1
@@ -955,7 +1097,6 @@ func (o *SchemaObject) checkArrayBody(ctx evalCtx, val jsontext.Value, valOff in
 		if matched < minRequired {
 			parent.Valid = false
 			parent.Error = fmt.Sprintf("contains matched %d items, minContains %d", matched, minRequired)
-			parent.Errors = perBranch
 		}
 		if cmp, ok := compareRat(o.MaxContains, big.NewRat(int64(matched), 1)); ok && cmp < 0 {
 			parent.Valid = false
@@ -964,6 +1105,11 @@ func (o *SchemaObject) checkArrayBody(ctx evalCtx, val jsontext.Value, valOff in
 			}
 			parent.Error += fmt.Sprintf("contains matched %d items, maxContains %s", matched, o.MaxContains)
 		}
+		if parent.Valid && len(matchedIdx) > 0 {
+			v, _ := json.Marshal(matchedIdx)
+			parent.Annotation = jsontext.Value(v)
+		}
+		assignChildren(&parent, perBranch)
 		out = append(out, parent)
 	}
 	return out, covered
@@ -974,6 +1120,8 @@ func (o *SchemaObject) checkArrayBody(ctx evalCtx, val jsontext.Value, valOff in
 func (o *SchemaObject) checkUnevaluatedItems(ctx evalCtx, val jsontext.Value, valOff int64, covered map[int]struct{}) (Output, coveredKeys) {
 	parent := ctx.atKeyword("unevaluatedItems").baseOutput(valOff)
 	var newCovered coveredKeys
+	var subs []Output
+	applied := false
 	dec := jsontext.NewDecoder(bytes.NewReader(val))
 	if _, err := dec.ReadToken(); err != nil {
 		parent.Valid = false
@@ -993,12 +1141,18 @@ func (o *SchemaObject) checkUnevaluatedItems(ctx evalCtx, val jsontext.Value, va
 			subCtx := ctx.atKeyword("unevaluatedItems").atInstanceIndex(i)
 			subOut, _ := o.UnevaluatedItems.evaluate(subCtx, bytes.Clone(v), off)
 			newCovered.addItem(i)
+			subs = append(subs, subOut)
+			applied = true
 			if !subOut.Valid {
 				parent.Valid = false
-				parent.Errors = append(parent.Errors, subOut)
 			}
 		}
 		i++
 	}
+	if parent.Valid && applied {
+		v, _ := json.Marshal(true)
+		parent.Annotation = jsontext.Value(v)
+	}
+	assignChildren(&parent, subs)
 	return parent, newCovered
 }

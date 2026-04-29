@@ -18,14 +18,38 @@ import (
 	"github.com/crhntr/jsonschema"
 )
 
+// SchemaURI is the canonical URL of the JSON Schema 2020-12
+// meta-schema's root document.
+const SchemaURI = "https://json-schema.org/draft/2020-12/schema"
+
 //go:embed draft/2020-12/schema.json draft/2020-12/meta/*.json
 var fsRoot embed.FS
 
-// FS is the read-only filesystem of every embedded meta-schema
-// document. The directory layout mirrors the upstream URL space:
-// draft/2020-12/schema.json is the root, draft/2020-12/meta/<vocab>.json
-// is each vocabulary file.
-var FS fs.FS = fsRoot
+func BytesForURL(url string) ([]byte, bool) {
+	for _, entry := range []struct {
+		uri  string
+		path string
+	}{
+		{SchemaURI, "draft/2020-12/schema.json"},
+		{"https://json-schema.org/draft/2020-12/meta/applicator", "draft/2020-12/meta/applicator.json"},
+		{"https://json-schema.org/draft/2020-12/meta/content", "draft/2020-12/meta/content.json"},
+		{"https://json-schema.org/draft/2020-12/meta/core", "draft/2020-12/meta/core.json"},
+		{"https://json-schema.org/draft/2020-12/meta/format-annotation", "draft/2020-12/meta/format-annotation.json"},
+		{"https://json-schema.org/draft/2020-12/meta/meta-data", "draft/2020-12/meta/meta-data.json"},
+		{"https://json-schema.org/draft/2020-12/meta/unevaluated", "draft/2020-12/meta/unevaluated.json"},
+		{"https://json-schema.org/draft/2020-12/meta/validation", "draft/2020-12/meta/validation.json"},
+	} {
+		if entry.uri != url {
+			continue
+		}
+		buf, err := fs.ReadFile(fsRoot, entry.path)
+		if err != nil {
+			return nil, false
+		}
+		return buf, true
+	}
+	return nil, false
+}
 
 // Seed loads every embedded document into r using its declared $id
 // as the cache key. After Seed returns, r.Resolve("https://json-schema.org/draft/2020-12/schema")
@@ -58,7 +82,3 @@ func Seed(r *jsonschema.Resolver) error {
 		return nil
 	})
 }
-
-// SchemaURI is the canonical URL of the JSON Schema 2020-12
-// meta-schema's root document.
-const SchemaURI = "https://json-schema.org/draft/2020-12/schema"

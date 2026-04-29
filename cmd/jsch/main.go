@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -15,7 +14,7 @@ import (
 	"github.com/go-json-experiment/json"
 
 	"github.com/crhntr/jsonschema"
-	"github.com/crhntr/jsonschema/metaschema"
+	"github.com/crhntr/jsonschema/internal/metaschema"
 )
 
 // jsonMarshal is a tiny indirection so the test for emitOutput can
@@ -252,7 +251,7 @@ func schemaSource(ctx context.Context, wd, arg string, client *http.Client) (uri
 		// Try the embedded copy first so air-gapped invocations
 		// of jsch on the canonical meta-schema URLs always
 		// succeed.
-		if buf, ok := embeddedBytes(arg); ok {
+		if buf, ok := metaschema.BytesForURL(arg); ok {
 			return arg, buf, nil
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, arg, nil)
@@ -296,31 +295,6 @@ func schemaSource(ctx context.Context, wd, arg string, client *http.Client) (uri
 // embeddedBytes returns the bytes of an embedded meta-schema
 // document keyed by its canonical URL, or false if the URL is not
 // one we ship.
-func embeddedBytes(url string) ([]byte, bool) {
-	for _, entry := range []struct {
-		uri  string
-		path string
-	}{
-		{metaschema.SchemaURI, "draft/2020-12/schema.json"},
-		{"https://json-schema.org/draft/2020-12/meta/applicator", "draft/2020-12/meta/applicator.json"},
-		{"https://json-schema.org/draft/2020-12/meta/content", "draft/2020-12/meta/content.json"},
-		{"https://json-schema.org/draft/2020-12/meta/core", "draft/2020-12/meta/core.json"},
-		{"https://json-schema.org/draft/2020-12/meta/format-annotation", "draft/2020-12/meta/format-annotation.json"},
-		{"https://json-schema.org/draft/2020-12/meta/meta-data", "draft/2020-12/meta/meta-data.json"},
-		{"https://json-schema.org/draft/2020-12/meta/unevaluated", "draft/2020-12/meta/unevaluated.json"},
-		{"https://json-schema.org/draft/2020-12/meta/validation", "draft/2020-12/meta/validation.json"},
-	} {
-		if entry.uri != url {
-			continue
-		}
-		buf, err := fs.ReadFile(metaschema.FS, entry.path)
-		if err != nil {
-			return nil, false
-		}
-		return buf, true
-	}
-	return nil, false
-}
 
 // readInstance returns the bytes and a display name for an instance
 // argument. "-" means stdin.

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-json-experiment/json"
 
 	"github.com/crhntr/jsonschema"
+	"github.com/crhntr/jsonschema/metaschema"
 )
 
 // jsonMarshal is a tiny indirection so the test for emitOutput can
@@ -61,20 +63,30 @@ func run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 
 func validate(ctx context.Context, wd string, args []string, stdout, stderr io.Writer, stdin io.Reader, client *http.Client) error {
 	var (
-		schema       string
-		formatAssert bool
-		strict       bool
-		quiet        bool
-		outputFmt    string
+		schema               string
+		schema202012         bool
+		skipSchemaValidation bool
+		formatAssert         bool
+		strict               bool
+		quiet                bool
+		outputFmt            string
 	)
 	flagSet := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flagSet.StringVar(&schema, "schema", "", "path or URL of a JSON Schema document (required)")
+	flagSet.BoolVar(&schema202012, "schema-2020-12", false, "shorthand for --schema=https://json-schema.org/draft/2020-12/schema (served from the embedded copy)")
+	flagSet.BoolVar(&skipSchemaValidation, "skip-schema-validation", false, "skip the pre-flight check that validates --schema against the JSON Schema 2020-12 meta-schema")
 	flagSet.BoolVar(&formatAssert, "format-assert", false, "treat the format keyword as an assertion (per the format-assertion vocabulary)")
 	flagSet.BoolVar(&strict, "strict", false, "fail on unknown schema keywords or unresolvable external $refs")
 	flagSet.BoolVar(&quiet, "quiet", false, "do not print success messages; failures still go to stderr")
 	flagSet.StringVar(&outputFmt, "output", "", "emit a JSON Schema 2020-12 output document per instance: flag, basic, detailed, or verbose")
 	if err := flagSet.Parse(args); err != nil {
 		return err
+	}
+	if schema202012 {
+		if schema != "" {
+			return fmt.Errorf("--schema and --schema-2020-12 are mutually exclusive")
+		}
+		schema = metaschema.SchemaURI
 	}
 	if schema == "" {
 		return fmt.Errorf("--schema is required")
@@ -83,7 +95,7 @@ func validate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		return err
 	}
 
-	m, err := loadSchema(ctx, wd, schema, strict, client)
+	m, err := loadSchema(ctx, wd, schema, strict, skipSchemaValidation, client)
 	if err != nil {
 		return err
 	}
@@ -168,15 +180,23 @@ func emitOutput(w io.Writer, format string, out jsonschema.Output) error {
 // loadSchema parses arg as either an absolute URL or a local file path
 // and runs it through a Resolver. Strict mode rejects schemas that
 // declared unknown top-level keywords.
-func loadSchema(ctx context.Context, wd, arg string, strict bool, client *http.Client) (*jsonschema.Schema, error) {
+func loadSchema(ctx context.Context, wd, arg string, strict, skipMeta bool, client *http.Client) (*jsonschema.Schema, error) {
 	r := jsonschema.NewResolver(client)
-	uri, body, err := schemaSource(wd, arg)
+	if err := metaschema.Seed(r); err != nil {
+		return nil, fmt.Errorf("seed metaschema: %w", err)
+	}
+	uri, body, err := schemaSource(ctx, wd, arg, client)
 	if err != nil {
 		return nil, err
 	}
 	if body != nil {
 		if _, err := r.Load(uri, body); err != nil {
 			return nil, fmt.Errorf("load schema: %w", err)
+		}
+	}
+	if !skipMeta && uri != metaschema.SchemaURI {
+		if err := validateAgainstMetaSchema(ctx, r, uri, body); err != nil {
+			return nil, err
 		}
 	}
 	m, err := r.Resolve(ctx, uri)
@@ -195,14 +215,63 @@ func loadSchema(ctx context.Context, wd, arg string, strict bool, client *http.C
 	return m, nil
 }
 
-// schemaSource returns the absolute URI for r.Resolve plus the schema
-// body if it's a local file (so the resolver doesn't try to fetch it).
-// Inputs starting with http://, https://, or file:// are URLs; anything
-// else is a local path resolved against wd.
-func schemaSource(wd, arg string) (uri string, body []byte, err error) {
+// validateAgainstMetaSchema runs body through the embedded JSON
+// Schema 2020-12 meta-schema and returns a descriptive error when
+// the input doesn't pass. body is taken pre-resolution so the
+// validation reflects the document as written, not the
+// resolver-augmented value.
+func validateAgainstMetaSchema(ctx context.Context, r *jsonschema.Resolver, uri string, body []byte) error {
+	if body == nil {
+		// Body is nil for URL-loaded schemas that the resolver
+		// will fetch itself; we'd need to hold onto those bytes
+		// up front. For now skip the meta-validation in that
+		// path rather than re-fetching.
+		return nil
+	}
+	meta, err := r.Resolve(ctx, metaschema.SchemaURI)
+	if err != nil {
+		return fmt.Errorf("resolve meta-schema: %w", err)
+	}
+	out := meta.Validate(uri, body)
+	if !out.Valid {
+		return fmt.Errorf("schema fails JSON Schema 2020-12 meta-schema validation:\n%s", out.AsError())
+	}
+	return nil
+}
+
+// schemaSource returns the absolute URI for r.Resolve plus the
+// schema's raw bytes. URLs are fetched once via client so callers
+// (e.g. the meta-schema pre-flight check) can inspect the document
+// before handing it to the Resolver. URLs that match an
+// embedded-meta-schema $id resolve from the embedded copy: callers
+// that have already pre-seeded the resolver with metaschema.Seed
+// can simply skip the fetch when body is non-nil.
+func schemaSource(ctx context.Context, wd, arg string, client *http.Client) (uri string, body []byte, err error) {
 	switch {
 	case strings.HasPrefix(arg, "http://"), strings.HasPrefix(arg, "https://"):
-		return arg, nil, nil
+		// Try the embedded copy first so air-gapped invocations
+		// of jsch on the canonical meta-schema URLs always
+		// succeed.
+		if buf, ok := embeddedBytes(arg); ok {
+			return arg, buf, nil
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, arg, nil)
+		if err != nil {
+			return "", nil, err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", nil, fmt.Errorf("fetch %s: %w", arg, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return "", nil, fmt.Errorf("fetch %s: %s", arg, resp.Status)
+		}
+		buf, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", nil, fmt.Errorf("read %s: %w", arg, err)
+		}
+		return arg, buf, nil
 	case strings.HasPrefix(arg, "file://"):
 		path := strings.TrimPrefix(arg, "file://")
 		buf, err := os.ReadFile(filepath.Clean(path))
@@ -222,6 +291,35 @@ func schemaSource(wd, arg string) (uri string, body []byte, err error) {
 		}
 		return "file://" + abs, buf, nil
 	}
+}
+
+// embeddedBytes returns the bytes of an embedded meta-schema
+// document keyed by its canonical URL, or false if the URL is not
+// one we ship.
+func embeddedBytes(url string) ([]byte, bool) {
+	for _, entry := range []struct {
+		uri  string
+		path string
+	}{
+		{metaschema.SchemaURI, "draft/2020-12/schema.json"},
+		{"https://json-schema.org/draft/2020-12/meta/applicator", "draft/2020-12/meta/applicator.json"},
+		{"https://json-schema.org/draft/2020-12/meta/content", "draft/2020-12/meta/content.json"},
+		{"https://json-schema.org/draft/2020-12/meta/core", "draft/2020-12/meta/core.json"},
+		{"https://json-schema.org/draft/2020-12/meta/format-annotation", "draft/2020-12/meta/format-annotation.json"},
+		{"https://json-schema.org/draft/2020-12/meta/meta-data", "draft/2020-12/meta/meta-data.json"},
+		{"https://json-schema.org/draft/2020-12/meta/unevaluated", "draft/2020-12/meta/unevaluated.json"},
+		{"https://json-schema.org/draft/2020-12/meta/validation", "draft/2020-12/meta/validation.json"},
+	} {
+		if entry.uri != url {
+			continue
+		}
+		buf, err := fs.ReadFile(metaschema.FS, entry.path)
+		if err != nil {
+			return nil, false
+		}
+		return buf, true
+	}
+	return nil, false
 }
 
 // readInstance returns the bytes and a display name for an instance

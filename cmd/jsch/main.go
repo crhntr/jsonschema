@@ -252,6 +252,13 @@ func schemaSource(ctx context.Context, wd, arg string, client *http.Client) (uri
 		if err != nil {
 			return "", nil, err
 		}
+		// Match Resolver.Resolve's HTTP behaviour so a nil
+		// client doesn't panic and content-negotiating servers
+		// that key off Accept return a schema document.
+		req.Header.Set("Accept", "application/schema+json, application/json")
+		if client == nil {
+			client = http.DefaultClient
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			return "", nil, fmt.Errorf("fetch %s: %w", arg, err)

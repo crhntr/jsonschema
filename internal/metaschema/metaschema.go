@@ -25,40 +25,16 @@ const SchemaURI = "https://json-schema.org/draft/2020-12/schema"
 //go:embed draft/2020-12/schema.json draft/2020-12/meta/*.json
 var fsRoot embed.FS
 
-func BytesForURL(url string) ([]byte, bool) {
-	for _, entry := range []struct {
-		uri  string
-		path string
-	}{
-		{SchemaURI, "draft/2020-12/schema.json"},
-		{"https://json-schema.org/draft/2020-12/meta/applicator", "draft/2020-12/meta/applicator.json"},
-		{"https://json-schema.org/draft/2020-12/meta/content", "draft/2020-12/meta/content.json"},
-		{"https://json-schema.org/draft/2020-12/meta/core", "draft/2020-12/meta/core.json"},
-		{"https://json-schema.org/draft/2020-12/meta/format-annotation", "draft/2020-12/meta/format-annotation.json"},
-		{"https://json-schema.org/draft/2020-12/meta/meta-data", "draft/2020-12/meta/meta-data.json"},
-		{"https://json-schema.org/draft/2020-12/meta/unevaluated", "draft/2020-12/meta/unevaluated.json"},
-		{"https://json-schema.org/draft/2020-12/meta/validation", "draft/2020-12/meta/validation.json"},
-	} {
-		if entry.uri != url {
-			continue
-		}
-		buf, err := fs.ReadFile(fsRoot, entry.path)
-		if err != nil {
-			return nil, false
-		}
-		return buf, true
-	}
-	return nil, false
-}
-
-// Seed loads every embedded document into r using its declared $id
-// as the cache key. After Seed returns, r.Resolve("https://json-schema.org/draft/2020-12/schema")
-// (and the seven vocabulary URLs) hits the embedded copy without
-// touching the network.
-func Seed(r *jsonschema.Resolver) error {
-	return fs.WalkDir(fsRoot, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+// embedded maps each document's declared $id to its bytes, populated
+// once at package init by walking fsRoot. Keeping the mapping
+// derived from the embed (rather than a hand-maintained URL → path
+// table) means dropping a new vocabulary file into draft/2020-12/
+// requires no code changes.
+var embedded = func() map[string][]byte {
+	m := map[string][]byte{}
+	err := fs.WalkDir(fsRoot, ".", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 		if d.IsDir() || !strings.HasSuffix(path, ".json") {
 			return nil
@@ -76,9 +52,31 @@ func Seed(r *jsonschema.Resolver) error {
 		if probe.ID == "" {
 			return fmt.Errorf("embedded %s has no $id", path)
 		}
-		if _, err := r.Load(probe.ID, body); err != nil {
-			return fmt.Errorf("seed %s: %w", probe.ID, err)
-		}
+		m[probe.ID] = body
 		return nil
 	})
+	if err != nil {
+		panic(fmt.Errorf("metaschema: index embedded documents: %w", err))
+	}
+	return m
+}()
+
+// BytesForURL returns the bytes of the embedded meta-schema document
+// whose $id equals url, or false if no such document is shipped.
+func BytesForURL(url string) ([]byte, bool) {
+	body, ok := embedded[url]
+	return body, ok
+}
+
+// Seed loads every embedded document into r using its declared $id
+// as the cache key. After Seed returns, r.Resolve(SchemaURI) (and
+// the seven vocabulary URLs) hits the embedded copy without
+// touching the network.
+func Seed(r *jsonschema.Resolver) error {
+	for uri, body := range embedded {
+		if _, err := r.Load(uri, body); err != nil {
+			return fmt.Errorf("seed %s: %w", uri, err)
+		}
+	}
+	return nil
 }

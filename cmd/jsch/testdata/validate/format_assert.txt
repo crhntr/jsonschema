@@ -1,0 +1,7 @@
+! jsch validate --schema schema.json --format-assert bad.json
+stderr 'not a valid ipv4'
+
+-- schema.json --
+{"format": "ipv4"}
+-- bad.json --
+"not-an-ip"

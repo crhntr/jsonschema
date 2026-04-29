@@ -1,0 +1,6 @@
+jsch validate --schema schema.json hello.json
+
+-- schema.json --
+{"type": "string"}
+-- hello.json --
+"hello"

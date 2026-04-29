@@ -1,0 +1,7 @@
+! jsch validate --schema simple.schema.json not_empty.json
+stderr 'nothing allowed here'
+
+-- simple.schema.json --
+false
+-- not_empty.json --
+[]

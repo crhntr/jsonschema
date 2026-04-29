@@ -1,0 +1,11 @@
+! jsch validate --schema schema.json instance.json
+stderr 'array items 0 and 2 are equal'
+
+-- schema.json --
+{
+  "type": "array",
+  "items": { "type": "integer" },
+  "uniqueItems": true
+}
+-- instance.json --
+[1, 2, 1]

@@ -1,0 +1,6 @@
+jsch validate --schema schema.json instance.json
+
+-- schema.json --
+{"type": "string", "x-vendor-thing": "ignored"}
+-- instance.json --
+"hi"

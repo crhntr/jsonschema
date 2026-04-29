@@ -1,0 +1,5 @@
+! jsch validate data.json
+stderr 'is required'
+
+-- data.json --
+{}

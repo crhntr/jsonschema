@@ -1,0 +1,7 @@
+jsch validate --schema schema.json --output flag good.json
+stdout '\{"valid":true\}'
+
+-- schema.json --
+{"type": "string"}
+-- good.json --
+"hello"

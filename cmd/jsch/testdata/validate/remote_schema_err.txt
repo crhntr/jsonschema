@@ -1,0 +1,9 @@
+! jsch validate --schema https://example.com/refs/embedded.json instance.json
+stderr 'string'
+
+-- instance.json --
+{
+	"child": {
+		"label": 42
+	}
+}

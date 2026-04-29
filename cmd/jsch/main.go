@@ -72,8 +72,8 @@ func validate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 	)
 	flagSet := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flagSet.StringVar(&schema, "schema", "", "path or URL of a JSON Schema document (required)")
-	flagSet.BoolVar(&schema202012, "schema-2020-12", false, "shorthand for --schema=https://json-schema.org/draft/2020-12/schema (served from the embedded copy)")
-	flagSet.BoolVar(&skipSchemaValidation, "skip-schema-validation", false, "skip the pre-flight check that validates --schema against the JSON Schema 2020-12 meta-schema")
+	flagSet.BoolVar(&schema202012, "schema-2020-12", false, "shorthand for --schema=https://json-schema.org/draft/2020-12/schema")
+	flagSet.BoolVar(&skipSchemaValidation, "skip-schema-validation", false, "do not validate --schema against the JSON Schema 2020-12 meta-schema before running")
 	flagSet.BoolVar(&formatAssert, "format-assert", false, "treat the format keyword as an assertion (per the format-assertion vocabulary)")
 	flagSet.BoolVar(&strict, "strict", false, "fail on unknown schema keywords or unresolvable external $refs")
 	flagSet.BoolVar(&quiet, "quiet", false, "do not print success messages; failures still go to stderr")
@@ -127,14 +127,14 @@ func validate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		if !out.Valid {
 			failed++
 			if quiet {
-				fmt.Fprintln(stderr, name+": invalid")
+				_, _ = fmt.Fprintln(stderr, name+": invalid")
 			} else {
-				fmt.Fprintln(stderr, out.AsError())
+				_, _ = fmt.Fprintln(stderr, out.AsError())
 			}
 			continue
 		}
 		if !quiet {
-			fmt.Fprintln(stdout, name+": ok")
+			_, _ = fmt.Fprintln(stdout, name+": ok")
 		}
 	}
 	if failed > 0 {
@@ -188,11 +188,12 @@ func loadSchema(ctx context.Context, wd, arg string, strict, skipMeta bool, clie
 	if err != nil {
 		return nil, err
 	}
-	if body != nil {
-		if _, err := r.Load(uri, body); err != nil {
-			return nil, fmt.Errorf("load schema: %w", err)
-		}
+	if _, err := r.Load(uri, body); err != nil {
+		return nil, fmt.Errorf("load schema: %w", err)
 	}
+	// The meta-schema validates itself, but routing it through
+	// the pre-flight is wasted work and produces noisier output
+	// on failure; skip when uri is the canonical meta-schema URL.
 	if !skipMeta && uri != metaschema.SchemaURI {
 		if err := validateAgainstMetaSchema(ctx, r, uri, body); err != nil {
 			return nil, err
@@ -220,13 +221,6 @@ func loadSchema(ctx context.Context, wd, arg string, strict, skipMeta bool, clie
 // validation reflects the document as written, not the
 // resolver-augmented value.
 func validateAgainstMetaSchema(ctx context.Context, r *jsonschema.Resolver, uri string, body []byte) error {
-	if body == nil {
-		// Body is nil for URL-loaded schemas that the resolver
-		// will fetch itself; we'd need to hold onto those bytes
-		// up front. For now skip the meta-validation in that
-		// path rather than re-fetching.
-		return nil
-	}
 	meta, err := r.Resolve(ctx, metaschema.SchemaURI)
 	if err != nil {
 		return fmt.Errorf("resolve meta-schema: %w", err)

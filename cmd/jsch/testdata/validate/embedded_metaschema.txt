@@ -1,0 +1,23 @@
+# --schema=https://json-schema.org/draft/2020-12/schema resolves
+# locally from the embedded copy, no network needed.
+jsch validate --schema https://json-schema.org/draft/2020-12/schema instance.json
+
+# --schema-2020-12 is sugar for the canonical URL above.
+jsch validate --schema-2020-12 instance.json
+
+# A bogus schema is caught by the meta-schema pre-flight check
+# unless the caller opts out.
+! jsch validate --schema bogus.json instance.json
+stderr 'fails JSON Schema 2020-12 meta-schema validation'
+
+# With --skip-schema-validation the bogus schema is accepted by
+# loadSchema and only the instance-level validation runs. The
+# bogus schema rejects the instance for missing the required
+# property, but the failure no longer mentions the meta-schema.
+! jsch validate --schema bogus.json --skip-schema-validation instance.json
+! stderr 'meta-schema'
+
+-- instance.json --
+{"type":"string"}
+-- bogus.json --
+{"required":["a","a"]}

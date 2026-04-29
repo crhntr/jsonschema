@@ -1,0 +1,8 @@
+jsch validate --schema schema.json --quiet instance.json
+! stdout .
+! stderr .
+
+-- schema.json --
+{"type": "string"}
+-- instance.json --
+"hello"

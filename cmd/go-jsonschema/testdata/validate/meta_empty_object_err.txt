@@ -1,6 +1,0 @@
-! go-jsonschema validate --schema simple.schema.json empty.json
-stderr 'invalid JSON'
-
--- simple.schema.json --
-{}
--- empty.json --

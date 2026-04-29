@@ -1,0 +1,11 @@
+jsch validate --schema schema.json instance.json
+
+-- schema.json --
+{
+  "oneOf": [
+    { "type": "string" },
+    { "type": "integer" }
+  ]
+}
+-- instance.json --
+"hello"

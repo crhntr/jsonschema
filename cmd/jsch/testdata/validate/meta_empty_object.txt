@@ -1,0 +1,6 @@
+jsch validate --schema simple.schema.json not_empty.json
+
+-- simple.schema.json --
+{}
+-- not_empty.json --
+[]

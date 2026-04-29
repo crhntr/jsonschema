@@ -1,0 +1,6 @@
+! jsch validate --schema simple.schema.json something.json
+
+-- simple.schema.json --
+false
+-- something.json --
+{}

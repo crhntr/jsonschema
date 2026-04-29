@@ -1,6 +1,0 @@
-go-jsonschema validate --schema simple.schema.json not_empty.json
-
--- simple.schema.json --
-true
--- not_empty.json --
-[]

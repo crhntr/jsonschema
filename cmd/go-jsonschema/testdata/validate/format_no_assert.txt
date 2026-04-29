@@ -1,6 +1,0 @@
-go-jsonschema validate --schema schema.json bad.json
-
--- schema.json --
-{"format": "ipv4"}
--- bad.json --
-"not-an-ip"

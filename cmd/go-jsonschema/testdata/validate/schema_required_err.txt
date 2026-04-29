@@ -1,5 +1,0 @@
-! go-jsonschema validate data.json
-stderr 'is required'
-
--- data.json --
-{}

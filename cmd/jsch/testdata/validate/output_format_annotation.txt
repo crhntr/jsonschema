@@ -1,0 +1,11 @@
+jsch validate --schema schema.json --output verbose any.json
+# Without --format-assert, /format is annotation-only per spec §F.2:
+# a "bad" uuid is still valid and the format name surfaces as the
+# annotation value.
+stdout '"keywordLocation":"/format"'
+stdout '"annotation":"uuid"'
+
+-- schema.json --
+{"format": "uuid"}
+-- any.json --
+"not-a-uuid"

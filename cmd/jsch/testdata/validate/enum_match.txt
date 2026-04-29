@@ -1,0 +1,6 @@
+jsch validate --schema schema.json instance.json
+
+-- schema.json --
+{"enum": ["red", "green", "blue"]}
+-- instance.json --
+"green"

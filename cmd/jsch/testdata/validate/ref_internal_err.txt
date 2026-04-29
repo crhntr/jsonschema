@@ -1,0 +1,16 @@
+! jsch validate --schema schema.json instance.json
+stderr 'less than minimum 1'
+
+-- schema.json --
+{
+  "$defs": {
+    "positive": { "type": "integer", "minimum": 1 }
+  },
+  "type": "object",
+  "properties": {
+    "count": { "$ref": "#/$defs/positive" }
+  },
+  "required": ["count"]
+}
+-- instance.json --
+{"count": 0}

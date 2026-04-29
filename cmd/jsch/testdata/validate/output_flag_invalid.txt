@@ -1,0 +1,7 @@
+! jsch validate --schema schema.json --output flag bad.json
+stdout '\{"valid":false\}'
+
+-- schema.json --
+{"type": "string"}
+-- bad.json --
+42

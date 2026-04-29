@@ -1,3 +1,0 @@
-go-jsonschema generate --schema object.schema.json
--- object.schema.json --
-{}

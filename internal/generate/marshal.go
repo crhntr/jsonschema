@@ -3,7 +3,6 @@ package generate
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"sort"
 	"strconv"
@@ -19,47 +18,88 @@ func EmitMarshal(t Type) ast.Decl {
 	if len(t.NullProperties) > 0 && t.Underlying == nil && len(t.Variants) == 0 {
 		return emitManualStructMarshal(t)
 	}
-	src := fmt.Sprintf(`package _
-
-func (r %[1]s) MarshalJSONTo(enc *jsontext.Encoder) error {
-	type alias %[1]s
-	return json.MarshalEncode(enc, alias(r))
+	body := []ast.Stmt{
+		// type alias T
+		&ast.DeclStmt{Decl: &ast.GenDecl{
+			Tok: token.TYPE,
+			Specs: []ast.Spec{&ast.TypeSpec{
+				Name: ident("alias"),
+				Type: ident(t.Name),
+			}},
+		}},
+		// return json.MarshalEncode(enc, alias(r))
+		returnStmt(callExpr(
+			sel("json", "MarshalEncode"),
+			ident("enc"),
+			callExpr(ident("alias"), ident("r")),
+		)),
+	}
+	return marshalFuncDecl(t.Name, body)
 }
-`, t.Name)
-	return parseDecl(src)
+
+// marshalFuncDecl builds `func (r <typeName>) MarshalJSONTo(enc *jsontext.Encoder) error`
+// with the supplied body.
+func marshalFuncDecl(typeName string, body []ast.Stmt) *ast.FuncDecl {
+	return &ast.FuncDecl{
+		Recv: &ast.FieldList{List: []*ast.Field{{
+			Names: []*ast.Ident{ident("r")},
+			Type:  ident(typeName),
+		}}},
+		Name: ident("MarshalJSONTo"),
+		Type: &ast.FuncType{
+			Params: &ast.FieldList{List: []*ast.Field{{
+				Names: []*ast.Ident{ident("enc")},
+				Type:  &ast.StarExpr{X: sel("jsontext", "Encoder")},
+			}}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: ident("error")}}},
+		},
+		Body: &ast.BlockStmt{List: body},
+	}
 }
 
 // emitManualStructMarshal writes the struct as a sequence of
 // jsontext tokens so wire-only NullProperty members are emitted
 // alongside the regular Go fields.
 func emitManualStructMarshal(t Type) ast.Decl {
-	var body strings.Builder
-	body.WriteString("\tif err := enc.WriteToken(jsontext.BeginObject); err != nil {\n\t\treturn err\n\t}\n")
+	body := []ast.Stmt{
+		// if err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }
+		ifErrReturn(encWriteToken(sel("jsontext", "BeginObject"))),
+	}
 
 	for _, f := range t.Fields {
+		fieldRef := &ast.SelectorExpr{X: ident("r"), Sel: ident(f.GoName)}
+		writeKey := ifErrReturn(encWriteToken(jsontextStringCall(f.JSONName)))
 		if f.Required {
-			fmt.Fprintf(&body, "\tif err := enc.WriteToken(jsontext.String(%q)); err != nil {\n\t\treturn err\n\t}\n", f.JSONName)
-			fmt.Fprintf(&body, "\tif err := json.MarshalEncode(enc, r.%s); err != nil {\n\t\treturn err\n\t}\n", f.GoName)
-		} else {
-			fmt.Fprintf(&body, "\tif r.%s != nil {\n", f.GoName)
-			fmt.Fprintf(&body, "\t\tif err := enc.WriteToken(jsontext.String(%q)); err != nil {\n\t\t\treturn err\n\t\t}\n", f.JSONName)
-			fmt.Fprintf(&body, "\t\tif err := json.MarshalEncode(enc, *r.%s); err != nil {\n\t\t\treturn err\n\t\t}\n", f.GoName)
-			body.WriteString("\t}\n")
+			body = append(body,
+				writeKey,
+				ifErrReturn(callExpr(sel("json", "MarshalEncode"), ident("enc"), fieldRef)),
+			)
+			continue
 		}
+		// if r.Field != nil { writeKey; json.MarshalEncode(enc, *r.Field) }
+		body = append(body, &ast.IfStmt{
+			Cond: binOp(fieldRef, token.NEQ, ident("nil")),
+			Body: &ast.BlockStmt{List: []ast.Stmt{
+				writeKey,
+				ifErrReturn(callExpr(
+					sel("json", "MarshalEncode"),
+					ident("enc"),
+					&ast.StarExpr{X: fieldRef},
+				)),
+			}},
+		})
 	}
 	for _, np := range t.NullProperties {
-		fmt.Fprintf(&body, "\tif err := enc.WriteToken(jsontext.String(%q)); err != nil {\n\t\treturn err\n\t}\n", np.JSONName)
-		body.WriteString("\tif err := enc.WriteToken(jsontext.Null); err != nil {\n\t\treturn err\n\t}\n")
+		body = append(body,
+			ifErrReturn(encWriteToken(jsontextStringCall(np.JSONName))),
+			ifErrReturn(encWriteToken(sel("jsontext", "Null"))),
+		)
 	}
 
-	body.WriteString("\treturn enc.WriteToken(jsontext.EndObject)\n")
+	// return enc.WriteToken(jsontext.EndObject)
+	body = append(body, returnStmt(encWriteToken(sel("jsontext", "EndObject"))))
 
-	src := fmt.Sprintf(`package _
-
-func (r %[1]s) MarshalJSONTo(enc *jsontext.Encoder) error {
-%[2]s}
-`, t.Name, body.String())
-	return parseDecl(src)
+	return marshalFuncDecl(t.Name, body)
 }
 
 // EmitUnmarshal returns the UnmarshalJSONFrom method for t. For
@@ -73,67 +113,143 @@ func EmitUnmarshal(t Type) ast.Decl {
 	if t.Underlying != nil {
 		return emitScalarUnmarshal(t)
 	}
-	var shadowFields strings.Builder
+
+	shadowFields := make([]*ast.Field, 0, len(t.Fields)+len(t.NullProperties))
 	for _, f := range t.Fields {
-		shadowFields.WriteString("\t\t")
-		shadowFields.WriteString(f.GoName)
-		shadowFields.WriteString(" ")
-		shadowFields.WriteString(shadowFieldType(f))
-		shadowFields.WriteString(" `json:")
-		shadowFields.WriteString(fmt.Sprintf("%q", f.JSONName))
-		shadowFields.WriteString("`\n")
+		shadowFields = append(shadowFields, &ast.Field{
+			Names: []*ast.Ident{ident(f.GoName)},
+			Type:  shadowFieldType(f),
+			Tag:   jsonStructTag(f.JSONName),
+		})
 	}
 	for _, np := range t.NullProperties {
 		// Use jsontext.Value (a []byte), not *jsontext.Value: jsonv2
 		// sets pointer-typed fields to nil when the JSON value is
 		// null, which would erase presence/absence distinction.
 		// A bare []byte length 0 means absent; "null" means present.
-		fmt.Fprintf(&shadowFields, "\t\t%s jsontext.Value `json:%q`\n", nullShadowFieldName(np.JSONName), np.JSONName)
+		shadowFields = append(shadowFields, &ast.Field{
+			Names: []*ast.Ident{ident(nullShadowFieldName(np.JSONName))},
+			Type:  sel("jsontext", "Value"),
+			Tag:   jsonStructTag(np.JSONName),
+		})
 	}
 
-	var optsExtra string
-	if t.RejectUnknown {
-		optsExtra = "\topts := []json.Options{json.RejectUnknownMembers(true)}\n"
-	} else {
-		optsExtra = "\tvar opts []json.Options\n"
+	body := []ast.Stmt{
+		// var shadow struct { ... }
+		&ast.DeclStmt{Decl: &ast.GenDecl{
+			Tok: token.VAR,
+			Specs: []ast.Spec{&ast.ValueSpec{
+				Names: []*ast.Ident{ident("shadow")},
+				Type:  &ast.StructType{Fields: &ast.FieldList{List: shadowFields}},
+			}},
+		}},
+		optsDeclStmt(t.RejectUnknown),
+		// if err := json.UnmarshalDecode(dec, &shadow, opts...); err != nil { return err }
+		ifErrReturn(&ast.CallExpr{
+			Fun: sel("json", "UnmarshalDecode"),
+			Args: []ast.Expr{
+				ident("dec"),
+				&ast.UnaryExpr{Op: token.AND, X: ident("shadow")},
+				ident("opts"),
+			},
+			Ellipsis: token.Pos(1), // emits opts...
+		}),
 	}
 
-	var checks strings.Builder
+	// Required-field nil checks.
 	for _, f := range t.Fields {
-		if f.Required {
-			fmt.Fprintf(&checks, "\tif shadow.%s == nil {\n\t\treturn fmt.Errorf(\"missing required field %%q\", %q)\n\t}\n", f.GoName, f.JSONName)
+		if !f.Required {
+			continue
 		}
+		body = append(body, ifReturnFmtErrorf(
+			binOp(shadowSel(f.GoName), token.EQL, ident("nil")),
+			"missing required field %q", stringLit(f.JSONName),
+		))
 	}
+	// Null-property checks.
 	for _, np := range t.NullProperties {
 		field := nullShadowFieldName(np.JSONName)
+		fieldExpr := shadowSel(field)
 		if np.Required {
-			fmt.Fprintf(&checks, "\tif len(shadow.%s) == 0 {\n\t\treturn fmt.Errorf(\"missing required field %%q\", %q)\n\t}\n", field, np.JSONName)
+			body = append(body, ifReturnFmtErrorf(
+				binOp(callExpr(ident("len"), fieldExpr), token.EQL, intLit(0)),
+				"missing required field %q", stringLit(np.JSONName),
+			))
 		}
-		fmt.Fprintf(&checks, "\tif len(shadow.%[1]s) != 0 && string(shadow.%[1]s) != \"null\" {\n\t\treturn fmt.Errorf(\"field %%q must be null, got %%s\", %[2]q, shadow.%[1]s)\n\t}\n", field, np.JSONName)
+		// if len(shadow.X) != 0 && string(shadow.X) != "null" { return fmt.Errorf("field %q must be null, got %s", "x", shadow.X) }
+		body = append(body, ifReturnFmtErrorf(
+			binOp(
+				binOp(callExpr(ident("len"), fieldExpr), token.NEQ, intLit(0)),
+				token.LAND,
+				binOp(callExpr(ident("string"), fieldExpr), token.NEQ, stringLit("null")),
+			),
+			"field %q must be null, got %s", stringLit(np.JSONName), fieldExpr,
+		))
 	}
-	emitDependentRequiredChecks(&checks, t)
+	body = append(body, dependentRequiredCheckStmts(t)...)
 
-	var assigns strings.Builder
+	// Assignments back into the receiver.
 	for _, f := range t.Fields {
+		rhs := ast.Expr(shadowSel(f.GoName))
 		if f.Required {
-			fmt.Fprintf(&assigns, "\tr.%s = *shadow.%s\n", f.GoName, f.GoName)
-		} else {
-			fmt.Fprintf(&assigns, "\tr.%s = shadow.%s\n", f.GoName, f.GoName)
+			rhs = &ast.StarExpr{X: rhs}
 		}
+		body = append(body, &ast.AssignStmt{
+			Lhs: []ast.Expr{&ast.SelectorExpr{X: ident("r"), Sel: ident(f.GoName)}},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{rhs},
+		})
 	}
+	body = append(body, returnStmt(ident("nil")))
 
-	src := fmt.Sprintf(`package _
-
-func (r *%[1]s) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	var shadow struct {
-%[2]s	}
-%[3]s	if err := json.UnmarshalDecode(dec, &shadow, opts...); err != nil {
-		return err
+	return &ast.FuncDecl{
+		Recv: &ast.FieldList{List: []*ast.Field{{
+			Names: []*ast.Ident{ident("r")},
+			Type:  &ast.StarExpr{X: ident(t.Name)},
+		}}},
+		Name: ident("UnmarshalJSONFrom"),
+		Type: &ast.FuncType{
+			Params: &ast.FieldList{List: []*ast.Field{{
+				Names: []*ast.Ident{ident("dec")},
+				Type:  &ast.StarExpr{X: sel("jsontext", "Decoder")},
+			}}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: ident("error")}}},
+		},
+		Body: &ast.BlockStmt{List: body},
 	}
-%[4]s%[5]s	return nil
 }
-`, t.Name, shadowFields.String(), optsExtra, checks.String(), assigns.String())
-	return parseDecl(src)
+
+// optsDeclStmt builds the `opts` declaration: an empty `[]json.Options`
+// by default, or one preloaded with `json.RejectUnknownMembers(true)`
+// when the struct rejects unknown members.
+func optsDeclStmt(reject bool) ast.Stmt {
+	if !reject {
+		return &ast.DeclStmt{Decl: &ast.GenDecl{
+			Tok: token.VAR,
+			Specs: []ast.Spec{&ast.ValueSpec{
+				Names: []*ast.Ident{ident("opts")},
+				Type:  &ast.ArrayType{Elt: sel("json", "Options")},
+			}},
+		}}
+	}
+	return &ast.AssignStmt{
+		Lhs: []ast.Expr{ident("opts")},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{&ast.CompositeLit{
+			Type: &ast.ArrayType{Elt: sel("json", "Options")},
+			Elts: []ast.Expr{callExpr(sel("json", "RejectUnknownMembers"), ident("true"))},
+		}},
+	}
+}
+
+// shadowSel returns `shadow.<name>`.
+func shadowSel(name string) *ast.SelectorExpr {
+	return &ast.SelectorExpr{X: ident("shadow"), Sel: ident(name)}
+}
+
+// jsonStructTag returns a struct tag basicLit holding `json:"<name>"`.
+func jsonStructTag(name string) *ast.BasicLit {
+	return &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("`json:%s`", strconv.Quote(name))}
 }
 
 // emitScalarUnmarshal generates UnmarshalJSONFrom for a scalar
@@ -321,14 +437,14 @@ func enumLiteral(raw string) ast.Expr {
 	return rawNumLit(raw)
 }
 
-// emitDependentRequiredChecks appends a guard per (parent, dep) pair
-// in t.DependentRequired: if the parent property was present and the
-// dep was not, return an error. Required properties never trigger
-// the check because the missing-required guard above would have
-// fired first.
-func emitDependentRequiredChecks(buf *strings.Builder, t Type) {
+// dependentRequiredCheckStmts returns one guard per (parent, dep)
+// pair in t.DependentRequired: if the parent property was present and
+// the dep was not, return an error. Required properties never trigger
+// the check because the missing-required guard above would have fired
+// first.
+func dependentRequiredCheckStmts(t Type) []ast.Stmt {
 	if len(t.DependentRequired) == 0 {
-		return
+		return nil
 	}
 	parents := make([]string, 0, len(t.DependentRequired))
 	for k := range t.DependentRequired {
@@ -336,36 +452,45 @@ func emitDependentRequiredChecks(buf *strings.Builder, t Type) {
 	}
 	sort.Strings(parents)
 
-	jsonToShadow := map[string]string{}
+	jsonToShadow := map[string]*ast.SelectorExpr{}
 	for _, f := range t.Fields {
-		jsonToShadow[f.JSONName] = "shadow." + f.GoName
+		jsonToShadow[f.JSONName] = shadowSel(f.GoName)
 	}
 	for _, np := range t.NullProperties {
-		jsonToShadow[np.JSONName] = "shadow." + nullShadowFieldName(np.JSONName)
+		jsonToShadow[np.JSONName] = shadowSel(nullShadowFieldName(np.JSONName))
 	}
 
+	var stmts []ast.Stmt
 	for _, parent := range parents {
 		parentExpr, ok := jsonToShadow[parent]
 		if !ok {
 			continue
 		}
-		parentPresence := parentExpr + " != nil"
+		var parentPresent ast.Expr
 		if isNullShadow(t, parent) {
-			parentPresence = "len(" + parentExpr + ") != 0"
+			parentPresent = binOp(callExpr(ident("len"), parentExpr), token.NEQ, intLit(0))
+		} else {
+			parentPresent = binOp(parentExpr, token.NEQ, ident("nil"))
 		}
 		for _, dep := range t.DependentRequired[parent] {
 			depExpr, ok := jsonToShadow[dep]
 			if !ok {
 				continue
 			}
-			depAbsence := depExpr + " == nil"
+			var depAbsent ast.Expr
 			if isNullShadow(t, dep) {
-				depAbsence = "len(" + depExpr + ") == 0"
+				depAbsent = binOp(callExpr(ident("len"), depExpr), token.EQL, intLit(0))
+			} else {
+				depAbsent = binOp(depExpr, token.EQL, ident("nil"))
 			}
-			fmt.Fprintf(buf, "\tif %s && %s {\n\t\treturn fmt.Errorf(\"property %%q requires %%q\", %q, %q)\n\t}\n",
-				parentPresence, depAbsence, parent, dep)
+			stmts = append(stmts, ifReturnFmtErrorf(
+				binOp(parentPresent, token.LAND, depAbsent),
+				"property %q requires %q",
+				stringLit(parent), stringLit(dep),
+			))
 		}
 	}
+	return stmts
 }
 
 // isNullShadow reports whether a JSON property is represented by
@@ -390,37 +515,9 @@ func nullShadowFieldName(jsonName string) string {
 // field on the unmarshal shadow struct. Required fields are pointed
 // to (so a missing key is observable), optional fields keep their
 // emitted type (already *T from Phase 4).
-func shadowFieldType(f Field) string {
-	expr := exprString(f.TypeExpr)
+func shadowFieldType(f Field) ast.Expr {
 	if f.Required {
-		return "*" + expr
+		return &ast.StarExpr{X: f.TypeExpr}
 	}
-	return expr
-}
-
-func parseDecl(src string) ast.Decl {
-	file, err := parser.ParseFile(token.NewFileSet(), "", src, 0)
-	if err != nil {
-		panic(fmt.Errorf("parse generated decl: %w\nsrc:\n%s", err, src))
-	}
-	return file.Decls[0]
-}
-
-// exprString prints a type expression to its Go source form. Used
-// to embed field types into the templated shadow struct.
-func exprString(e ast.Expr) string {
-	switch x := e.(type) {
-	case *ast.Ident:
-		return x.Name
-	case *ast.StarExpr:
-		return "*" + exprString(x.X)
-	case *ast.SelectorExpr:
-		return exprString(x.X) + "." + x.Sel.Name
-	case *ast.ArrayType:
-		return "[]" + exprString(x.Elt)
-	case *ast.MapType:
-		return "map[" + exprString(x.Key) + "]" + exprString(x.Value)
-	default:
-		panic(fmt.Errorf("unsupported type expression %T", e))
-	}
+	return f.TypeExpr
 }

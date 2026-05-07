@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"strconv"
 )
 
 // parseGoTypeExpr parses a Go type expression string into an ast.Expr.
@@ -59,7 +58,7 @@ func emitStructType(t Type) *ast.StructType {
 		fields.List = append(fields.List, &ast.Field{
 			Names: []*ast.Ident{{Name: f.GoName}},
 			Type:  f.TypeExpr,
-			Tag:   &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("`json:%s`", strconv.Quote(tagValue))},
+			Tag:   jsonStructTag(tagValue),
 		})
 	}
 	for _, af := range t.AdditionalFields {

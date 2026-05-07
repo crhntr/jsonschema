@@ -1,4 +1,4 @@
-go-jsonschema generate --schema https://json-schema.org/draft/2020-12/schema --overrides overrides.json --out ./model --package model --type Root
+jsch generate --schema https://json-schema.org/draft/2020-12/schema --overrides overrides.json --out ./model --package model --type Root
 
 exec go vet ./model
 exec go test -count=1 ./model

@@ -1,4 +1,4 @@
-go-jsonschema generate --schema https://json-schema.org/draft/2020-12/schema --out ./model --package model --type Schema
+jsch generate --schema https://json-schema.org/draft/2020-12/schema --out ./model --package model --type Schema
 
 exec go vet ./model
 exec go test -count=1 ./model

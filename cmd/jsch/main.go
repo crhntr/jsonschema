@@ -14,6 +14,7 @@ import (
 	"github.com/go-json-experiment/json"
 
 	"github.com/crhntr/jsonschema"
+	gen "github.com/crhntr/jsonschema/internal/generate"
 	"github.com/crhntr/jsonschema/internal/metaschema"
 )
 
@@ -50,7 +51,7 @@ func run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 		}
 		return exitOK
 	case "generate":
-		if err := generate(wd, flagSet.Args()[1:], stdout, stderr); err != nil {
+		if err := generate(ctx, wd, flagSet.Args()[1:], stdout, stderr, client); err != nil {
 			_, _ = io.WriteString(stderr, err.Error()+"\n")
 			return exitError
 		}
@@ -314,12 +315,55 @@ func readInstance(wd, arg string, stdin io.Reader) ([]byte, string, error) {
 	return buf, arg, nil
 }
 
-func generate(wd string, args []string, stdout, stderr io.Writer) error {
-	var schemaPath string
+func generate(ctx context.Context, wd string, args []string, stdout, stderr io.Writer, client *http.Client) error {
+	var (
+		schemaPath    string
+		overridesPath string
+		outDir        string
+		packageName   string
+		typeName      string
+	)
 	flagSet := flag.NewFlagSet("generate", flag.ContinueOnError)
-	flagSet.StringVar(&schemaPath, "schema", "", "path or URL of a JSON Schema document")
+	flagSet.StringVar(&schemaPath, "schema", "", "path or URL of a JSON Schema document (required)")
+	flagSet.StringVar(&overridesPath, "overrides", "", "path to a JSON sidecar file of go-codegen overrides keyed by JSON pointer")
+	flagSet.StringVar(&outDir, "out", ".", "directory to write the generated Go file into")
+	flagSet.StringVar(&packageName, "package", "", "name of the generated package (defaults to the basename of --out)")
+	flagSet.StringVar(&typeName, "type", "Root", "exported Go identifier for the root schema type")
 	if err := flagSet.Parse(args); err != nil {
 		return err
+	}
+	if schemaPath == "" {
+		return fmt.Errorf("--schema is required")
+	}
+	root, err := loadSchema(ctx, wd, schemaPath, false, true, client)
+	if err != nil {
+		return err
+	}
+	var overrides gen.Overrides
+	if overridesPath != "" {
+		buf, err := os.ReadFile(filepath.Join(wd, overridesPath))
+		if err != nil {
+			return fmt.Errorf("read overrides: %w", err)
+		}
+		overrides, err = gen.ParseOverrides(buf)
+		if err != nil {
+			return err
+		}
+	}
+	if packageName == "" {
+		packageName = filepath.Base(filepath.Clean(filepath.Join(wd, outDir)))
+	}
+	src, err := gen.GenerateFromSchema(root, typeName, packageName, overrides)
+	if err != nil {
+		return err
+	}
+	outAbs := filepath.Join(wd, outDir)
+	if err := os.MkdirAll(outAbs, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", outAbs, err)
+	}
+	outFile := filepath.Join(outAbs, strings.ToLower(typeName)+".gen.go")
+	if err := os.WriteFile(outFile, src, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", outFile, err)
 	}
 	return nil
 }

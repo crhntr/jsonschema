@@ -2,6 +2,8 @@ package jsonschema
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,9 +11,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 
 	"github.com/crhntr/jsonschema/jsonptr"
 )

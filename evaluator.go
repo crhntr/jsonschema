@@ -2,6 +2,8 @@ package jsonschema
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -9,9 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/go-json-experiment/json/jsontext"
-	"github.com/go-json-experiment/json/v1"
 
 	"github.com/crhntr/jsonschema/jsonptr"
 )
@@ -163,7 +162,7 @@ func (m *Schema) ValidateWithFormatAssertion(name string, in []byte) Output {
 }
 
 func (m *Schema) validateRoot(ctx evalCtx, in []byte) Output {
-	if !json.Valid(in) {
+	if !jsontext.Value(in).IsValid() {
 		out := ctx.baseOutput(0)
 		out.Valid = false
 		out.Error = "invalid JSON"

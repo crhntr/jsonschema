@@ -1,7 +1,7 @@
 package generate
 
 import (
-	"github.com/go-json-experiment/json/jsontext"
+	"encoding/json/jsontext"
 	"reflect"
 	"testing"
 )

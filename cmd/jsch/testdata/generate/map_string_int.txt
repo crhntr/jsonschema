@@ -28,11 +28,12 @@ func TestCounts_RoundTrip(t *testing.T) {
 	if c["alice"] != 3 || c["bob"] != 7 {
 		t.Errorf("got %#v, want {alice:3, bob:7}", c)
 	}
-	out, err := json.Marshal(c)
+	out, err := json.Marshal(c, json.Deterministic(true))
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	// jsonv2 sorts map keys.
+	// json.Deterministic(true) sorts map keys; without it jsonv2
+	// emits them in Go's randomized map iteration order.
 	if string(out) != `{"alice":3,"bob":7}` {
 		t.Errorf("Marshal = %s, want %s", out, `{"alice":3,"bob":7}`)
 	}

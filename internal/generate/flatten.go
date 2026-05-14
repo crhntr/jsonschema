@@ -12,9 +12,10 @@ import (
 // entry, and $defs entry it described is now a sibling on the
 // returned object.
 //
-// Cycle detection: flatten refuses to revisit any *jsonschema.Schema
-// pointer already on the resolution stack, so a self-referential
-// allOf chain returns an error instead of looping forever.
+// Cycle detection: flatten tracks the current recursion path and
+// errors out when an allOf member would re-enter a schema already
+// being expanded. Sibling allOf members reusing the same $ref are
+// allowed — only true graph cycles trip the guard.
 func flatten(obj jsonschema.SchemaObject) (jsonschema.SchemaObject, error) {
 	return flattenWithStack(obj, map[*jsonschema.Schema]bool{})
 }
@@ -24,11 +25,13 @@ func flattenWithStack(obj jsonschema.SchemaObject, stack map[*jsonschema.Schema]
 	out.AllOf = nil
 
 	for i, member := range obj.AllOf {
-		memberObj, err := resolveMember(member, stack)
+		memberObj, target, err := resolveMember(member, stack)
 		if err != nil {
 			return jsonschema.SchemaObject{}, fmt.Errorf("flatten allOf[%d]: %w", i, err)
 		}
+		stack[target] = true
 		flat, err := flattenWithStack(memberObj, stack)
+		delete(stack, target)
 		if err != nil {
 			return jsonschema.SchemaObject{}, fmt.Errorf("flatten allOf[%d]: %w", i, err)
 		}
@@ -38,26 +41,23 @@ func flattenWithStack(obj jsonschema.SchemaObject, stack map[*jsonschema.Schema]
 	return out, nil
 }
 
-// resolveMember unwraps an allOf member to its SchemaObject. If the
-// member is a $ref to an already-resolved schema, the resolved
-// target is followed (and added to the cycle-detection stack).
-func resolveMember(s *jsonschema.Schema, stack map[*jsonschema.Schema]bool) (jsonschema.SchemaObject, error) {
+// resolveMember unwraps an allOf member to its SchemaObject and
+// returns the resolved *Schema identity so the caller can push it
+// onto the recursion path. Returns an error if descending into target
+// would re-enter a schema currently being flattened.
+func resolveMember(s *jsonschema.Schema, stack map[*jsonschema.Schema]bool) (jsonschema.SchemaObject, *jsonschema.Schema, error) {
 	target := s
 	if r := s.Resolved(); r != nil {
 		target = r
 	}
 	if stack[target] {
-		return jsonschema.SchemaObject{}, fmt.Errorf("cycle through allOf at %p", target)
+		return jsonschema.SchemaObject{}, nil, fmt.Errorf("cycle through allOf at %p", target)
 	}
-	stack[target] = true
-	// We do not delete on return — flattening is conjunctive and a
-	// repeated $ref inside the same chain is still a cycle.
-
 	obj, ok := target.TypeObject()
 	if !ok {
-		return jsonschema.SchemaObject{}, fmt.Errorf("allOf member is a boolean schema")
+		return jsonschema.SchemaObject{}, nil, fmt.Errorf("allOf member is a boolean schema")
 	}
-	return obj, nil
+	return obj, target, nil
 }
 
 // mergeInto folds src's object-level keywords into dst. allOf is

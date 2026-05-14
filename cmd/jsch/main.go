@@ -39,7 +39,7 @@ func run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 	)
 	flagSet := flag.NewFlagSet("jsch", flag.ContinueOnError)
 	if err := flagSet.Parse(args); err != nil {
-		_, _ = io.WriteString(stderr, err.Error())
+		_, _ = io.WriteString(stderr, err.Error()+"\n")
 		return exitError
 	}
 	switch flagSet.Arg(0) {
@@ -55,8 +55,12 @@ func run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 			return exitError
 		}
 		return exitOK
+	case "":
+		_, _ = io.WriteString(stderr, "usage: jsch <validate|generate> [args]\n")
+		return exitError
 	default:
-		return exitOK
+		_, _ = fmt.Fprintf(stderr, "jsch: unknown subcommand %q\nusage: jsch <validate|generate> [args]\n", flagSet.Arg(0))
+		return exitError
 	}
 }
 
@@ -361,7 +365,7 @@ func generate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		return fmt.Errorf("mkdir %s: %w", outAbs, err)
 	}
 	outFile := filepath.Join(outAbs, strings.ToLower(typeName)+".gen.go")
-	if err := os.WriteFile(outFile, src, 0o600); err != nil {
+	if err := os.WriteFile(outFile, src, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", outFile, err)
 	}
 	return nil

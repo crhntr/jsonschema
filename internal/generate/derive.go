@@ -3,7 +3,6 @@ package generate
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"slices"
 	"sort"
 	"strconv"
@@ -43,6 +42,9 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps, ove
 		doc = obj.Description
 	}
 
+	if err := validateAdditionalFields(annotations.GoAdditionalFields, annotations.GoImports); err != nil {
+		return Type{}, nil, fmt.Errorf("%s goAdditionalFields: %w", name, err)
+	}
 	t := Type{
 		Name:              name,
 		Doc:               doc,
@@ -104,7 +106,11 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps, ove
 			return Type{}, nil, fmt.Errorf("scalar root: %w", err)
 		}
 		t.Underlying = expr
-		t.Constraints = deriveConstraints(obj)
+		c, err := deriveConstraints(obj, expr)
+		if err != nil {
+			return Type{}, nil, fmt.Errorf("scalar root: %w", err)
+		}
+		t.Constraints = c
 		return t, nil, nil
 	}
 
@@ -153,6 +159,9 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 		return Type{}, fmt.Errorf("annotations: %w", err)
 	}
 
+	if err := validateAdditionalFields(annot.GoAdditionalFields, annot.GoImports); err != nil {
+		return Type{}, fmt.Errorf("%s goAdditionalFields: %w", name, err)
+	}
 	t := Type{
 		Name:              name,
 		RejectUnknown:     rejectsAdditionalProperties(obj),
@@ -189,7 +198,7 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 			explicitGoType := false
 			if override, ok := parentAnnot.Fields[jsonName]; ok {
 				if override.GoType != "" {
-					parsed, err := parser.ParseExpr(override.GoType)
+					parsed, err := parseAndValidateGoType(override.GoType, override.GoImports)
 					if err != nil {
 						return Type{}, fmt.Errorf("property %q goType %q: %w", jsonName, override.GoType, err)
 					}
@@ -203,7 +212,7 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 					jsonTags = override.GoJSONTags
 				}
 			}
-			if !explicitGoType && !required {
+			if !explicitGoType && !required && needsPointerForOptional(fieldType) {
 				fieldType = &ast.StarExpr{X: fieldType}
 			}
 			t.Fields = append(t.Fields, Field{
@@ -237,7 +246,7 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 			explicitGoType bool
 		)
 		if propAnnotations.GoType != "" {
-			fieldType, err = parser.ParseExpr(propAnnotations.GoType)
+			fieldType, err = parseAndValidateGoType(propAnnotations.GoType, propAnnotations.GoImports)
 			if err != nil {
 				return Type{}, fmt.Errorf("property %q goType %q: %w", jsonName, propAnnotations.GoType, err)
 			}
@@ -347,8 +356,10 @@ func isScalarRoot(obj *jsonschema.SchemaObject) bool {
 }
 
 // deriveConstraints lifts the assertion keywords supported in
-// Phase 6 off obj into an IR Constraints value.
-func deriveConstraints(obj *jsonschema.SchemaObject) Constraints {
+// Phase 6 off obj into an IR Constraints value. underlying is the
+// Go type expression for the scalar (used to reject incompatible
+// bound shapes, e.g. a fractional minimum on an integer field).
+func deriveConstraints(obj *jsonschema.SchemaObject, underlying ast.Expr) (Constraints, error) {
 	var c Constraints
 	if n, ok := jsontextInt(obj.MinLength); ok {
 		c.MinLength = &n
@@ -357,16 +368,47 @@ func deriveConstraints(obj *jsonschema.SchemaObject) Constraints {
 		c.MaxLength = &n
 	}
 	if s, ok := jsontextNumber(obj.Minimum); ok {
+		if err := checkBoundCompatibility("minimum", s, underlying); err != nil {
+			return Constraints{}, err
+		}
 		c.Minimum = &s
 	}
 	if s, ok := jsontextNumber(obj.Maximum); ok {
+		if err := checkBoundCompatibility("maximum", s, underlying); err != nil {
+			return Constraints{}, err
+		}
 		c.Maximum = &s
 	}
 	for _, e := range obj.Enum {
 		c.Enum = append(c.Enum, string(e))
 	}
 	c.Pattern = obj.Pattern
-	return c
+	return c, nil
+}
+
+// checkBoundCompatibility rejects bound literals that would generate
+// code which fails to compile, namely a fractional bound on an
+// integer underlying type. Overflow of the underlying type's range
+// is left to the Go compiler to surface (it does so as a constant
+// out-of-range error on the comparison literal).
+func checkBoundCompatibility(keyword, raw string, underlying ast.Expr) error {
+	id, ok := underlying.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	switch id.Name {
+	case "int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64":
+	default:
+		return nil
+	}
+	for i := 0; i < len(raw); i++ {
+		switch raw[i] {
+		case '.', 'e', 'E':
+			return fmt.Errorf("%s %s is not representable as %s", keyword, raw, id.Name)
+		}
+	}
+	return nil
 }
 
 // jsontextNumber returns the raw JSON number text of v.
@@ -498,12 +540,15 @@ func mapKeyTypeFor(a Annotations) ast.Expr {
 
 // needsPointerForOptional reports whether an optional field should
 // be wrapped in a pointer to distinguish absent from the zero value.
-// Slices and maps have a natural nil zero value, so the wrap would
-// be redundant.
+// Slices, maps, and bare `any` already have a natural nil zero value,
+// so the wrap would be redundant (and `*any` in particular is
+// almost always wrong).
 func needsPointerForOptional(expr ast.Expr) bool {
-	switch expr.(type) {
+	switch e := expr.(type) {
 	case *ast.ArrayType, *ast.MapType:
 		return false
+	case *ast.Ident:
+		return e.Name != "any"
 	}
 	return true
 }

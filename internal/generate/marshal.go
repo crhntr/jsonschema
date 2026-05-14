@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -76,7 +77,13 @@ func emitManualStructMarshal(t Type) ast.Decl {
 			)
 			continue
 		}
-		// if r.Field != nil { writeKey; json.MarshalEncode(enc, *r.Field) }
+		// Optional fields are stored as pointers (*T) when derive
+		// wrapped them; slice/map fields keep their natural nil zero
+		// value. Only dereference the former.
+		var valueArg ast.Expr = fieldRef
+		if _, ptr := f.TypeExpr.(*ast.StarExpr); ptr {
+			valueArg = &ast.StarExpr{X: fieldRef}
+		}
 		body = append(body, &ast.IfStmt{
 			Cond: binOp(fieldRef, token.NEQ, ident("nil")),
 			Body: &ast.BlockStmt{List: []ast.Stmt{
@@ -84,7 +91,7 @@ func emitManualStructMarshal(t Type) ast.Decl {
 				ifErrReturn(callExpr(
 					sel("json", "MarshalEncode"),
 					ident("enc"),
-					&ast.StarExpr{X: fieldRef},
+					valueArg,
 				)),
 			}},
 		})
@@ -109,7 +116,7 @@ func emitManualStructMarshal(t Type) ast.Decl {
 // length / range constraints before assigning the receiver.
 // additionalProperties: false is enforced via
 // json.RejectUnknownMembers when t.RejectUnknown is set.
-func EmitUnmarshal(t Type) ast.Decl {
+func EmitUnmarshal(t Type) (ast.Decl, error) {
 	if t.Underlying != nil {
 		return emitScalarUnmarshal(t)
 	}
@@ -216,7 +223,7 @@ func EmitUnmarshal(t Type) ast.Decl {
 			Results: &ast.FieldList{List: []*ast.Field{{Type: ident("error")}}},
 		},
 		Body: &ast.BlockStmt{List: body},
-	}
+	}, nil
 }
 
 // optsDeclStmt builds the `opts` declaration: an empty `[]json.Options`
@@ -257,7 +264,7 @@ func jsonStructTag(name string) *ast.BasicLit {
 // The function body is built from go/ast nodes (not string templates)
 // so the constraint checks are individually inspectable AST and the
 // compiler validates each at generation time.
-func emitScalarUnmarshal(t Type) ast.Decl {
+func emitScalarUnmarshal(t Type) (ast.Decl, error) {
 	body := []ast.Stmt{
 		// var v <underlying>
 		&ast.DeclStmt{Decl: &ast.GenDecl{
@@ -282,7 +289,11 @@ func emitScalarUnmarshal(t Type) ast.Decl {
 			Body: &ast.BlockStmt{List: []ast.Stmt{returnStmt(ident("err"))}},
 		},
 	}
-	body = append(body, scalarConstraintChecks(t)...)
+	checks, err := scalarConstraintChecks(t)
+	if err != nil {
+		return nil, err
+	}
+	body = append(body, checks...)
 	body = append(body,
 		// *r = T(v)
 		&ast.AssignStmt{
@@ -308,7 +319,7 @@ func emitScalarUnmarshal(t Type) ast.Decl {
 			Results: &ast.FieldList{List: []*ast.Field{{Type: ident("error")}}},
 		},
 		Body: &ast.BlockStmt{List: body},
-	}
+	}, nil
 }
 
 // scalarConstraintChecks builds AST statements that enforce the
@@ -317,7 +328,7 @@ func emitScalarUnmarshal(t Type) ast.Decl {
 //	if <cond> { return fmt.Errorf(...) }
 //
 // and runs against the locally-bound variable v.
-func scalarConstraintChecks(t Type) []ast.Stmt {
+func scalarConstraintChecks(t Type) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
 	c := t.Constraints
 	lenV := callExpr(ident("len"), ident("v"))
@@ -364,9 +375,13 @@ func scalarConstraintChecks(t Type) []ast.Stmt {
 		))
 	}
 	if len(c.Enum) > 0 {
-		stmts = append(stmts, enumCheckStmt(t.Name, c.Enum))
+		stmt, err := enumCheckStmt(t.Name, c.Enum)
+		if err != nil {
+			return nil, err
+		}
+		stmts = append(stmts, stmt)
 	}
-	return stmts
+	return stmts, nil
 }
 
 // patternVarName is the package-level identifier holding the
@@ -403,10 +418,14 @@ func EmitPatternVar(t Type) ast.Decl {
 //
 // where each <eN> is a Go literal whose source is the raw JSON text
 // of the enum entry.
-func enumCheckStmt(typeName string, enum []string) ast.Stmt {
+func enumCheckStmt(typeName string, enum []string) (ast.Stmt, error) {
 	cases := make([]ast.Expr, 0, len(enum))
 	for _, raw := range enum {
-		cases = append(cases, enumLiteral(raw))
+		lit, err := enumLiteral(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s enum: %w", typeName, err)
+		}
+		cases = append(cases, lit)
 	}
 	return &ast.SwitchStmt{
 		Tag: ident("v"),
@@ -416,25 +435,26 @@ func enumCheckStmt(typeName string, enum []string) ast.Stmt {
 				fmtErrorfCall(typeName+": value %v not in enum", ident("v")),
 			)}},
 		}},
-	}
+	}, nil
 }
 
 // enumLiteral converts a raw JSON enum entry to a Go expression.
-// JSON strings stay quoted; numbers / true / false / null splice
-// through as their raw text.
-func enumLiteral(raw string) ast.Expr {
+// JSON strings are decoded then re-quoted with strconv.Quote so
+// JSON-only escapes (notably \/) survive the round-trip;
+// numbers / true / false / null splice through as their raw text.
+func enumLiteral(raw string) (ast.Expr, error) {
 	if len(raw) > 0 && raw[0] == '"' {
-		// JSON's interior-string escapes (\", \\, \n, \uXXXX, …) are
-		// a subset of Go's, so the JSON text doubles as a valid Go
-		// double-quoted string literal for the values seen in
-		// schemas. \/ would need translation if it ever appeared.
-		return &ast.BasicLit{Kind: token.STRING, Value: raw}
+		var s string
+		if err := json.Unmarshal([]byte(raw), &s); err != nil {
+			return nil, fmt.Errorf("enum value %s: %w", raw, err)
+		}
+		return &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(s)}, nil
 	}
 	switch raw {
 	case "true", "false", "null":
-		return ident(raw)
+		return ident(raw), nil
 	}
-	return rawNumLit(raw)
+	return rawNumLit(raw), nil
 }
 
 // dependentRequiredCheckStmts returns one guard per (parent, dep)

@@ -70,10 +70,18 @@ func TestEmit_ScalarStringAlias(t *testing.T) {
 			MaxLength: &max,
 		},
 	}
+	td, err := Emit(typ)
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	um, err := EmitUnmarshal(typ)
+	if err != nil {
+		t.Fatalf("EmitUnmarshal: %v", err)
+	}
 	src, err := formatFile("model", []ast.Decl{
-		Emit(typ),
+		td,
 		EmitMarshal(typ),
-		EmitUnmarshal(typ),
+		um,
 	})
 	if err != nil {
 		t.Fatalf("formatFile: %v", err)

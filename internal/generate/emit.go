@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strings"
 )
 
 // parseGoTypeExpr parses a Go type expression string into an ast.Expr.
@@ -20,15 +21,21 @@ func parseGoTypeExpr(src string) (ast.Expr, error) {
 // printing. Scalar types emit `type Name <expr>`; struct types emit
 // `type Name struct { … }`; composite types emit a discriminated
 // union struct.
-func Emit(t Type) *ast.GenDecl {
-	var typExpr ast.Expr
+func Emit(t Type) (*ast.GenDecl, error) {
+	var (
+		typExpr ast.Expr
+		err     error
+	)
 	switch {
 	case len(t.Variants) > 0:
-		typExpr = emitCompositeStructType(t)
+		typExpr, err = emitCompositeStructType(t)
 	case t.Underlying != nil:
 		typExpr = t.Underlying
 	default:
-		typExpr = emitStructType(t)
+		typExpr, err = emitStructType(t)
+	}
+	if err != nil {
+		return nil, err
 	}
 	spec := &ast.TypeSpec{
 		Name: &ast.Ident{Name: t.Name},
@@ -39,12 +46,24 @@ func Emit(t Type) *ast.GenDecl {
 		Specs: []ast.Spec{spec},
 	}
 	if t.Doc != "" {
-		decl.Doc = &ast.CommentGroup{List: []*ast.Comment{{Text: "// " + t.Doc}}}
+		decl.Doc = docCommentGroup(t.Doc)
 	}
-	return decl
+	return decl, nil
 }
 
-func emitStructType(t Type) *ast.StructType {
+// docCommentGroup turns a free-text doc string into one Go-style line
+// comment per source line, so multi-line schema descriptions survive
+// emission without being collapsed onto one //-line.
+func docCommentGroup(doc string) *ast.CommentGroup {
+	lines := strings.Split(doc, "\n")
+	comments := make([]*ast.Comment, 0, len(lines))
+	for _, line := range lines {
+		comments = append(comments, &ast.Comment{Text: "// " + line})
+	}
+	return &ast.CommentGroup{List: comments}
+}
+
+func emitStructType(t Type) (*ast.StructType, error) {
 	fields := new(ast.FieldList)
 	for _, f := range t.Fields {
 		tagValue := f.JSONName
@@ -64,11 +83,11 @@ func emitStructType(t Type) *ast.StructType {
 	for _, af := range t.AdditionalFields {
 		field, err := emitAdditionalField(af)
 		if err != nil {
-			panic(fmt.Errorf("additional field %+v: %w", af, err))
+			return nil, fmt.Errorf("additional field %+v: %w", af, err)
 		}
 		fields.List = append(fields.List, field)
 	}
-	return &ast.StructType{Fields: fields}
+	return &ast.StructType{Fields: fields}, nil
 }
 
 // emitAdditionalField turns an IR GoAdditionalField into an *ast.Field
@@ -95,7 +114,7 @@ func emitAdditionalField(af GoAdditionalField) (*ast.Field, error) {
 	}
 	field.Tag = &ast.BasicLit{Kind: token.STRING, Value: "`" + tag + "`"}
 	if af.GoDoc != "" {
-		field.Doc = &ast.CommentGroup{List: []*ast.Comment{{Text: "// " + af.GoDoc}}}
+		field.Doc = docCommentGroup(af.GoDoc)
 	}
 	return field, nil
 }

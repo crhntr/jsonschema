@@ -153,7 +153,11 @@ func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName st
 // emitTypeDecls returns all the declarations (type + pattern var +
 // methods + interface asserts) for a single IR Type.
 func emitTypeDecls(t Type) ([]ast.Decl, error) {
-	decls := []ast.Decl{Emit(t)}
+	typeDecl, err := Emit(t)
+	if err != nil {
+		return nil, err
+	}
+	decls := []ast.Decl{typeDecl}
 	if pat := EmitPatternVar(t); pat != nil {
 		decls = append(decls, pat)
 	}
@@ -166,7 +170,11 @@ func emitTypeDecls(t Type) ([]ast.Decl, error) {
 		}
 		decls = append(decls, um)
 	} else {
-		decls = append(decls, EmitMarshal(t), EmitUnmarshal(t))
+		um, err := EmitUnmarshal(t)
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, EmitMarshal(t), um)
 	}
 	decls = append(decls, interfaceAssertions(t))
 	return decls, nil

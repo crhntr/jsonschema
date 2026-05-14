@@ -17,11 +17,10 @@ type Overrides struct {
 	// any field collision.
 	Refs map[string]Annotations `json:"refs,omitempty"`
 	// JSONPackage selects which json/jsontext import paths the
-	// emitter should use. Empty defaults to the stdlib jsonv2
-	// path. "experiment" uses
-	// encoding/json/v2 (and its jsontext
-	// subpackage), which lets the output drop into projects that
-	// haven't enabled GOEXPERIMENT=jsonv2.
+	// emitter should use. Empty (or "stdlib") emits the
+	// encoding/json/v2 + encoding/json/jsontext pair. Any other
+	// value is treated as a custom base path, and "<base>/jsontext"
+	// is used for the jsontext sibling.
 	JSONPackage string `json:"jsonPackage,omitempty"`
 }
 
@@ -30,8 +29,6 @@ type Overrides struct {
 func (o Overrides) jsonImports() (jsonPath, jsontextPath string) {
 	switch o.JSONPackage {
 	case "", "stdlib":
-		return "encoding/json/v2", "encoding/json/jsontext"
-	case "experiment":
 		return "encoding/json/v2", "encoding/json/jsontext"
 	default:
 		return o.JSONPackage, o.JSONPackage + "/jsontext"

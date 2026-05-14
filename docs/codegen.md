@@ -15,7 +15,7 @@ document-level goOverrides still pending), and 14 preview
 package that vets, builds, and round-trips real schemas) all
 implemented in `internal/generate/`. End-to-end CLI is wired and
 covered by scripttest fixtures under
-`cmd/go-jsonschema/testdata/generate/`. Phases 13 (warnings)
+`cmd/jsch/testdata/generate/`. Phases 13 (warnings)
 and 15 (replace hand-rolled `Schema`) pending.
 
 ## Context
@@ -113,7 +113,7 @@ error.
 
 The generator lives in `./internal/generate` (package `generate`). It
 is internal because the public surface is the CLI
-(`go-jsonschema generate`) and the generated Go output — callers
+(`jsch generate`) and the generated Go output — callers
 should not import the generator directly.
 
 ```
@@ -234,7 +234,7 @@ The generator is multi-pass:
   `compileECMA262`, `compareRat`, etc. for the runtime side; the
   generator emits inline equivalents (or calls into a shared runtime
   helper package).
-- `cmd/go-jsonschema/main.go::generate` — currently a stub; wire to
+- `cmd/jsch/main.go::generate` — currently a stub; wire to
   `internal/generate.Generate`.
 - `internal/generate/vocab.go` — Phase 1 (Annotations type +
   ParseAnnotations).
@@ -249,11 +249,11 @@ Test discipline mirrors muxt's CLI testdata pattern (see
 `typelate/muxt/cmd/muxt/testdata/`, e.g.
 `howto_template_with_no_call.txt`): each phase ships **one
 script-test fixture** in
-`cmd/go-jsonschema/testdata/generate/<phase>.txt`. Each `.txt`
+`cmd/jsch/testdata/generate/<phase>.txt`. Each `.txt`
 contains the input schema, a `go.mod`, and a hand-written `_test.go`
 separated by `-- name --` markers. The script:
 
-1. Runs `go-jsonschema generate ...` to emit Go into the script's
+1. Runs `jsch generate ...` to emit Go into the script's
    working directory.
 2. Optionally checks shape with `exec go doc <pkg>.<Ident>` (compare
    exact output — never substring-grep generated source).
@@ -265,7 +265,7 @@ a package that compiles and behaves. Example skeleton:
 
 ```
 env GOEXPERIMENT=jsonv2
-go-jsonschema generate --schema schema.json --package model
+jsch generate --schema schema.json --package model
 
 exec go test -cover
 
@@ -290,9 +290,9 @@ Lower-level package tests in `internal/generate/*_test.go` use
 `t.TempDir()` for unit coverage of derive/emit functions where the
 script harness would be overkill.
 
-The scripttest harness in `cmd/go-jsonschema/main_test.go` sets
+The scripttest harness in `cmd/jsch/main_test.go` sets
 `GOEXPERIMENT=jsonv2` on `script.Engine.Env` (and propagates it into
-the `go-jsonschema` cmd handler) so:
+the `jsch` cmd handler) so:
 
 - `exec go test` / `exec go build` see the v2 stdlib package.
 - The generator's own `packages.Load` (which shells `go list`) can
@@ -441,7 +441,7 @@ Each phase lands as its own commit.
       `json:"-"` so wire encoding is unaffected.
     - `testdata/codegen/schema_overrides.json` is the canonical
       sidecar, and
-      `cmd/go-jsonschema/testdata/generate/metaschema_with_resolution_metadata.txt`
+      `cmd/jsch/testdata/generate/metaschema_with_resolution_metadata.txt`
       proves the meta-schema generates with the resolution
       metadata fields attached and with the right types.
 
@@ -483,9 +483,9 @@ Each phase lands as its own commit.
       `schema.go`, and run the conformance suite.
 
 CLI wiring (originally a separate phase) landed alongside the
-end-to-end fixture work: `go-jsonschema generate --schema X --out
+end-to-end fixture work: `jsch generate --schema X --out
 PKG_DIR --package NAME --type Ident` is exercised by every
-fixture under `cmd/go-jsonschema/testdata/generate/`. The
+fixture under `cmd/jsch/testdata/generate/`. The
 `--overrides FILE` flag arrives with Phase 12.
 
 Each phase ends with `go test ./...` plus the conformance suite
@@ -503,7 +503,7 @@ End-to-end:
 - `go test ./...` — conformance suite (2061/2061) stays green
   throughout; no regression in the validator from any shared
   refactors.
-- `go test ./cmd/go-jsonschema` — scripttest covers the `generate`
+- `go test ./cmd/jsch` — scripttest covers the `generate`
   subcommand once Phase 14 lands; `exec go test` inside the script
   exercises the produced package.
 - Manual: `go doc github.com/crhntr/jsonschema/internal/generate`

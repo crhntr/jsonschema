@@ -91,6 +91,37 @@ func TestNewResolver_DisallowedImport(t *testing.T) {
 	}
 }
 
+func TestParseAndValidateGoType(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		src       string
+		goImports []string
+		wantErr   string
+	}{
+		{name: "primitive", src: "int"},
+		{name: "qualified declared", src: "time.Time", goImports: []string{"time"}},
+		{name: "slice qualified", src: "[]big.Rat", goImports: []string{"math/big"}},
+		{name: "pointer qualified", src: "*big.Rat", goImports: []string{"math/big"}},
+		{name: "map qualified", src: "map[string]time.Time", goImports: []string{"time"}},
+		{name: "qualified missing", src: "time.Time", wantErr: "missing from goImports"},
+		{name: "disallowed import", src: "thing.Thing", goImports: []string{"example.com/thing"}, wantErr: "allowed set"},
+		{name: "syntax error", src: "][]", wantErr: "parse"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseAndValidateGoType(tc.src, tc.goImports)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("parseAndValidateGoType(%q, %v): %v", tc.src, tc.goImports, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("parseAndValidateGoType(%q, %v) err = %v, want containing %q", tc.src, tc.goImports, err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestAllowedImportPath(t *testing.T) {
 	for _, tc := range []struct {
 		path string

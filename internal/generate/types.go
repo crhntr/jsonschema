@@ -157,3 +157,83 @@ func allowedImportPath(path string) bool {
 	}
 	return true
 }
+
+// importBaseName returns the conventional Go package identifier for
+// an import path. It assumes path's last segment matches the
+// package name (true for the stdlib and golang.org/x trees this
+// generator supports). Callers that need precise resolution should
+// use NewResolver instead.
+func importBaseName(path string) string {
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
+
+// parseAndValidateGoType parses src as a Go type expression and
+// verifies (a) every declared goImports path is in the allowlist
+// and (b) every selector base (foo.Bar) names a package whose
+// conventional identifier appears in goImports. Unqualified
+// identifiers are assumed to be Go builtins and are not validated
+// here (the Go compiler will catch typos).
+func parseAndValidateGoType(src string, goImports []string) (ast.Expr, error) {
+	for _, p := range goImports {
+		if !allowedImportPath(p) {
+			return nil, fmt.Errorf("goImports %q is not in the allowed set (stdlib, encoding/json/v2, golang.org/x/*)", p)
+		}
+	}
+	expr, err := parseGoTypeExpr(src)
+	if err != nil {
+		return nil, err
+	}
+	if err := walkSelectors(expr, goImports); err != nil {
+		return nil, err
+	}
+	return expr, nil
+}
+
+// validateAdditionalFields parses every additional-field goType and
+// runs it through parseAndValidateGoType so malformed expressions
+// surface as a regular generation error instead of panicking from
+// emitAdditionalField.
+func validateAdditionalFields(fields []GoAdditionalField, goImports []string) error {
+	for _, af := range fields {
+		if _, err := parseAndValidateGoType(af.GoType, goImports); err != nil {
+			return fmt.Errorf("%v: %w", af.GoIdent, err)
+		}
+	}
+	return nil
+}
+
+func walkSelectors(expr ast.Expr, goImports []string) error {
+	switch e := expr.(type) {
+	case *ast.SelectorExpr:
+		base, ok := e.X.(*ast.Ident)
+		if !ok {
+			return fmt.Errorf("selector base must be a package identifier, got %T", e.X)
+		}
+		found := false
+		for _, p := range goImports {
+			if importBaseName(p) == base.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("package %q used in goType but missing from goImports", base.Name)
+		}
+		return nil
+	case *ast.StarExpr:
+		return walkSelectors(e.X, goImports)
+	case *ast.ArrayType:
+		return walkSelectors(e.Elt, goImports)
+	case *ast.MapType:
+		if err := walkSelectors(e.Key, goImports); err != nil {
+			return err
+		}
+		return walkSelectors(e.Value, goImports)
+	case *ast.Ident:
+		return nil
+	}
+	return nil
+}

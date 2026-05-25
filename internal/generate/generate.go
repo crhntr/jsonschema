@@ -124,7 +124,7 @@ func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName st
 	for _, t := range types {
 		td, err := emitTypeDecls(t)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("emit %s: %w", t.Name, err)
 		}
 		decls = append(decls, td...)
 	}

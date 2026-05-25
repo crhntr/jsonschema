@@ -100,13 +100,13 @@ func (r *Resolver) resolveExpr(expr ast.Expr) (types.Type, error) {
 	case *ast.StarExpr:
 		elem, err := r.resolveExpr(e.X)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("pointer element: %w", err)
 		}
 		return types.NewPointer(elem), nil
 	case *ast.ArrayType:
 		elem, err := r.resolveExpr(e.Elt)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("array element: %w", err)
 		}
 		if e.Len != nil {
 			return nil, fmt.Errorf("fixed-size arrays are not supported in goType")
@@ -115,11 +115,11 @@ func (r *Resolver) resolveExpr(expr ast.Expr) (types.Type, error) {
 	case *ast.MapType:
 		key, err := r.resolveExpr(e.Key)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("map key: %w", err)
 		}
 		val, err := r.resolveExpr(e.Value)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("map value: %w", err)
 		}
 		return types.NewMap(key, val), nil
 	default:

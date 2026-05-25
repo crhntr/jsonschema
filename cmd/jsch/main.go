@@ -276,18 +276,18 @@ func schemaSource(ctx context.Context, wd, arg string, client *http.Client) (uri
 		path := strings.TrimPrefix(arg, "file://")
 		buf, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
-			return "", nil, err
+			return "", nil, fmt.Errorf("read schema %s: %w", arg, err)
 		}
 		return arg, buf, nil
 	default:
 		path := filepath.Clean(filepath.Join(wd, arg))
 		buf, err := os.ReadFile(path)
 		if err != nil {
-			return "", nil, err
+			return "", nil, fmt.Errorf("read schema %s: %w", arg, err)
 		}
 		abs, err := filepath.Abs(path)
 		if err != nil {
-			return "", nil, err
+			return "", nil, fmt.Errorf("resolve schema path %s: %w", arg, err)
 		}
 		return "file://" + abs, buf, nil
 	}
@@ -309,7 +309,7 @@ func readInstance(wd, arg string, stdin io.Reader) ([]byte, string, error) {
 	}
 	buf, err := os.ReadFile(filepath.Clean(filepath.Join(wd, arg)))
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("read instance %s: %w", arg, err)
 	}
 	return buf, arg, nil
 }
@@ -346,7 +346,7 @@ func generate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		}
 		overrides, err = gen.ParseOverrides(buf)
 		if err != nil {
-			return err
+			return fmt.Errorf("parse overrides %s: %w", overridesPath, err)
 		}
 	}
 	if packageName == "" {

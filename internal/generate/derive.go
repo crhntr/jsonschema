@@ -17,7 +17,10 @@ import (
 // exported Go identifier the caller wants on the emitted declaration.
 func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 	t, _, err := deriveWithRefs(name, obj, refMaps{}, Annotations{})
-	return t, err
+	if err != nil {
+		return Type{}, fmt.Errorf("derive %s: %w", name, err)
+	}
+	return t, nil
 }
 
 // deriveWithRefs is Derive plus a JSON-pointer → Go-identifier map
@@ -31,7 +34,7 @@ func Derive(name string, obj *jsonschema.SchemaObject) (Type, error) {
 func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps, override Annotations) (Type, []Type, error) {
 	annotations, err := ParseAnnotations(obj.Extra)
 	if err != nil {
-		return Type{}, nil, err
+		return Type{}, nil, fmt.Errorf("annotations: %w", err)
 	}
 	annotations = mergeAnnotations(annotations, override)
 	if annotations.GoIdent != "" {

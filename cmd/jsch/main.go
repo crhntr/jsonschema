@@ -387,7 +387,7 @@ func generate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		return fmt.Errorf("mkdir %s: %w", outAbs, err)
 	}
 	outFile := filepath.Join(outAbs, strings.ToLower(typeName)+".gen.go")
-	if err := os.WriteFile(outFile, src, 0o600); err != nil {
+	if err := os.WriteFile(outFile, src, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", outFile, err)
 	}
 	return nil

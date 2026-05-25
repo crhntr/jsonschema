@@ -24,11 +24,12 @@ func flattenWithStack(obj jsonschema.SchemaObject, stack map[*jsonschema.Schema]
 	out.AllOf = nil
 
 	for i, member := range obj.AllOf {
-		memberObj, err := resolveMember(member, stack)
+		memberObj, target, err := resolveMember(member, stack)
 		if err != nil {
 			return jsonschema.SchemaObject{}, fmt.Errorf("flatten allOf[%d]: %w", i, err)
 		}
 		flat, err := flattenWithStack(memberObj, stack)
+		delete(stack, target)
 		if err != nil {
 			return jsonschema.SchemaObject{}, fmt.Errorf("flatten allOf[%d]: %w", i, err)
 		}
@@ -40,24 +41,23 @@ func flattenWithStack(obj jsonschema.SchemaObject, stack map[*jsonschema.Schema]
 
 // resolveMember unwraps an allOf member to its SchemaObject. If the
 // member is a $ref to an already-resolved schema, the resolved
-// target is followed (and added to the cycle-detection stack).
-func resolveMember(s *jsonschema.Schema, stack map[*jsonschema.Schema]bool) (jsonschema.SchemaObject, error) {
+// target is followed (and added to the cycle-detection stack). The
+// caller must remove target from stack after the recursive descent
+// returns so unrelated sibling branches can reuse the same $ref.
+func resolveMember(s *jsonschema.Schema, stack map[*jsonschema.Schema]bool) (jsonschema.SchemaObject, *jsonschema.Schema, error) {
 	target := s
 	if r := s.Resolved(); r != nil {
 		target = r
 	}
 	if stack[target] {
-		return jsonschema.SchemaObject{}, fmt.Errorf("cycle through allOf at %p", target)
+		return jsonschema.SchemaObject{}, nil, fmt.Errorf("cycle through allOf at %p", target)
 	}
-	stack[target] = true
-	// We do not delete on return — flattening is conjunctive and a
-	// repeated $ref inside the same chain is still a cycle.
-
 	obj, ok := target.TypeObject()
 	if !ok {
-		return jsonschema.SchemaObject{}, fmt.Errorf("allOf member is a boolean schema")
+		return jsonschema.SchemaObject{}, nil, fmt.Errorf("allOf member is a boolean schema")
 	}
-	return obj, nil
+	stack[target] = true
+	return obj, target, nil
 }
 
 // mergeInto folds src's object-level keywords into dst. allOf is

@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -76,7 +77,15 @@ func emitManualStructMarshal(t Type) ast.Decl {
 			)
 			continue
 		}
-		// if r.Field != nil { writeKey; json.MarshalEncode(enc, *r.Field) }
+		// Optional fields are *T for scalars/structs (so absent vs
+		// zero is preserved) but bare slice/map for collections
+		// (whose nil zero already encodes absence). Dereference only
+		// the pointer case so the wire output is the underlying
+		// value either way.
+		var encodeArg ast.Expr = fieldRef
+		if _, isPtr := f.TypeExpr.(*ast.StarExpr); isPtr {
+			encodeArg = &ast.StarExpr{X: fieldRef}
+		}
 		body = append(body, &ast.IfStmt{
 			Cond: binOp(fieldRef, token.NEQ, ident("nil")),
 			Body: &ast.BlockStmt{List: []ast.Stmt{
@@ -84,7 +93,7 @@ func emitManualStructMarshal(t Type) ast.Decl {
 				ifErrReturn(callExpr(
 					sel("json", "MarshalEncode"),
 					ident("enc"),
-					&ast.StarExpr{X: fieldRef},
+					encodeArg,
 				)),
 			}},
 		})
@@ -420,14 +429,18 @@ func enumCheckStmt(typeName string, enum []string) ast.Stmt {
 }
 
 // enumLiteral converts a raw JSON enum entry to a Go expression.
-// JSON strings stay quoted; numbers / true / false / null splice
-// through as their raw text.
+// JSON strings are decoded then re-quoted via strconv.Quote so any
+// JSON-only escape (notably \/) round-trips into a valid Go string
+// literal; numbers / true / false / null splice through as raw text.
 func enumLiteral(raw string) ast.Expr {
 	if len(raw) > 0 && raw[0] == '"' {
-		// JSON's interior-string escapes (\", \\, \n, \uXXXX, …) are
-		// a subset of Go's, so the JSON text doubles as a valid Go
-		// double-quoted string literal for the values seen in
-		// schemas. \/ would need translation if it ever appeared.
+		var s string
+		if err := json.Unmarshal([]byte(raw), &s); err == nil {
+			return &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(s)}
+		}
+		// Fall through: leave malformed input untouched so the Go
+		// compiler surfaces the syntax error rather than this code
+		// silently swallowing it.
 		return &ast.BasicLit{Kind: token.STRING, Value: raw}
 	}
 	switch raw {

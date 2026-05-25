@@ -46,6 +46,9 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps, ove
 		doc = obj.Description
 	}
 
+	if err := validateAdditionalFields(annotations.GoAdditionalFields); err != nil {
+		return Type{}, nil, err
+	}
 	t := Type{
 		Name:              name,
 		Doc:               doc,
@@ -140,9 +143,24 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps, ove
 	}
 	st.Doc = doc
 	if len(annotations.GoAdditionalFields) > 0 {
+		if err := validateAdditionalFields(annotations.GoAdditionalFields); err != nil {
+			return Type{}, nil, err
+		}
 		st.AdditionalFields = append([]GoAdditionalField(nil), annotations.GoAdditionalFields...)
 	}
 	return st, nil, nil
+}
+
+// validateAdditionalFields parses each entry's GoType expression so
+// malformed user input surfaces as a generation error with schema
+// context rather than panicking deep inside the emit pass.
+func validateAdditionalFields(fields []GoAdditionalField) error {
+	for _, af := range fields {
+		if _, err := parseGoTypeExpr(af.GoType); err != nil {
+			return fmt.Errorf("goAdditionalFields: %w", err)
+		}
+	}
+	return nil
 }
 
 // deriveStructShape produces the IR Type for a non-composite,
@@ -156,6 +174,9 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 		return Type{}, fmt.Errorf("annotations: %w", err)
 	}
 
+	if err := validateAdditionalFields(annot.GoAdditionalFields); err != nil {
+		return Type{}, err
+	}
 	t := Type{
 		Name:              name,
 		RejectUnknown:     rejectsAdditionalProperties(obj),

@@ -1,0 +1,56 @@
+jsch generate --schema schema.json --out ./model --package model --type Doc
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "Named": {
+      "type": "object",
+      "properties": {"name": {"type": "string"}},
+      "required": ["name"]
+    },
+    "Stamped": {
+      "type": "object",
+      "properties": {"stamp": {"type": "string"}},
+      "required": ["stamp"]
+    },
+    "NamedAndStamped": {
+      "allOf": [
+        {"$ref": "#/$defs/Named"},
+        {"$ref": "#/$defs/Stamped"}
+      ]
+    }
+  },
+  "allOf": [
+    {"$ref": "#/$defs/Named"},
+    {"$ref": "#/$defs/NamedAndStamped"}
+  ]
+}
+-- go.mod --
+module example.com/siblingpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+func TestDoc_SiblingRefMergedNotCycle(t *testing.T) {
+	in := []byte(`{"name":"alice","stamp":"2020"}`)
+	var d Doc
+	if err := json.Unmarshal(in, &d); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if d.Name != "alice" {
+		t.Errorf("Name = %q, want alice", d.Name)
+	}
+	if d.Stamp != "2020" {
+		t.Errorf("Stamp = %q, want 2020", d.Stamp)
+	}
+}

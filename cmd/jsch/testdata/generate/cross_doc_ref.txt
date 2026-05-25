@@ -1,4 +1,4 @@
-go-jsonschema generate --schema https://example.com/refs/embedded.json --out ./model --package model --type Outer
+jsch generate --schema https://example.com/refs/embedded.json --out ./model --package model --type Outer
 
 exec go test -count=1 ./model
 

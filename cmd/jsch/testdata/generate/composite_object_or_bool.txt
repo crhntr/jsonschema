@@ -1,4 +1,4 @@
-go-jsonschema generate --schema schema.json --out ./model --package model --type Schema
+jsch generate --schema schema.json --out ./model --package model --type Schema
 
 exec go test -count=1 ./model
 

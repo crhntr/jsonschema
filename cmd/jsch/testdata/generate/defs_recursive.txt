@@ -1,4 +1,4 @@
-go-jsonschema generate --schema schema.json --out ./model --package model --type Tree
+jsch generate --schema schema.json --out ./model --package model --type Tree
 
 exec go test -count=1 ./model
 

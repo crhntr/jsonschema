@@ -65,3 +65,26 @@ func ifReturnFmtErrorf(cond ast.Expr, format string, args ...ast.Expr) *ast.IfSt
 		Body: &ast.BlockStmt{List: []ast.Stmt{returnStmt(fmtErrorfCall(format, args...))}},
 	}
 }
+
+// ifErrReturn returns `if err := <call>; err != nil { return err }`.
+func ifErrReturn(call ast.Expr) *ast.IfStmt {
+	return &ast.IfStmt{
+		Init: &ast.AssignStmt{
+			Lhs: []ast.Expr{ident("err")},
+			Tok: token.DEFINE,
+			Rhs: []ast.Expr{call},
+		},
+		Cond: binOp(ident("err"), token.NEQ, ident("nil")),
+		Body: &ast.BlockStmt{List: []ast.Stmt{returnStmt(ident("err"))}},
+	}
+}
+
+// jsontextStringCall returns `jsontext.String(<lit>)`.
+func jsontextStringCall(s string) *ast.CallExpr {
+	return callExpr(sel("jsontext", "String"), stringLit(s))
+}
+
+// encWriteToken returns `enc.WriteToken(<arg>)`.
+func encWriteToken(arg ast.Expr) *ast.CallExpr {
+	return callExpr(sel("enc", "WriteToken"), arg)
+}

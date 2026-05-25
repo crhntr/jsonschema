@@ -109,8 +109,12 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps, ove
 		if err != nil {
 			return Type{}, nil, fmt.Errorf("scalar root: %w", err)
 		}
+		constraints := deriveConstraints(obj)
+		if err := validateScalarBounds(expr, constraints); err != nil {
+			return Type{}, nil, fmt.Errorf("scalar root: %w", err)
+		}
 		t.Underlying = expr
-		t.Constraints = deriveConstraints(obj)
+		t.Constraints = constraints
 		return t, nil, nil
 	}
 
@@ -368,6 +372,84 @@ func isScalarRoot(obj *jsonschema.SchemaObject) bool {
 	default:
 		return false
 	}
+}
+
+// validateScalarBounds checks that the raw JSON text of Minimum /
+// Maximum parses against the scalar's chosen Go type. A non-integer
+// or out-of-range bound on an integer schema would otherwise emit
+// `int` vs `float` comparisons (or compile-time integer overflow)
+// in the generated code; returning here gives a clear diagnostic
+// instead.
+func validateScalarBounds(underlying ast.Expr, c Constraints) error {
+	id, ok := underlying.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	check := boundChecker(id.Name)
+	if check == nil {
+		return nil
+	}
+	if c.Minimum != nil {
+		if err := check(*c.Minimum); err != nil {
+			return fmt.Errorf("minimum %s: %w", *c.Minimum, err)
+		}
+	}
+	if c.Maximum != nil {
+		if err := check(*c.Maximum); err != nil {
+			return fmt.Errorf("maximum %s: %w", *c.Maximum, err)
+		}
+	}
+	return nil
+}
+
+// boundChecker returns a parser for the named Go numeric type, or
+// nil if numeric bounds do not apply to it. Bound text is the
+// schema's raw JSON, so e.g. "1.5" must reject for any integer type.
+func boundChecker(typeName string) func(string) error {
+	switch typeName {
+	case "int", "int8", "int16", "int32", "int64":
+		bits := intBits(typeName)
+		return func(s string) error {
+			if _, err := strconv.ParseInt(s, 10, bits); err != nil {
+				return fmt.Errorf("not representable as %s: %w", typeName, err)
+			}
+			return nil
+		}
+	case "uint", "uint8", "uint16", "uint32", "uint64":
+		bits := intBits(typeName)
+		return func(s string) error {
+			if _, err := strconv.ParseUint(s, 10, bits); err != nil {
+				return fmt.Errorf("not representable as %s: %w", typeName, err)
+			}
+			return nil
+		}
+	case "float32", "float64":
+		bits := 64
+		if typeName == "float32" {
+			bits = 32
+		}
+		return func(s string) error {
+			if _, err := strconv.ParseFloat(s, bits); err != nil {
+				return fmt.Errorf("not representable as %s: %w", typeName, err)
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func intBits(typeName string) int {
+	switch typeName {
+	case "int8", "uint8":
+		return 8
+	case "int16", "uint16":
+		return 16
+	case "int32", "uint32":
+		return 32
+	case "int64", "uint64":
+		return 64
+	}
+	return strconv.IntSize
 }
 
 // deriveConstraints lifts the assertion keywords supported in

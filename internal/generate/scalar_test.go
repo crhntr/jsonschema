@@ -60,6 +60,50 @@ func TestDerive_IntegerScalarWithRange(t *testing.T) {
 	}
 }
 
+func TestDerive_IntegerScalarRejectsNonIntegerBound(t *testing.T) {
+	src := `{"type":"integer","minimum":1.5}`
+	s, err := jsonschema.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	obj, _ := s.TypeObject()
+	_, err = Derive("Age", &obj)
+	if err == nil {
+		t.Fatal("Derive: nil error, want non-integer minimum rejection")
+	}
+	if !strings.Contains(err.Error(), "minimum") {
+		t.Errorf("err = %q, want mention of minimum", err)
+	}
+}
+
+func TestDerive_IntegerScalarRejectsOverflowBound(t *testing.T) {
+	src := `{"type":"integer","maximum":99999999999999999999}`
+	s, err := jsonschema.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	obj, _ := s.TypeObject()
+	_, err = Derive("Big", &obj)
+	if err == nil {
+		t.Fatal("Derive: nil error, want overflow rejection")
+	}
+	if !strings.Contains(err.Error(), "maximum") {
+		t.Errorf("err = %q, want mention of maximum", err)
+	}
+}
+
+func TestDerive_NumberScalarAcceptsFloatBound(t *testing.T) {
+	src := `{"type":"number","minimum":1.5,"maximum":2.75}`
+	s, err := jsonschema.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	obj, _ := s.TypeObject()
+	if _, err := Derive("Ratio", &obj); err != nil {
+		t.Fatalf("Derive: %v", err)
+	}
+}
+
 func TestEmit_ScalarStringAlias(t *testing.T) {
 	min, max := 3, 12
 	typ := Type{

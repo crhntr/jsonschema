@@ -183,15 +183,35 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 			if !b {
 				continue
 			}
-			fieldType := ast.Expr(ident("any"))
-			if !required {
+			var fieldType ast.Expr = ident("any")
+			goName := exportedIdent(jsonName)
+			var jsonTags []string
+			explicitGoType := false
+			if override, ok := parentAnnot.Fields[jsonName]; ok {
+				if override.GoType != "" {
+					parsed, err := parser.ParseExpr(override.GoType)
+					if err != nil {
+						return Type{}, fmt.Errorf("property %q goType %q: %w", jsonName, override.GoType, err)
+					}
+					fieldType = parsed
+					explicitGoType = true
+				}
+				if override.GoIdent != "" {
+					goName = override.GoIdent
+				}
+				if len(override.GoJSONTags) > 0 {
+					jsonTags = override.GoJSONTags
+				}
+			}
+			if !explicitGoType && !required {
 				fieldType = &ast.StarExpr{X: fieldType}
 			}
 			t.Fields = append(t.Fields, Field{
-				GoName:   exportedIdent(jsonName),
+				GoName:   goName,
 				JSONName: jsonName,
 				TypeExpr: fieldType,
 				Required: required,
+				JSONTags: jsonTags,
 			})
 			continue
 		}

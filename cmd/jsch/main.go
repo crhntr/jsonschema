@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -189,7 +191,7 @@ func loadSchema(ctx context.Context, wd, arg string, strict, skipMeta bool, clie
 		return nil, err
 	}
 	if _, err := r.Load(uri, body); err != nil {
-		return nil, fmt.Errorf("load schema: %w", err)
+		return nil, positionJSONError(arg, body, err, "load schema")
 	}
 	// The meta-schema validates itself, but routing it through
 	// the pre-flight is wasted work and produces noisier output
@@ -297,6 +299,30 @@ func schemaSource(ctx context.Context, wd, arg string, client *http.Client) (uri
 // document keyed by its canonical URL, or false if the URL is not
 // one we ship.
 
+// positionJSONError reformats a JSON decoding error as
+// `name:line:col: <msg>` when err carries a *jsontext.SyntacticError or
+// *json.SemanticError (both expose ByteOffset). For SyntacticError the
+// message is rebuilt from the underlying Err + JSONPointer so the
+// trailing "after offset N" clause doesn't duplicate the position
+// already encoded in the name:line:col prefix. When no positioned
+// error is present, the fallback prefix is used as a plain wrap. The
+// offset / line / column come from jsonschema.NewSource, the same
+// coordinate system Validate uses for instance failures.
+func positionJSONError(name string, body []byte, err error, fallback string) error {
+	if sErr, ok := errors.AsType[*jsontext.SyntacticError](err); ok {
+		s := jsonschema.NewSource(name, body, sErr.ByteOffset)
+		if sErr.JSONPointer != "" {
+			return fmt.Errorf("%s:%d:%d: jsontext: %w within %q", s.Name, s.Line, s.Column, sErr.Err, sErr.JSONPointer)
+		}
+		return fmt.Errorf("%s:%d:%d: jsontext: %w", s.Name, s.Line, s.Column, sErr.Err)
+	}
+	if smErr, ok := errors.AsType[*json.SemanticError](err); ok {
+		s := jsonschema.NewSource(name, body, smErr.ByteOffset)
+		return fmt.Errorf("%s:%d:%d: %w", s.Name, s.Line, s.Column, smErr)
+	}
+	return fmt.Errorf("%s: %w", fallback, err)
+}
+
 // readInstance returns the bytes and a display name for an instance
 // argument. "-" means stdin.
 func readInstance(wd, arg string, stdin io.Reader) ([]byte, string, error) {
@@ -346,7 +372,7 @@ func generate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		}
 		overrides, err = gen.ParseOverrides(buf)
 		if err != nil {
-			return fmt.Errorf("parse overrides %s: %w", overridesPath, err)
+			return positionJSONError(overridesPath, buf, err, "parse overrides "+overridesPath)
 		}
 	}
 	if packageName == "" {

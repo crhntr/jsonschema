@@ -68,7 +68,7 @@ func (c evalCtx) baseOutput(valOff int64) Output {
 		KeywordLocation:         c.keywordLocation,
 		AbsoluteKeywordLocation: c.absoluteKeywordLocation,
 		InstanceLocation:        c.instanceLocation,
-		Source:                  byteSource(c.sourceName, c.in, valOff),
+		Source:                  NewSource(c.sourceName, c.in, valOff),
 	}
 }
 
@@ -116,10 +116,15 @@ func (c *coveredKeys) merge(o coveredKeys) {
 	}
 }
 
-// byteSource computes the 1-based line / 0-based column of offset
+// NewSource computes the 1-based line / 0-based column of offset
 // within in. Used to populate Output.Source so failure messages can
-// point at the value in the original document.
-func byteSource(name string, in []byte, offset int64) Source {
+// point at the value in the original document. Out-of-range offsets
+// clamp to len(in). Exported so callers can format their own
+// `name:line:col: msg` errors against the same coordinate system the
+// validator uses — useful at CLI boundaries that read a schema or
+// instance file and want to attribute a json/v2 decoding error to a
+// position in the source.
+func NewSource(name string, in []byte, offset int64) Source {
 	if offset > int64(len(in)) {
 		offset = int64(len(in))
 	}
@@ -162,26 +167,41 @@ func (m *Schema) ValidateWithFormatAssertion(name string, in []byte) Output {
 }
 
 func (m *Schema) validateRoot(ctx evalCtx, in []byte) Output {
-	if !jsontext.Value(in).IsValid() {
-		out := ctx.baseOutput(0)
-		out.Valid = false
-		out.Error = "invalid JSON"
-		return out
-	}
 	dec := jsontext.NewDecoder(bytes.NewReader(in))
 	valOff := dec.InputOffset()
 	val, err := dec.ReadValue()
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return ctx.baseOutput(0)
+		off := dec.InputOffset()
+		sErr, hasSyntactic := errors.AsType[*jsontext.SyntacticError](err)
+		if hasSyntactic {
+			off = sErr.ByteOffset
 		}
-		out := ctx.baseOutput(dec.InputOffset())
+		out := ctx.baseOutput(off)
 		out.Valid = false
-		out.Error = err.Error()
+		switch {
+		case errors.Is(err, io.EOF):
+			out.Error = "invalid JSON"
+		case hasSyntactic:
+			out.Error = jsontextMessage(sErr)
+		default:
+			out.Error = err.Error()
+		}
 		return out
 	}
 	out, _ := m.evaluate(ctx, val, valOff)
 	return out
+}
+
+// jsontextMessage formats a *jsontext.SyntacticError without the
+// trailing "after offset N" clause that the type's own Error() adds;
+// the absolute position lives on Output.Source.Offset (or in a
+// caller-prepended name:line:col prefix), so duplicating it in the
+// message is noise.
+func jsontextMessage(sErr *jsontext.SyntacticError) string {
+	if sErr.JSONPointer != "" {
+		return fmt.Sprintf("jsontext: %s within %q", sErr.Err, sErr.JSONPointer)
+	}
+	return fmt.Sprintf("jsontext: %s", sErr.Err)
 }
 
 // evaluate validates val against m. Returns one Output for this

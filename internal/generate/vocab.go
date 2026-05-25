@@ -2,11 +2,10 @@
 package generate
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
-
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 )
 
 // VocabURI identifies the Go-codegen vocabulary keywords are siblings of.

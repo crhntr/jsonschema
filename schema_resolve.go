@@ -1,11 +1,10 @@
 package jsonschema
 
 import (
+	"encoding/json/v2"
 	"iter"
 	"maps"
 	"slices"
-
-	"github.com/go-json-experiment/json"
 )
 
 // Parse unmarshals a JSON Schema document and retains a reference to buf so

@@ -1,10 +1,9 @@
 package jsonschema_test
 
 import (
+	"encoding/json/v2"
 	"strings"
 	"testing"
-
-	"github.com/go-json-experiment/json"
 
 	"github.com/crhntr/jsonschema"
 )

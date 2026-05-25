@@ -1,11 +1,10 @@
 package jsonschema
 
 import (
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
-
-	"github.com/go-json-experiment/json"
 )
 
 // typeEnumStrings returns the legal values of the JSON Schema "type"

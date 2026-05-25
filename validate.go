@@ -2,6 +2,8 @@ package jsonschema
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"math/big"
 	"net/mail"
@@ -10,8 +12,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/go-json-experiment/json/jsontext"
-	"github.com/go-json-experiment/json/v1"
 	"golang.org/x/net/idna"
 
 	"github.com/crhntr/jsonschema/jsonptr"

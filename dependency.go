@@ -1,8 +1,8 @@
 package jsonschema
 
 import (
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 )
 
 // Dependency represents a single entry of the legacy dependencies

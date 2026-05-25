@@ -28,7 +28,7 @@ func NewResolver(imports []string) (*Resolver, error) {
 	}
 	for _, p := range imports {
 		if !allowedImportPath(p) {
-			return nil, fmt.Errorf("import %q is not in the allowed set (stdlib, github.com/go-json-experiment/json, golang.org/x/*)", p)
+			return nil, fmt.Errorf("import %q is not in the allowed set (stdlib, encoding/json/v2, golang.org/x/*)", p)
 		}
 	}
 	cfg := &packages.Config{
@@ -138,14 +138,14 @@ func (r *Resolver) lookupPackageByName(name string) (*packages.Package, string) 
 
 // allowedImportPath reports whether path may appear in goImports.
 // The generated code must only depend on the standard library,
-// github.com/go-json-experiment/json (and its jsontext sibling),
+// encoding/json/v2 (and its jsontext sibling),
 // or golang.org/x/*.
 func allowedImportPath(path string) bool {
 	if path == "" {
 		return false
 	}
-	if path == "github.com/go-json-experiment/json" ||
-		strings.HasPrefix(path, "github.com/go-json-experiment/json/") {
+	if path == "encoding/json/v2" ||
+		strings.HasPrefix(path, "encoding/json/v2/") {
 		return true
 	}
 	if strings.HasPrefix(path, "golang.org/x/") {

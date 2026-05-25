@@ -1,10 +1,9 @@
 package jsonschema
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
-
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 )
 
 // Type carries the JSON Schema "type" keyword's value, which the

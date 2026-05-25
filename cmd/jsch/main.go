@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json/v2"
 	"flag"
 	"fmt"
 	"io"
@@ -10,8 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/go-json-experiment/json"
 
 	"github.com/crhntr/jsonschema"
 	gen "github.com/crhntr/jsonschema/internal/generate"

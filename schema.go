@@ -29,10 +29,9 @@
 package jsonschema
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
-
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 )
 
 // Schema is a parsed JSON Schema document or subschema. A Schema
@@ -216,4 +215,3 @@ func (m *Schema) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		return errors.New("expected meta to be either a boolean or object")
 	}
 }
-

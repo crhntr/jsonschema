@@ -2,11 +2,10 @@ package jsonptr
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"strconv"
-
-	"github.com/go-json-experiment/json/jsontext"
 )
 
 // Find returns the JSON value located at p within data. The returned value

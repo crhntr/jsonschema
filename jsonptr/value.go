@@ -2,14 +2,13 @@ package jsonptr
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
-
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 )
 
 // Walker lets a type control how FindValue descends into it. The method

@@ -1,9 +1,8 @@
 package generate
 
 import (
+	"encoding/json/v2"
 	"fmt"
-
-	"github.com/go-json-experiment/json"
 )
 
 // Overrides is the document-level go-codegen configuration loaded
@@ -20,7 +19,7 @@ type Overrides struct {
 	// JSONPackage selects which json/jsontext import paths the
 	// emitter should use. Empty defaults to the stdlib jsonv2
 	// path. "experiment" uses
-	// github.com/go-json-experiment/json (and its jsontext
+	// encoding/json/v2 (and its jsontext
 	// subpackage), which lets the output drop into projects that
 	// haven't enabled GOEXPERIMENT=jsonv2.
 	JSONPackage string `json:"jsonPackage,omitempty"`
@@ -33,7 +32,7 @@ func (o Overrides) jsonImports() (jsonPath, jsontextPath string) {
 	case "", "stdlib":
 		return "encoding/json/v2", "encoding/json/jsontext"
 	case "experiment":
-		return "github.com/go-json-experiment/json", "github.com/go-json-experiment/json/jsontext"
+		return "encoding/json/v2", "encoding/json/jsontext"
 	default:
 		return o.JSONPackage, o.JSONPackage + "/jsontext"
 	}

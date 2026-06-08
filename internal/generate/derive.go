@@ -261,7 +261,7 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 		}
 
 		var (
-			fieldType   ast.Expr
+			fieldType      ast.Expr
 			explicitGoType bool
 		)
 		if propAnnotations.GoType != "" {

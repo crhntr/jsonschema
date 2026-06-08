@@ -229,7 +229,7 @@ func emitCompositeUnmarshal(t Type) (*ast.FuncDecl, error) {
 		},
 		Body: &ast.BlockStmt{List: []ast.Stmt{
 			&ast.SwitchStmt{
-				Tag: callExpr(&ast.SelectorExpr{X: ident("dec"), Sel: ident("PeekKind")}),
+				Tag:  callExpr(&ast.SelectorExpr{X: ident("dec"), Sel: ident("PeekKind")}),
 				Body: &ast.BlockStmt{List: cases},
 			},
 		}},

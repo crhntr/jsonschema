@@ -28,7 +28,7 @@ func variantValueName(kind string) string { return kind }
 // underlying a composite type declaration. Any goAdditionalFields
 // configured on the IR Type are appended after the variant fields,
 // each with json:"-" so promoted members never leak into JSON.
-func emitCompositeStructType(t Type) *ast.StructType {
+func emitCompositeStructType(t Type) (*ast.StructType, error) {
 	var fields []*ast.Field
 	for _, v := range t.Variants {
 		fields = append(fields, &ast.Field{
@@ -45,11 +45,11 @@ func emitCompositeStructType(t Type) *ast.StructType {
 	for _, af := range t.AdditionalFields {
 		field, err := emitAdditionalField(af)
 		if err != nil {
-			panic(fmt.Errorf("composite additional field %+v: %w", af, err))
+			return nil, fmt.Errorf("composite additional field %+v: %w", af, err)
 		}
 		fields = append(fields, field)
 	}
-	return &ast.StructType{Fields: &ast.FieldList{List: fields}}
+	return &ast.StructType{Fields: &ast.FieldList{List: fields}}, nil
 }
 
 // emitCompositeAccessors returns the public Type<Kind>() / Set<Kind>()

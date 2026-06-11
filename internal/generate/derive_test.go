@@ -127,7 +127,7 @@ func TestEmit_OptionalGetsOmitzero(t *testing.T) {
 			{GoName: "Nickname", JSONName: "nickname", TypeExpr: &ast.StarExpr{X: &ast.Ident{Name: "string"}}, Required: false},
 		},
 	}
-	src, err := formatFile("model", []ast.Decl{Emit(typ)})
+	src, err := formatFile("model", []ast.Decl{mustEmit(t, typ)})
 	if err != nil {
 		t.Fatalf("formatFile: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestEmit_FormatsAsValidGo(t *testing.T) {
 			{GoName: "Age", JSONName: "age", TypeExpr: &ast.Ident{Name: "int"}, Required: true},
 		},
 	}
-	src, err := formatFile("model", []ast.Decl{Emit(typ)})
+	src, err := formatFile("model", []ast.Decl{mustEmit(t, typ)})
 	if err != nil {
 		t.Fatalf("formatFile: %v", err)
 	}

@@ -3,7 +3,6 @@ package generate
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"slices"
 	"sort"
 	"strconv"
@@ -46,7 +45,7 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps, ove
 		doc = obj.Description
 	}
 
-	if err := validateAdditionalFields(annotations.GoAdditionalFields); err != nil {
+	if err := validateAdditionalFields(annotations.GoAdditionalFields, annotations.GoImports); err != nil {
 		return Type{}, nil, err
 	}
 	t := Type{
@@ -147,7 +146,7 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps, ove
 	}
 	st.Doc = doc
 	if len(annotations.GoAdditionalFields) > 0 {
-		if err := validateAdditionalFields(annotations.GoAdditionalFields); err != nil {
+		if err := validateAdditionalFields(annotations.GoAdditionalFields, annotations.GoImports); err != nil {
 			return Type{}, nil, err
 		}
 		st.AdditionalFields = append([]GoAdditionalField(nil), annotations.GoAdditionalFields...)
@@ -155,12 +154,14 @@ func deriveWithRefs(name string, obj *jsonschema.SchemaObject, refs refMaps, ove
 	return st, nil, nil
 }
 
-// validateAdditionalFields parses each entry's GoType expression so
-// malformed user input surfaces as a generation error with schema
-// context rather than panicking deep inside the emit pass.
-func validateAdditionalFields(fields []GoAdditionalField) error {
+// validateAdditionalFields resolves each entry's GoType expression
+// against the parent schema's imports so malformed input or a goType
+// referencing a package outside the allowed set surfaces as a
+// generation error with schema context rather than panicking deep
+// inside the emit pass.
+func validateAdditionalFields(fields []GoAdditionalField, imports []string) error {
 	for _, af := range fields {
-		if _, err := parseGoTypeExpr(af.GoType); err != nil {
+		if _, err := resolveGoType(af.GoType, imports); err != nil {
 			return fmt.Errorf("goAdditionalFields: %w", err)
 		}
 	}
@@ -178,7 +179,7 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 		return Type{}, fmt.Errorf("annotations: %w", err)
 	}
 
-	if err := validateAdditionalFields(annot.GoAdditionalFields); err != nil {
+	if err := validateAdditionalFields(annot.GoAdditionalFields, annot.GoImports); err != nil {
 		return Type{}, err
 	}
 	t := Type{
@@ -217,7 +218,7 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 			explicitGoType := false
 			if override, ok := parentAnnot.Fields[jsonName]; ok {
 				if override.GoType != "" {
-					parsed, err := parser.ParseExpr(override.GoType)
+					parsed, err := resolveGoType(override.GoType, override.GoImports)
 					if err != nil {
 						return Type{}, fmt.Errorf("property %q goType %q: %w", jsonName, override.GoType, err)
 					}
@@ -265,7 +266,7 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 			explicitGoType bool
 		)
 		if propAnnotations.GoType != "" {
-			fieldType, err = parser.ParseExpr(propAnnotations.GoType)
+			fieldType, err = resolveGoType(propAnnotations.GoType, propAnnotations.GoImports)
 			if err != nil {
 				return Type{}, fmt.Errorf("property %q goType %q: %w", jsonName, propAnnotations.GoType, err)
 			}

@@ -19,16 +19,23 @@ func parseGoTypeExpr(src string) (ast.Expr, error) {
 // Emit turns an IR Type into a top-level *ast.GenDecl ready for
 // printing. Scalar types emit `type Name <expr>`; struct types emit
 // `type Name struct { … }`; composite types emit a discriminated
-// union struct.
-func Emit(t Type) *ast.GenDecl {
-	var typExpr ast.Expr
+// union struct. It returns an error when an additional field's goType
+// expression cannot be parsed.
+func Emit(t Type) (*ast.GenDecl, error) {
+	var (
+		typExpr ast.Expr
+		err     error
+	)
 	switch {
 	case len(t.Variants) > 0:
-		typExpr = emitCompositeStructType(t)
+		typExpr, err = emitCompositeStructType(t)
 	case t.Underlying != nil:
 		typExpr = t.Underlying
 	default:
-		typExpr = emitStructType(t)
+		typExpr, err = emitStructType(t)
+	}
+	if err != nil {
+		return nil, err
 	}
 	spec := &ast.TypeSpec{
 		Name: &ast.Ident{Name: t.Name},
@@ -41,10 +48,10 @@ func Emit(t Type) *ast.GenDecl {
 	if t.Doc != "" {
 		decl.Doc = &ast.CommentGroup{List: []*ast.Comment{{Text: "// " + t.Doc}}}
 	}
-	return decl
+	return decl, nil
 }
 
-func emitStructType(t Type) *ast.StructType {
+func emitStructType(t Type) (*ast.StructType, error) {
 	fields := new(ast.FieldList)
 	for _, f := range t.Fields {
 		tagValue := f.JSONName
@@ -64,11 +71,11 @@ func emitStructType(t Type) *ast.StructType {
 	for _, af := range t.AdditionalFields {
 		field, err := emitAdditionalField(af)
 		if err != nil {
-			panic(fmt.Errorf("additional field %+v: %w", af, err))
+			return nil, fmt.Errorf("additional field %+v: %w", af, err)
 		}
 		fields.List = append(fields.List, field)
 	}
-	return &ast.StructType{Fields: fields}
+	return &ast.StructType{Fields: fields}, nil
 }
 
 // emitAdditionalField turns an IR GoAdditionalField into an *ast.Field

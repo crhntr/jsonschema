@@ -115,7 +115,7 @@ func TestEmit_ScalarStringAlias(t *testing.T) {
 		},
 	}
 	src, err := formatFile("model", []ast.Decl{
-		Emit(typ),
+		mustEmit(t, typ),
 		EmitMarshal(typ),
 		EmitUnmarshal(typ),
 	})

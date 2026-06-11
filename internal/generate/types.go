@@ -16,6 +16,12 @@ import (
 // the universe scope.
 type Resolver struct {
 	pkgs map[string]*packages.Package
+
+	// allowUnknownIdents permits unqualified identifiers that are not
+	// Go builtins, treating them as references to locally generated or
+	// hand-written companion types in the output package. Selector
+	// expressions are still validated against the loaded packages.
+	allowUnknownIdents bool
 }
 
 // NewResolver loads the given import paths so their exported types
@@ -73,6 +79,12 @@ func (r *Resolver) resolveExpr(expr ast.Expr) (types.Type, error) {
 	case *ast.Ident:
 		obj := types.Universe.Lookup(e.Name)
 		if obj == nil {
+			if r.allowUnknownIdents {
+				// A local generated type or companion declaration in
+				// the output package; we cannot type-check it here, so
+				// accept the identifier as-is.
+				return types.Typ[types.Invalid], nil
+			}
 			return nil, fmt.Errorf("unknown identifier %q (unqualified identifiers must be Go builtins)", e.Name)
 		}
 		return obj.Type(), nil
@@ -134,6 +146,24 @@ func (r *Resolver) lookupPackageByName(name string) (*packages.Package, string) 
 		}
 	}
 	return nil, ""
+}
+
+// resolveGoType validates a goType expression against the declared
+// imports — which must all be in the allowed set — and Go builtins,
+// while permitting unqualified references to locally generated or
+// hand-written companion types. It returns the parsed expression
+// ready for splicing into the emitted declaration.
+func resolveGoType(src string, imports []string) (ast.Expr, error) {
+	r, err := NewResolver(imports)
+	if err != nil {
+		return nil, err
+	}
+	r.allowUnknownIdents = true
+	expr, _, err := r.Resolve(src)
+	if err != nil {
+		return nil, err
+	}
+	return expr, nil
 }
 
 // allowedImportPath reports whether path may appear in goImports.

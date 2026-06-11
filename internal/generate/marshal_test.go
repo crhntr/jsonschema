@@ -16,7 +16,7 @@ func TestEmitMarshal_Skeleton(t *testing.T) {
 		RejectUnknown: true,
 	}
 	src, err := formatFile("model", []ast.Decl{
-		Emit(typ),
+		mustEmit(t, typ),
 		EmitMarshal(typ),
 		EmitUnmarshal(typ),
 	})
@@ -67,7 +67,7 @@ func TestEmitMarshal_ManualPathOptionalCollection(t *testing.T) {
 		NullProperties: []NullProperty{{JSONName: "marker", Required: true}},
 	}
 	src, err := formatFile("model", []ast.Decl{
-		Emit(typ),
+		mustEmit(t, typ),
 		EmitMarshal(typ),
 	})
 	if err != nil {

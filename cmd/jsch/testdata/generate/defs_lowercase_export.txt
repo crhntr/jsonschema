@@ -1,0 +1,52 @@
+jsch generate --schema schema.json --out ./model --package model --type Catalog
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "$defs": {
+    "widget": {
+      "type": "object",
+      "properties": {
+        "sku":   {"type": "string"},
+        "label": {"type": "string"}
+      },
+      "required": ["sku"]
+    }
+  },
+  "properties": {
+    "featured": {"$ref": "#/$defs/widget"}
+  },
+  "required": ["featured"]
+}
+-- go.mod --
+module example.com/catalogpkg
+
+go 1.26
+-- model/model_test.go --
+package model_test
+
+import (
+	"encoding/json/v2"
+	"testing"
+
+	model "example.com/catalogpkg/model"
+)
+
+// A camelCase / lowercase $defs key must still produce an exported Go
+// type so callers in other packages can name and construct it. This
+// test lives in an external _test package precisely to prove the type
+// is reachable across the package boundary.
+func TestWidget_ExportedAndConstructible(t *testing.T) {
+	c := model.Catalog{
+		Featured: model.Widget{Sku: "abc"},
+	}
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != `{"featured":{"sku":"abc"}}` {
+		t.Errorf("Marshal = %s", out)
+	}
+}

@@ -201,7 +201,11 @@ func buildRefMap(schema *jsonschema.SchemaObject, rootName string) (refMaps, []s
 		if err != nil {
 			return refMaps{}, nil, fmt.Errorf("$defs/%s annotations: %w", k, err)
 		}
-		name := k
+		// Export the type by default so callers in other packages can
+		// name and construct it; the root type referencing it is
+		// exported. A goIdent annotation still wins for authors who
+		// want a different (or deliberately unexported) name.
+		name := exportedIdent(k)
 		if annot.GoIdent != "" {
 			name = annot.GoIdent
 		}

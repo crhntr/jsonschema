@@ -50,7 +50,7 @@ import (
 )
 
 func TestAnchorString_MatchesPattern(t *testing.T) {
-	var a anchorString
+	var a AnchorString
 	if err := json.Unmarshal([]byte(`"good_name"`), &a); err != nil {
 		t.Errorf("Unmarshal: %v", err)
 	}

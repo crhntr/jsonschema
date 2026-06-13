@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"slices"
 )
 
 // parseGoTypeExpr parses a Go type expression string into an ast.Expr.
@@ -56,8 +57,16 @@ func emitStructType(t Type) (*ast.StructType, error) {
 	for _, f := range t.Fields {
 		tagValue := f.JSONName
 		extras := f.JSONTags
-		if !f.Required && len(extras) == 0 {
-			extras = []string{"omitzero"}
+		// Optional fields omit their zero value unless the author
+		// already chose an omit strategy. omitzero is prepended even
+		// when explicit goJSONTags are present (e.g. a format flag),
+		// so an optional time.Time does not serialize as the zero
+		// instant. It must lead the option list because jsonv2
+		// requires the `format` option, when present, to come last.
+		if !f.Required &&
+			!slices.Contains(extras, "omitzero") &&
+			!slices.Contains(extras, "omitempty") {
+			extras = append([]string{"omitzero"}, extras...)
 		}
 		for _, e := range extras {
 			tagValue += "," + e

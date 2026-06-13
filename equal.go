@@ -2,12 +2,11 @@ package jsonschema
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
-
-	"github.com/go-json-experiment/json/jsontext"
 )
 
 // Equal reports whether two JSON values are structurally equivalent

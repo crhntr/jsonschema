@@ -1,0 +1,76 @@
+jsch generate --schema schema.json --out ./model --package model --type Schema
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": ["object", "boolean"],
+  "properties": {
+    "id":    {"type": "string"},
+    "title": {"type": "string"}
+  },
+  "required": ["id"]
+}
+-- go.mod --
+module example.com/typedobj
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+// The object variant of Schema should be a typed struct with the
+// declared properties, not map[string]any.
+func TestSchema_ObjectVariantIsTypedStruct(t *testing.T) {
+	var s Schema
+	if err := json.Unmarshal([]byte(`{"id":"abc","title":"hi"}`), &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	got, ok := s.TypeObject()
+	if !ok {
+		t.Fatalf("TypeObject ok=false, want true")
+	}
+	if got.Id != "abc" {
+		t.Errorf("Id = %q, want abc", got.Id)
+	}
+	if got.Title == nil || *got.Title != "hi" {
+		t.Errorf("Title = %v, want pointer to 'hi'", got.Title)
+	}
+}
+
+func TestSchema_BooleanVariant(t *testing.T) {
+	var s Schema
+	if err := json.Unmarshal([]byte(`true`), &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got, ok := s.TypeBoolean(); !ok || got != true {
+		t.Errorf("TypeBoolean = (%v, %v), want (true, true)", got, ok)
+	}
+}
+
+func TestSchema_RequiredEnforced(t *testing.T) {
+	var s Schema
+	err := json.Unmarshal([]byte(`{"title":"missing id"}`), &s)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want missing-required-field")
+	}
+}
+
+func TestSchema_RoundTripObject(t *testing.T) {
+	in := []byte(`{"id":"x","title":"y"}`)
+	var s Schema
+	if err := json.Unmarshal(in, &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != string(in) {
+		t.Errorf("Marshal = %s, want %s", out, in)
+	}
+}

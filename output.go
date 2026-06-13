@@ -1,11 +1,10 @@
 package jsonschema
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
-
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 )
 
 // Output is a JSON Schema 2020-12 Output Unit (§12.4) plus a Source

@@ -1,0 +1,68 @@
+jsch generate --schema https://json-schema.org/draft/2020-12/schema --overrides overrides.json --out ./model --package model --type Root
+
+exec go vet ./model
+exec go test -count=1 ./model
+
+-- overrides.json --
+{
+  "refs": {
+    "#": {
+      "goIdent": "Schema",
+      "goAdditionalFields": [
+        {"goIdent": "resolved", "goType": "*Schema"},
+        {"goIdent": "dynamic", "goType": "bool"},
+        {"goIdent": "baseURI", "goType": "string"},
+        {"goIdent": "resource", "goType": "*Schema"},
+        {"goIdent": "anchors", "goType": "map[string]*Schema"},
+        {"goIdent": "dynamicAnchors", "goType": "map[string]*Schema"},
+        {"goIdent": "source", "goType": "[]byte"},
+        {"goIdent": "skipValidation", "goType": "bool"}
+      ],
+      "fields": {
+        "type": {"goType": "*any"}
+      }
+    }
+  }
+}
+-- go.mod --
+module example.com/metawith
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"reflect"
+	"testing"
+)
+
+// The override file injects goAdditionalFields onto the meta-schema's
+// composite root so the generated Schema struct carries the resolution
+// metadata fields the package's existing Resolver expects to mutate.
+// This is the load-bearing fixture for the eventual Phase 15 swap.
+func TestSchema_HasResolutionMetadata(t *testing.T) {
+	rt := reflect.TypeOf(Schema{})
+	wantFields := map[string]string{
+		"resolved":       "*model.Schema",
+		"dynamic":        "bool",
+		"baseURI":        "string",
+		"resource":       "*model.Schema",
+		"anchors":        "map[string]*model.Schema",
+		"dynamicAnchors": "map[string]*model.Schema",
+		"source":         "[]uint8",
+		"skipValidation": "bool",
+	}
+	for name, wantType := range wantFields {
+		f, ok := rt.FieldByName(name)
+		if !ok {
+			t.Errorf("Schema missing field %q", name)
+			continue
+		}
+		if f.Type.String() != wantType {
+			t.Errorf("Schema.%s type = %s, want %s", name, f.Type, wantType)
+		}
+		if got := f.Tag.Get("json"); got != "-" {
+			t.Errorf("Schema.%s json tag = %q, want %q", name, got, "-")
+		}
+	}
+}

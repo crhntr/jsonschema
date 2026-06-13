@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,9 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/go-json-experiment/json"
-
 	"github.com/crhntr/jsonschema"
+	gen "github.com/crhntr/jsonschema/internal/generate"
 	"github.com/crhntr/jsonschema/internal/metaschema"
 )
 
@@ -50,7 +52,7 @@ func run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 		}
 		return exitOK
 	case "generate":
-		if err := generate(wd, flagSet.Args()[1:], stdout, stderr); err != nil {
+		if err := generate(ctx, wd, flagSet.Args()[1:], stdout, stderr, client); err != nil {
 			_, _ = io.WriteString(stderr, err.Error()+"\n")
 			return exitError
 		}
@@ -189,7 +191,7 @@ func loadSchema(ctx context.Context, wd, arg string, strict, skipMeta bool, clie
 		return nil, err
 	}
 	if _, err := r.Load(uri, body); err != nil {
-		return nil, fmt.Errorf("load schema: %w", err)
+		return nil, positionJSONError(arg, body, err, "load schema")
 	}
 	// The meta-schema validates itself, but routing it through
 	// the pre-flight is wasted work and produces noisier output
@@ -276,18 +278,18 @@ func schemaSource(ctx context.Context, wd, arg string, client *http.Client) (uri
 		path := strings.TrimPrefix(arg, "file://")
 		buf, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
-			return "", nil, err
+			return "", nil, fmt.Errorf("read schema %s: %w", arg, err)
 		}
 		return arg, buf, nil
 	default:
 		path := filepath.Clean(filepath.Join(wd, arg))
 		buf, err := os.ReadFile(path)
 		if err != nil {
-			return "", nil, err
+			return "", nil, fmt.Errorf("read schema %s: %w", arg, err)
 		}
 		abs, err := filepath.Abs(path)
 		if err != nil {
-			return "", nil, err
+			return "", nil, fmt.Errorf("resolve schema path %s: %w", arg, err)
 		}
 		return "file://" + abs, buf, nil
 	}
@@ -296,6 +298,30 @@ func schemaSource(ctx context.Context, wd, arg string, client *http.Client) (uri
 // embeddedBytes returns the bytes of an embedded meta-schema
 // document keyed by its canonical URL, or false if the URL is not
 // one we ship.
+
+// positionJSONError reformats a JSON decoding error as
+// `name:line:col: <msg>` when err carries a *jsontext.SyntacticError or
+// *json.SemanticError (both expose ByteOffset). For SyntacticError the
+// message is rebuilt from the underlying Err + JSONPointer so the
+// trailing "after offset N" clause doesn't duplicate the position
+// already encoded in the name:line:col prefix. When no positioned
+// error is present, the fallback prefix is used as a plain wrap. The
+// offset / line / column come from jsonschema.NewSource, the same
+// coordinate system Validate uses for instance failures.
+func positionJSONError(name string, body []byte, err error, fallback string) error {
+	if sErr, ok := errors.AsType[*jsontext.SyntacticError](err); ok {
+		s := jsonschema.NewSource(name, body, sErr.ByteOffset)
+		if sErr.JSONPointer != "" {
+			return fmt.Errorf("%s:%d:%d: jsontext: %w within %q", s.Name, s.Line, s.Column, sErr.Err, sErr.JSONPointer)
+		}
+		return fmt.Errorf("%s:%d:%d: jsontext: %w", s.Name, s.Line, s.Column, sErr.Err)
+	}
+	if smErr, ok := errors.AsType[*json.SemanticError](err); ok {
+		s := jsonschema.NewSource(name, body, smErr.ByteOffset)
+		return fmt.Errorf("%s:%d:%d: %w", s.Name, s.Line, s.Column, smErr)
+	}
+	return fmt.Errorf("%s: %w", fallback, err)
+}
 
 // readInstance returns the bytes and a display name for an instance
 // argument. "-" means stdin.
@@ -309,17 +335,60 @@ func readInstance(wd, arg string, stdin io.Reader) ([]byte, string, error) {
 	}
 	buf, err := os.ReadFile(filepath.Clean(filepath.Join(wd, arg)))
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("read instance %s: %w", arg, err)
 	}
 	return buf, arg, nil
 }
 
-func generate(wd string, args []string, stdout, stderr io.Writer) error {
-	var schemaPath string
+func generate(ctx context.Context, wd string, args []string, stdout, stderr io.Writer, client *http.Client) error {
+	var (
+		schemaPath    string
+		overridesPath string
+		outDir        string
+		packageName   string
+		typeName      string
+	)
 	flagSet := flag.NewFlagSet("generate", flag.ContinueOnError)
-	flagSet.StringVar(&schemaPath, "schema", "", "path or URL of a JSON Schema document")
+	flagSet.StringVar(&schemaPath, "schema", "", "path or URL of a JSON Schema document (required)")
+	flagSet.StringVar(&overridesPath, "overrides", "", "path to a JSON sidecar file of go-codegen overrides keyed by JSON pointer")
+	flagSet.StringVar(&outDir, "out", ".", "directory to write the generated Go file into")
+	flagSet.StringVar(&packageName, "package", "", "name of the generated package (defaults to the basename of --out)")
+	flagSet.StringVar(&typeName, "type", "Root", "exported Go identifier for the root schema type")
 	if err := flagSet.Parse(args); err != nil {
 		return err
+	}
+	if schemaPath == "" {
+		return fmt.Errorf("--schema is required")
+	}
+	root, err := loadSchema(ctx, wd, schemaPath, false, true, client)
+	if err != nil {
+		return err
+	}
+	var overrides gen.Overrides
+	if overridesPath != "" {
+		buf, err := os.ReadFile(filepath.Join(wd, overridesPath))
+		if err != nil {
+			return fmt.Errorf("read overrides: %w", err)
+		}
+		overrides, err = gen.ParseOverrides(buf)
+		if err != nil {
+			return positionJSONError(overridesPath, buf, err, "parse overrides "+overridesPath)
+		}
+	}
+	if packageName == "" {
+		packageName = filepath.Base(filepath.Clean(filepath.Join(wd, outDir)))
+	}
+	src, err := gen.GenerateFromSchema(root, typeName, packageName, overrides)
+	if err != nil {
+		return err
+	}
+	outAbs := filepath.Join(wd, outDir)
+	if err := os.MkdirAll(outAbs, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", outAbs, err)
+	}
+	outFile := filepath.Join(outAbs, strings.ToLower(typeName)+".gen.go")
+	if err := os.WriteFile(outFile, src, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", outFile, err)
 	}
 	return nil
 }

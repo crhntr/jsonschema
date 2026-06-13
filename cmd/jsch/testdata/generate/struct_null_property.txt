@@ -1,0 +1,77 @@
+jsch generate --schema schema.json --out ./model --package model --type Tagged
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "properties": {
+    "name":   {"type": "string"},
+    "marker": {"type": "null"}
+  },
+  "required": ["name", "marker"]
+}
+-- go.mod --
+module example.com/taggedpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+// The "marker" property is wire-only: present and null on the wire,
+// invisible to Go callers.
+func TestTagged_NoMarkerField(t *testing.T) {
+	rt := reflect.TypeOf(Tagged{})
+	for i := 0; i < rt.NumField(); i++ {
+		if strings.EqualFold(rt.Field(i).Name, "Marker") {
+			t.Errorf("Tagged has a Marker field; null-only property should be wire-only")
+		}
+	}
+}
+
+func TestTagged_RoundTrip(t *testing.T) {
+	in := []byte(`{"name":"alice","marker":null}`)
+	var v Tagged
+	if err := json.Unmarshal(in, &v); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if v.Name != "alice" {
+		t.Errorf("Name = %q, want alice", v.Name)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != `{"name":"alice","marker":null}` {
+		t.Errorf("Marshal = %s, want %s", out, `{"name":"alice","marker":null}`)
+	}
+}
+
+func TestTagged_MissingMarker(t *testing.T) {
+	var v Tagged
+	err := json.Unmarshal([]byte(`{"name":"alice"}`), &v)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want missing-required-field error")
+	}
+	if !strings.Contains(err.Error(), `"marker"`) {
+		t.Errorf("err = %q, want mention of marker", err)
+	}
+}
+
+func TestTagged_NonNullMarker(t *testing.T) {
+	var v Tagged
+	err := json.Unmarshal([]byte(`{"name":"alice","marker":"oops"}`), &v)
+	if err == nil {
+		t.Fatalf("Unmarshal: err = nil, want must-be-null error")
+	}
+	if !strings.Contains(err.Error(), "must be null") {
+		t.Errorf("err = %q, want must-be-null message", err)
+	}
+}

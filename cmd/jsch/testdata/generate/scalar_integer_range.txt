@@ -1,0 +1,51 @@
+jsch generate --schema schema.json --out ./model --package model --type Age
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "integer",
+  "minimum": 1,
+  "maximum": 150
+}
+-- go.mod --
+module example.com/agepkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+func TestAge_RoundTrip(t *testing.T) {
+	in := []byte(`42`)
+	var a Age
+	if err := json.Unmarshal(in, &a); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if a != 42 {
+		t.Errorf("Unmarshal = %d, want 42", int(a))
+	}
+	out, err := json.Marshal(a)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != "42" {
+		t.Errorf("Marshal = %s, want 42", out)
+	}
+}
+
+// minimum / maximum are validation concerns enforced by
+// jsonschema.Validate, not the generated unmarshaler. Out-of-range
+// values decode structurally without error.
+func TestAge_NoRangeValidation(t *testing.T) {
+	for _, in := range []string{`0`, `200`} {
+		var a Age
+		if err := json.Unmarshal([]byte(in), &a); err != nil {
+			t.Errorf("Unmarshal(%s): %v", in, err)
+		}
+	}
+}

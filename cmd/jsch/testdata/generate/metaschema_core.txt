@@ -1,0 +1,86 @@
+jsch generate --schema meta/core.json --out ./model --package model --type Core
+
+exec go vet ./model
+exec go test -count=1 ./model
+
+-- meta/core.json --
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://json-schema.org/draft/2020-12/meta/core",
+    "$dynamicAnchor": "meta",
+    "title": "Core vocabulary meta-schema",
+    "type": ["object", "boolean"],
+    "properties": {
+        "$id": {
+            "$ref": "#/$defs/uriReferenceString",
+            "$comment": "Non-empty fragments not allowed.",
+            "pattern": "^[^#]*#?$"
+        },
+        "$schema": { "$ref": "#/$defs/uriString" },
+        "$ref": { "$ref": "#/$defs/uriReferenceString" },
+        "$anchor": { "$ref": "#/$defs/anchorString" },
+        "$dynamicRef": { "$ref": "#/$defs/uriReferenceString" },
+        "$dynamicAnchor": { "$ref": "#/$defs/anchorString" },
+        "$comment": { "type": "string" }
+    },
+    "$defs": {
+        "anchorString": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][-A-Za-z0-9._]*$"
+        },
+        "uriString": {
+            "type": "string"
+        },
+        "uriReferenceString": {
+            "type": "string"
+        }
+    }
+}
+-- go.mod --
+module example.com/metacore
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+// AnchorString is a plain string alias: the pattern keyword is a
+// validation concern enforced by jsonschema.Validate, not the
+// generated unmarshaler. Both matching and non-matching values decode
+// structurally without error.
+func TestAnchorString_StructuralDecode(t *testing.T) {
+	for _, in := range []string{`"good_name"`, `"123-bad"`} {
+		var a AnchorString
+		if err := json.Unmarshal([]byte(in), &a); err != nil {
+			t.Errorf("Unmarshal(%s): %v", in, err)
+		}
+	}
+}
+
+func TestCore_BooleanVariant(t *testing.T) {
+	var c Core
+	if err := json.Unmarshal([]byte(`true`), &c); err != nil {
+		t.Fatalf("Unmarshal(true): %v", err)
+	}
+	if got, ok := c.TypeBoolean(); !ok || got != true {
+		t.Errorf("TypeBoolean = (%v, %v), want (true, true)", got, ok)
+	}
+}
+
+func TestCore_ObjectVariant(t *testing.T) {
+	var c Core
+	if err := json.Unmarshal([]byte(`{"$id":"https://example.com/x"}`), &c); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	got, ok := c.TypeObject()
+	if !ok {
+		t.Fatalf("TypeObject ok=false, want true")
+	}
+	if got.Id == nil || *got.Id != "https://example.com/x" {
+		t.Errorf("Id = %v, want pointer to 'https://example.com/x'", got.Id)
+	}
+}

@@ -1,0 +1,44 @@
+jsch generate --schema schema.json --out ./model --package model --type Schema
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": ["object", "boolean"],
+  "additionalProperties": {"type": "string"}
+}
+-- go.mod --
+module example.com/schemapkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+func TestSchema_RoundTripBool(t *testing.T) {
+	var s Schema
+	if err := json.Unmarshal([]byte(`true`), &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got, ok := s.TypeBoolean(); !ok || got != true {
+		t.Errorf("TypeBoolean = (%v, %v), want (true, true)", got, ok)
+	}
+}
+
+func TestSchema_RoundTripObject(t *testing.T) {
+	var s Schema
+	if err := json.Unmarshal([]byte(`{"a":"hello"}`), &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	got, ok := s.TypeObject()
+	if !ok {
+		t.Fatalf("TypeObject ok = false, want true")
+	}
+	if got["a"] != "hello" {
+		t.Errorf("got[a] = %q, want %q", got["a"], "hello")
+	}
+}

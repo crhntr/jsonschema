@@ -1,0 +1,75 @@
+jsch generate --schema schema.json --out ./model --package model --type Event
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type":       "string",
+      "goJSONTags": ["omitempty"]
+    },
+    "created": {
+      "type":       "string",
+      "format":     "date-time",
+      "goType":     "time.Time",
+      "goImports":  ["time"],
+      "goJSONTags": ["format:RFC3339Nano"]
+    }
+  },
+  "required": ["created"]
+}
+-- go.mod --
+module example.com/eventpkg
+
+go 1.26
+
+require ()
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"reflect"
+	"testing"
+	"time"
+)
+
+func TestEvent_FieldTypes(t *testing.T) {
+	rt := reflect.TypeOf(Event{})
+	createdField, ok := rt.FieldByName("Created")
+	if !ok {
+		t.Fatalf("Event has no Created field")
+	}
+	if createdField.Type != reflect.TypeOf(time.Time{}) {
+		t.Errorf("Created type = %v, want time.Time", createdField.Type)
+	}
+	wantTag := `json:"created,format:RFC3339Nano"`
+	if string(createdField.Tag) != wantTag {
+		t.Errorf("Created tag = %q, want %q", string(createdField.Tag), wantTag)
+	}
+
+	idField, ok := rt.FieldByName("Id")
+	if !ok {
+		t.Fatalf("Event has no Id field")
+	}
+	wantIDTag := `json:"id,omitempty"`
+	if string(idField.Tag) != wantIDTag {
+		t.Errorf("Id tag = %q, want %q", string(idField.Tag), wantIDTag)
+	}
+}
+
+func TestEvent_RoundTrip(t *testing.T) {
+	in := []byte(`{"created":"2026-04-26T15:00:00Z","id":"abc"}`)
+	var e Event
+	if err := json.Unmarshal(in, &e); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if e.Id == nil || *e.Id != "abc" {
+		t.Errorf("Id = %v, want pointer to \"abc\"", e.Id)
+	}
+	if e.Created.Year() != 2026 {
+		t.Errorf("Created.Year = %d, want 2026", e.Created.Year())
+	}
+}

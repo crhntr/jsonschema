@@ -1,13 +1,12 @@
 package jsonptr_test
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"math/big"
 	"strings"
 	"testing"
-
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 
 	"github.com/crhntr/jsonschema"
 	"github.com/crhntr/jsonschema/jsonptr"

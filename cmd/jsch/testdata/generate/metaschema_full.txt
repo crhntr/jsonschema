@@ -1,0 +1,79 @@
+jsch generate --schema https://json-schema.org/draft/2020-12/schema --out ./model --package model --type Schema
+
+exec go vet ./model
+exec go test -count=1 ./model
+
+-- go.mod --
+module example.com/metafull
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"reflect"
+	"testing"
+)
+
+// The full 2020-12 meta-schema collapses every vocabulary's
+// keywords into a single SchemaObject via the Phase 10
+// allOf-merge + Phase 14 cross-document $ref resolution.
+func TestSchema_MergedVocabularies(t *testing.T) {
+	rt := reflect.TypeOf(SchemaObject{})
+	expectedFields := []string{
+		// Core
+		"Id", "Schema", "Ref", "Anchor", "DynamicRef", "DynamicAnchor", "Defs", "Vocabulary", "Comment",
+		// Applicator
+		"AllOf", "AnyOf", "OneOf", "Not", "If", "Then", "Else",
+		"Properties", "PatternProperties", "AdditionalProperties",
+		"Items", "PrefixItems", "Contains",
+		"DependentSchemas",
+		// Validation
+		"Type", "Enum", "Const",
+		"MultipleOf", "Maximum", "Minimum",
+		"MaxLength", "MinLength", "Pattern",
+		"MaxItems", "MinItems", "UniqueItems",
+		"Required", "DependentRequired",
+		// Meta-data
+		"Title", "Description", "Default", "Deprecated", "ReadOnly", "WriteOnly", "Examples",
+		// Format
+		"Format",
+		// Content
+		"ContentEncoding", "ContentMediaType", "ContentSchema",
+	}
+	got := make(map[string]bool, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		got[rt.Field(i).Name] = true
+	}
+	for _, f := range expectedFields {
+		if !got[f] {
+			t.Errorf("SchemaObject missing field %q", f)
+		}
+	}
+}
+
+func TestSchema_BooleanVariant(t *testing.T) {
+	var s Schema
+	if err := json.Unmarshal([]byte(`true`), &s); err != nil {
+		t.Fatalf("Unmarshal(true): %v", err)
+	}
+	if got, ok := s.TypeBoolean(); !ok || got != true {
+		t.Errorf("TypeBoolean = (%v, %v), want (true, true)", got, ok)
+	}
+}
+
+func TestSchema_ObjectVariant(t *testing.T) {
+	in := []byte(`{"type":"string","minLength":3}`)
+	var s Schema
+	if err := json.Unmarshal(in, &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	obj, ok := s.TypeObject()
+	if !ok {
+		t.Fatalf("TypeObject ok=false, want true")
+	}
+	if obj.MinLength == nil {
+		t.Errorf("MinLength = nil, want non-nil")
+	}
+}

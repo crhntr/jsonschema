@@ -9,11 +9,10 @@ package metaschema
 
 import (
 	"embed"
+	"encoding/json/v2"
 	"fmt"
 	"io/fs"
 	"strings"
-
-	"github.com/go-json-experiment/json"
 
 	"github.com/crhntr/jsonschema"
 )

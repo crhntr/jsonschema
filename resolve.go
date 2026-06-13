@@ -2,6 +2,8 @@ package jsonschema
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,9 +11,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 
 	"github.com/crhntr/jsonschema/jsonptr"
 )
@@ -762,7 +761,7 @@ func (m *Schema) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (js
 		return "", live, nil
 	}
 	if ptr == "" {
-		b, _ := m.TypeBool()
+		b, _ := m.TypeBoolean()
 		return "", b, nil
 	}
 	return ptr, nil, fmt.Errorf("cannot descend into boolean schema at %q", ptr)

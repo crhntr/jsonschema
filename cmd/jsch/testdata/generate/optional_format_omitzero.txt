@@ -1,0 +1,52 @@
+jsch generate --schema schema.json --out ./model --package model --type Event
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "properties": {
+    "createdAt": {
+      "type":      "string",
+      "format":    "date-time",
+      "goType":    "time.Time",
+      "goImports": ["time"],
+      "goJSONTags": ["format:RFC3339"]
+    }
+  }
+}
+-- go.mod --
+module example.com/eventpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+	"time"
+)
+
+// An optional field with an explicit goType + format tag must still
+// get omitzero, and the emitted tag must be valid jsonv2 (the format
+// option has to be last). A zero Event therefore marshals without the
+// createdAt member.
+func TestEvent_OptionalFormatOmitsZero(t *testing.T) {
+	out, err := json.Marshal(Event{})
+	if err != nil {
+		t.Fatalf("Marshal zero: %v", err)
+	}
+	if string(out) != `{}` {
+		t.Errorf("Marshal zero = %s, want {}", out)
+	}
+
+	e := Event{CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}
+	out, err = json.Marshal(e)
+	if err != nil {
+		t.Fatalf("Marshal set: %v", err)
+	}
+	if string(out) != `{"createdAt":"2026-01-02T03:04:05Z"}` {
+		t.Errorf("Marshal set = %s", out)
+	}
+}

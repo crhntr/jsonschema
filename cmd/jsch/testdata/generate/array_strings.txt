@@ -1,0 +1,45 @@
+jsch generate --schema schema.json --out ./model --package model --type Tags
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "array",
+  "items": {"type": "string"}
+}
+-- go.mod --
+module example.com/tagspkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+func TestTags_RoundTrip(t *testing.T) {
+	in := []byte(`["a","b","c"]`)
+	var tags Tags
+	if err := json.Unmarshal(in, &tags); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if len(tags) != 3 || tags[0] != "a" || tags[2] != "c" {
+		t.Errorf("got %#v, want [a b c]", tags)
+	}
+	out, err := json.Marshal(tags)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != `["a","b","c"]` {
+		t.Errorf("Marshal = %s, want %s", out, `["a","b","c"]`)
+	}
+}
+
+func TestTags_NonStringElement(t *testing.T) {
+	var tags Tags
+	if err := json.Unmarshal([]byte(`[1]`), &tags); err == nil {
+		t.Fatalf("Unmarshal: err = nil, want type error")
+	}
+}

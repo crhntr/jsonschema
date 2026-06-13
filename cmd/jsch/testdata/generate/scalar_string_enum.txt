@@ -1,0 +1,46 @@
+jsch generate --schema schema.json --out ./model --package model --type Color
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "string",
+  "enum": ["red", "green", "blue"]
+}
+-- go.mod --
+module example.com/colorpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+func TestColor_RoundTrip(t *testing.T) {
+	for _, want := range []string{"red", "green", "blue"} {
+		var c Color
+		if err := json.Unmarshal([]byte(`"`+want+`"`), &c); err != nil {
+			t.Errorf("Unmarshal(%q): %v", want, err)
+			continue
+		}
+		if string(c) != want {
+			t.Errorf("got %q, want %q", string(c), want)
+		}
+	}
+}
+
+// enum is a validation concern enforced by jsonschema.Validate, not
+// the generated unmarshaler. A value outside the enum decodes
+// structurally without error.
+func TestColor_NoEnumValidation(t *testing.T) {
+	var c Color
+	if err := json.Unmarshal([]byte(`"yellow"`), &c); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if string(c) != "yellow" {
+		t.Errorf("got %q, want %q", string(c), "yellow")
+	}
+}

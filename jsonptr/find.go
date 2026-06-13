@@ -2,11 +2,10 @@ package jsonptr
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"strconv"
-
-	"github.com/go-json-experiment/json/jsontext"
 )
 
 // Find returns the JSON value located at p within data. The returned value
@@ -52,7 +51,7 @@ func descend(dec *jsontext.Decoder, ptr Pointer, p Pointer) error {
 
 func descendObject(dec *jsontext.Decoder, target string, p Pointer) error {
 	if _, err := dec.ReadToken(); err != nil { // consume '{'
-		return err
+		return fmt.Errorf("jsonptr %q: read '{' before member %q: %w", p, target, err)
 	}
 	for {
 		if dec.PeekKind() == jsontext.KindEndObject {
@@ -60,13 +59,13 @@ func descendObject(dec *jsontext.Decoder, target string, p Pointer) error {
 		}
 		key, err := dec.ReadToken()
 		if err != nil {
-			return err
+			return fmt.Errorf("jsonptr %q: read key while seeking %q: %w", p, target, err)
 		}
 		if key.String() == target {
 			return nil
 		}
 		if _, err := dec.ReadValue(); err != nil {
-			return err
+			return fmt.Errorf("jsonptr %q: skip value at key %q while seeking %q: %w", p, key.String(), target, err)
 		}
 	}
 }
@@ -80,7 +79,7 @@ func descendArray(dec *jsontext.Decoder, target string, p Pointer) error {
 		return fmt.Errorf("jsonptr %q: array index %d is negative", p, idx)
 	}
 	if _, err := dec.ReadToken(); err != nil { // consume '['
-		return err
+		return fmt.Errorf("jsonptr %q: read '[' before index %d: %w", p, idx, err)
 	}
 	for i := 0; ; i++ {
 		if dec.PeekKind() == jsontext.KindEndArray {
@@ -93,7 +92,7 @@ func descendArray(dec *jsontext.Decoder, target string, p Pointer) error {
 			if err == io.EOF {
 				return fmt.Errorf("jsonptr %q: unexpected EOF", p)
 			}
-			return err
+			return fmt.Errorf("jsonptr %q: skip element %d while seeking index %d: %w", p, i, idx, err)
 		}
 	}
 }

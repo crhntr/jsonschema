@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,9 +17,33 @@ import (
 )
 
 func Test(t *testing.T) {
-	fileHandler := http.FileServerFS(os.DirFS(filepath.FromSlash("../../testdata/schema/example.com")))
+	// Serve the entire testdata/schema tree. The rewriteTransport
+	// below encodes the original Host as the first path segment so
+	// e.g. https://json-schema.org/draft/2020-12/schema resolves to
+	// testdata/schema/json-schema.org/draft/2020-12/schema and
+	// https://example.com/refs/embedded.json to
+	// testdata/schema/example.com/refs/embedded.json. When the
+	// requested path has no extension and the literal file is not
+	// present, the handler falls back to <path>.json so URLs
+	// published without a suffix (the JSON Schema convention)
+	// resolve to the on-disk fixture.
+	rootFS := os.DirFS(filepath.FromSlash("../../testdata/schema"))
+	fileHandler := http.FileServerFS(rootFS)
 	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
 		res.Header().Set("Content-Type", "application/schema+json")
+		clean := strings.TrimPrefix(req.URL.Path, "/")
+		if filepath.Ext(clean) == "" {
+			if _, err := fs.Stat(rootFS, clean); err != nil {
+				if _, err := fs.Stat(rootFS, clean+".json"); err == nil {
+					req2 := *req
+					u := *req.URL
+					u.Path = req.URL.Path + ".json"
+					req2.URL = &u
+					fileHandler.ServeHTTP(res, &req2)
+					return
+				}
+			}
+		}
 		fileHandler.ServeHTTP(res, req)
 	}))
 	t.Cleanup(server.Close)
@@ -37,6 +62,19 @@ func Test(t *testing.T) {
 	e.Cmds = script.DefaultCmds()
 	e.Conds = script.DefaultConds()
 
+	// GOEXPERIMENT=jsonv2 makes encoding/json/v2 + encoding/json/jsontext
+	// resolvable to "exec go test" / "exec go build" inside fixtures.
+	scriptEnv := []string{
+		"GOEXPERIMENT=jsonv2",
+		"HOME=" + os.Getenv("HOME"),
+		"PATH=" + os.Getenv("PATH"),
+	}
+	for _, k := range []string{"GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT"} {
+		if v := os.Getenv(k); v != "" {
+			scriptEnv = append(scriptEnv, k+"="+v)
+		}
+	}
+
 	e.Cmds["jsch"] = script.Command(script.CmdUsage{
 		Summary: "jsch",
 		Args:    "",
@@ -52,10 +90,10 @@ func Test(t *testing.T) {
 	})
 
 	t.Run("validate", func(t *testing.T) {
-		scripttest.Test(t, t.Context(), e, nil, "testdata/validate/*.txt")
+		scripttest.Test(t, t.Context(), e, scriptEnv, "testdata/validate/*.txt")
 	})
 	t.Run("generate", func(t *testing.T) {
-		scripttest.Test(t, t.Context(), e, nil, "testdata/generate/*.txt")
+		scripttest.Test(t, t.Context(), e, scriptEnv, "testdata/generate/*.txt")
 	})
 }
 
@@ -65,11 +103,16 @@ type rewriteTransport struct {
 }
 
 func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Encode the original host as the first path segment so the
+	// shared file server can route between schema vendors
+	// (example.com, json-schema.org, etc.) without a Host-aware
+	// router.
 	r2 := req.Clone(req.Context())
+	originalHost := req.URL.Host
 	r2.URL = &url.URL{
 		Scheme:   "http",
 		Host:     rt.target,
-		Path:     req.URL.Path,
+		Path:     "/" + originalHost + req.URL.Path,
 		RawQuery: req.URL.RawQuery,
 	}
 	r2.Host = rt.target

@@ -1,0 +1,54 @@
+jsch generate --schema schema.json --out ./model --package model --type Tree
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "object",
+  "$defs": {
+    "Node": {
+      "type": "object",
+      "properties": {
+        "value":    {"type": "string"},
+        "children": {"type": "array", "items": {"$ref": "#/$defs/Node"}}
+      },
+      "required": ["value"]
+    }
+  },
+  "properties": {
+    "root": {"$ref": "#/$defs/Node"}
+  },
+  "required": ["root"]
+}
+-- go.mod --
+module example.com/treepkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+func TestTree_RoundTrip(t *testing.T) {
+	in := []byte(`{"root":{"children":[{"value":"a"},{"value":"b"}],"value":"root"}}`)
+	var tr Tree
+	if err := json.Unmarshal(in, &tr); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if tr.Root.Value != "root" {
+		t.Errorf("Root.Value = %q, want root", tr.Root.Value)
+	}
+	if len(tr.Root.Children) != 2 || tr.Root.Children[0].Value != "a" {
+		t.Errorf("Root.Children = %#v", tr.Root.Children)
+	}
+	out, err := json.Marshal(tr)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != `{"root":{"children":[{"value":"a"},{"value":"b"}],"value":"root"}}` {
+		t.Errorf("Marshal = %s", out)
+	}
+}

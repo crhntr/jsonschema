@@ -1,0 +1,44 @@
+jsch generate --schema schema.json --out ./model --package model --type Slug
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "string",
+  "pattern": "^[a-z][a-z0-9-]*$"
+}
+-- go.mod --
+module example.com/slugpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+func TestSlug_Match(t *testing.T) {
+	var s Slug
+	if err := json.Unmarshal([]byte(`"hello-world"`), &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if string(s) != "hello-world" {
+		t.Errorf("got %q, want %q", string(s), "hello-world")
+	}
+}
+
+// The pattern keyword is a validation concern enforced by
+// jsonschema.Validate, not the generated unmarshaler. A non-matching
+// value therefore decodes structurally without error — the caller is
+// expected to validate the bytes before unmarshaling.
+func TestSlug_NoValidationOnUnmarshal(t *testing.T) {
+	var s Slug
+	if err := json.Unmarshal([]byte(`"Hello World"`), &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if string(s) != "Hello World" {
+		t.Errorf("got %q, want %q", string(s), "Hello World")
+	}
+}

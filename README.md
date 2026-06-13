@@ -1,7 +1,7 @@
 # jsonschema
 
 A spec-compliant JSON Schema 2020-12 toolkit for Go, built on
-[`github.com/go-json-experiment/json`](https://github.com/go-json-experiment/json).
+[`encoding/json/v2`](https://pkg.go.dev/encoding/json/v2).
 
 ## Status
 

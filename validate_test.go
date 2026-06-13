@@ -2,6 +2,8 @@ package jsonschema_test
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"flag"
 	"net/http"
 	"net/http/httptest"
@@ -12,9 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 
 	"github.com/crhntr/jsonschema"
 )

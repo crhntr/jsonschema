@@ -1,0 +1,87 @@
+{
+  "_comment": "Sidecar overrides used by Phase 15 to replace the hand-rolled Schema with the generator's output. Drives resolution metadata onto Schema via goAdditionalFields and pins each SchemaObject field to the precise Go type the resolver / validator depend on (mostly *Schema, []*Schema, jsontext.Value).",
+  "jsonPackage": "experiment",
+  "refs": {
+    "#": {
+      "goIdent": "Schema",
+      "goAdditionalFields": [
+        {"goIdent": "resolved", "goType": "*Schema"},
+        {"goIdent": "dynamic", "goType": "bool"},
+        {"goIdent": "baseURI", "goType": "string"},
+        {"goIdent": "resource", "goType": "*Schema"},
+        {"goIdent": "anchors", "goType": "map[string]*Schema"},
+        {"goIdent": "dynamicAnchors", "goType": "map[string]*Schema"},
+        {"goIdent": "source", "goType": "[]byte"},
+        {"goIdent": "skipValidation", "goType": "bool"}
+      ],
+      "fields": {
+        "$id":            {"goIdent": "ID", "goType": "string"},
+        "$schema":        {"goType": "string"},
+        "$ref":           {"goType": "string"},
+        "$anchor":        {"goType": "string"},
+        "$dynamicRef":    {"goType": "string"},
+        "$dynamicAnchor": {"goType": "string"},
+        "$comment":       {"goType": "string"},
+        "$defs":          {"goType": "map[string]*Schema"},
+        "$vocabulary":    {"goType": "map[string]bool"},
+
+        "if":   {"goType": "*Schema"},
+        "then": {"goType": "*Schema"},
+        "else": {"goType": "*Schema"},
+        "not":  {"goType": "*Schema"},
+
+        "allOf": {"goType": "[]*Schema"},
+        "anyOf": {"goType": "[]*Schema"},
+        "oneOf": {"goType": "[]*Schema"},
+
+        "properties":            {"goType": "map[string]*Schema"},
+        "patternProperties":     {"goType": "map[string]*Schema"},
+        "additionalProperties":  {"goType": "*Schema"},
+        "unevaluatedProperties": {"goType": "*Schema"},
+        "propertyNames":         {"goType": "*Schema"},
+        "dependentRequired":     {"goType": "map[string][]string"},
+        "dependentSchemas":      {"goType": "map[string]*Schema"},
+        "dependencies":          {"goType": "map[string]*Dependency"},
+
+        "title":            {"goType": "string"},
+        "description":      {"goType": "string"},
+        "deprecated":       {"goType": "bool"},
+        "readOnly":         {"goType": "bool"},
+        "writeOnly":        {"goType": "bool"},
+        "examples":         {"goType": "[]jsontext.Value", "goImports": ["github.com/go-json-experiment/json/jsontext"]},
+
+        "prefixItems":      {"goType": "[]*Schema"},
+        "items":            {"goType": "*Schema"},
+        "unevaluatedItems": {"goType": "*Schema"},
+        "contains":         {"goType": "*Schema"},
+
+        "minContains": {"goType": "jsontext.Value"},
+        "maxContains": {"goType": "jsontext.Value"},
+
+        "type":   {"goType": "*Type"},
+        "enum":   {"goType": "[]jsontext.Value"},
+        "const":  {"goType": "jsontext.Value"},
+        "default": {"goType": "jsontext.Value"},
+
+        "multipleOf":       {"goType": "jsontext.Value"},
+        "maximum":          {"goType": "jsontext.Value"},
+        "exclusiveMaximum": {"goType": "jsontext.Value"},
+        "minimum":          {"goType": "jsontext.Value"},
+        "exclusiveMinimum": {"goType": "jsontext.Value"},
+        "maxLength":        {"goType": "jsontext.Value"},
+        "minLength":        {"goType": "jsontext.Value"},
+
+        "maxItems":      {"goType": "jsontext.Value"},
+        "minItems":      {"goType": "jsontext.Value"},
+        "uniqueItems":   {"goType": "bool"},
+
+        "maxProperties": {"goType": "jsontext.Value"},
+        "minProperties": {"goType": "jsontext.Value"},
+        "required":      {"goType": "[]string"},
+
+        "format":  {"goType": "string"},
+        "pattern": {"goType": "string"}
+      }
+    }
+  }
+}

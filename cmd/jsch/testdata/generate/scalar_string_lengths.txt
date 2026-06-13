@@ -1,0 +1,51 @@
+jsch generate --schema schema.json --out ./model --package model --type Username
+
+exec go test -count=1 ./model
+
+-- schema.json --
+{
+  "type": "string",
+  "minLength": 3,
+  "maxLength": 12
+}
+-- go.mod --
+module example.com/userpkg
+
+go 1.26
+-- model/model_test.go --
+package model
+
+import (
+	"encoding/json/v2"
+	"testing"
+)
+
+func TestUsername_RoundTrip(t *testing.T) {
+	in := []byte(`"alice"`)
+	var u Username
+	if err := json.Unmarshal(in, &u); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if u != "alice" {
+		t.Errorf("Unmarshal = %q, want %q", string(u), "alice")
+	}
+	out, err := json.Marshal(u)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(out) != `"alice"` {
+		t.Errorf("Marshal = %s, want %s", out, `"alice"`)
+	}
+}
+
+// minLength / maxLength are validation concerns enforced by
+// jsonschema.Validate, not the generated unmarshaler. Out-of-bounds
+// values decode structurally without error.
+func TestUsername_NoLengthValidation(t *testing.T) {
+	for _, in := range []string{`"hi"`, `"abcdefghijklmnop"`} {
+		var u Username
+		if err := json.Unmarshal([]byte(in), &u); err != nil {
+			t.Errorf("Unmarshal(%s): %v", in, err)
+		}
+	}
+}

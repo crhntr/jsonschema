@@ -16,7 +16,6 @@ package model
 
 import (
 	"encoding/json/v2"
-	"strings"
 	"testing"
 )
 
@@ -33,13 +32,15 @@ func TestColor_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestColor_NotInEnum(t *testing.T) {
+// enum is a validation concern enforced by jsonschema.Validate, not
+// the generated unmarshaler. A value outside the enum decodes
+// structurally without error.
+func TestColor_NoEnumValidation(t *testing.T) {
 	var c Color
-	err := json.Unmarshal([]byte(`"yellow"`), &c)
-	if err == nil {
-		t.Fatalf("Unmarshal: err = nil, want enum rejection")
+	if err := json.Unmarshal([]byte(`"yellow"`), &c); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not in enum") {
-		t.Errorf("err = %q, want enum-rejection message", err)
+	if string(c) != "yellow" {
+		t.Errorf("got %q, want %q", string(c), "yellow")
 	}
 }

@@ -45,18 +45,19 @@ package model
 
 import (
 	"encoding/json/v2"
-	"strings"
 	"testing"
 )
 
-func TestAnchorString_MatchesPattern(t *testing.T) {
-	var a AnchorString
-	if err := json.Unmarshal([]byte(`"good_name"`), &a); err != nil {
-		t.Errorf("Unmarshal: %v", err)
-	}
-	err := json.Unmarshal([]byte(`"123-bad"`), &a)
-	if err == nil || !strings.Contains(err.Error(), "does not match pattern") {
-		t.Errorf("err = %v, want pattern rejection", err)
+// AnchorString is a plain string alias: the pattern keyword is a
+// validation concern enforced by jsonschema.Validate, not the
+// generated unmarshaler. Both matching and non-matching values decode
+// structurally without error.
+func TestAnchorString_StructuralDecode(t *testing.T) {
+	for _, in := range []string{`"good_name"`, `"123-bad"`} {
+		var a AnchorString
+		if err := json.Unmarshal([]byte(in), &a); err != nil {
+			t.Errorf("Unmarshal(%s): %v", in, err)
+		}
 	}
 }
 

@@ -17,7 +17,6 @@ package model
 
 import (
 	"encoding/json/v2"
-	"strings"
 	"testing"
 )
 
@@ -39,24 +38,14 @@ func TestAge_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestAge_BelowMin(t *testing.T) {
-	var a Age
-	err := json.Unmarshal([]byte(`0`), &a)
-	if err == nil {
-		t.Fatalf("Unmarshal: err = nil, want minimum rejection")
-	}
-	if !strings.Contains(err.Error(), "below minimum 1") {
-		t.Errorf("err = %q, want minimum message", err)
-	}
-}
-
-func TestAge_AboveMax(t *testing.T) {
-	var a Age
-	err := json.Unmarshal([]byte(`200`), &a)
-	if err == nil {
-		t.Fatalf("Unmarshal: err = nil, want maximum rejection")
-	}
-	if !strings.Contains(err.Error(), "above maximum 150") {
-		t.Errorf("err = %q, want maximum message", err)
+// minimum / maximum are validation concerns enforced by
+// jsonschema.Validate, not the generated unmarshaler. Out-of-range
+// values decode structurally without error.
+func TestAge_NoRangeValidation(t *testing.T) {
+	for _, in := range []string{`0`, `200`} {
+		var a Age
+		if err := json.Unmarshal([]byte(in), &a); err != nil {
+			t.Errorf("Unmarshal(%s): %v", in, err)
+		}
 	}
 }

@@ -104,7 +104,13 @@ func TestDerive_NumberScalarAcceptsFloatBound(t *testing.T) {
 	}
 }
 
-func TestEmit_ScalarStringAlias(t *testing.T) {
+// TestEmit_ScalarIsPlainAlias guards that a scalar type emits a plain
+// `type T <underlying>` alias with no custom marshal/unmarshal methods
+// and no value-constraint enforcement. Validation is the job of
+// jsonschema.Validate, run before json.Unmarshal — the unmarshaler
+// does pure structural decoding (here, the default for the underlying
+// primitive).
+func TestEmit_ScalarIsPlainAlias(t *testing.T) {
 	min, max := 3, 12
 	typ := Type{
 		Name:       "Username",
@@ -114,24 +120,23 @@ func TestEmit_ScalarStringAlias(t *testing.T) {
 			MaxLength: &max,
 		},
 	}
-	src, err := formatFile("model", []ast.Decl{
-		mustEmit(t, typ),
-		EmitMarshal(typ),
-		EmitUnmarshal(typ),
-	})
+	decls, err := emitTypeDecls(typ)
+	if err != nil {
+		t.Fatalf("emitTypeDecls: %v", err)
+	}
+	src, err := formatFile("model", decls)
 	if err != nil {
 		t.Fatalf("formatFile: %v", err)
 	}
-	for _, want := range []string{
-		"type Username string",
-		"func (r Username) MarshalJSONTo(",
-		"func (r *Username) UnmarshalJSONFrom(",
-		`len(v) < 3`,
-		`len(v) > 12`,
-		`*r = Username(v)`,
+	if !strings.Contains(src, "type Username string") {
+		t.Errorf("emitted source missing type decl\nsrc:\n%s", src)
+	}
+	for _, unwanted := range []string{
+		"MarshalJSONTo", "UnmarshalJSONFrom", "MarshalerTo", "UnmarshalerFrom",
+		"len(v)", "MustCompile", "not in enum",
 	} {
-		if !strings.Contains(src, want) {
-			t.Errorf("emitted source missing %q\nsrc:\n%s", want, src)
+		if strings.Contains(src, unwanted) {
+			t.Errorf("scalar alias should not contain %q\nsrc:\n%s", unwanted, src)
 		}
 	}
 }

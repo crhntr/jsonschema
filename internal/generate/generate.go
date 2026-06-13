@@ -119,7 +119,7 @@ func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName st
 
 	jsonPath, jsontextPath := overrides.jsonImports()
 	decls := []ast.Decl{
-		importDecl(jsonPath, jsontextPath, "fmt", "regexp"),
+		importDecl(jsonPath, jsontextPath, "fmt"),
 	}
 	for _, t := range types {
 		td, err := emitTypeDecls(t)
@@ -150,16 +150,23 @@ func generateFromObject(schema jsonschema.SchemaObject, typeName, packageName st
 	return out, nil
 }
 
-// emitTypeDecls returns all the declarations (type + pattern var +
-// methods + interface asserts) for a single IR Type.
+// emitTypeDecls returns all the declarations for a single IR Type:
+// the type itself plus, for struct and composite types, the marshal /
+// unmarshal methods and interface assertions. Scalar aliases emit just
+// the type (no methods).
 func emitTypeDecls(t Type) ([]ast.Decl, error) {
 	typeDecl, err := Emit(t)
 	if err != nil {
 		return nil, err
 	}
 	decls := []ast.Decl{typeDecl}
-	if pat := EmitPatternVar(t); pat != nil {
-		decls = append(decls, pat)
+	// Scalar aliases are pure structural types: encoding/json/v2
+	// handles their underlying primitive directly, and value
+	// constraints (length, range, pattern, enum) are validation —
+	// the caller's job via jsonschema.Validate, not the unmarshaler's.
+	// So a scalar emits just `type T <underlying>` with no methods.
+	if t.Underlying != nil && len(t.Variants) == 0 {
+		return decls, nil
 	}
 	if len(t.Variants) > 0 {
 		decls = append(decls, emitCompositeAccessors(t)...)

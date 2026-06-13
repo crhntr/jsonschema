@@ -19,20 +19,6 @@ func stringLit(s string) *ast.BasicLit {
 	return &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(s)}
 }
 
-// rawNumLit returns a numeric BasicLit whose Value is the raw JSON
-// text of the number. The token kind is INT if the text has no
-// decimal point or exponent, else FLOAT.
-func rawNumLit(raw string) *ast.BasicLit {
-	kind := token.INT
-	for _, c := range raw {
-		if c == '.' || c == 'e' || c == 'E' {
-			kind = token.FLOAT
-			break
-		}
-	}
-	return &ast.BasicLit{Kind: kind, Value: raw}
-}
-
 // intLit returns a decimal integer BasicLit.
 func intLit(n int) *ast.BasicLit {
 	return &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(n)}

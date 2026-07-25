@@ -201,15 +201,15 @@ func stepValue(v reflect.Value, tok string) (reflect.Value, error) {
 // lookupStructToken finds the value at tok within struct v. It first
 // matches against the struct's own fields (by JSON tag name, falling
 // back to the Go field name), then descends into any field tagged
-// `json:",inline"` — recursively for inline structs, and as a key
-// lookup for inline `map[string]T` fields that capture unknown members.
+// `json:",embed"` — recursively for embedded structs, and as a key
+// lookup for embedded `map[string]T` fields that capture unknown members.
 func lookupStructToken(v reflect.Value, tok string) (reflect.Value, bool) {
 	t := v.Type()
 	for f := range t.Fields() {
 		if !f.IsExported() {
 			continue
 		}
-		if hasJSONOption(f, "inline") {
+		if hasJSONOption(f, "embed") {
 			continue
 		}
 		if jsonFieldName(f) == tok {
@@ -217,7 +217,7 @@ func lookupStructToken(v reflect.Value, tok string) (reflect.Value, bool) {
 		}
 	}
 	for f := range t.Fields() {
-		if !f.IsExported() || !hasJSONOption(f, "inline") {
+		if !f.IsExported() || !hasJSONOption(f, "embed") {
 			continue
 		}
 		fv := v.FieldByIndex(f.Index)
@@ -262,7 +262,7 @@ func jsonFieldName(f reflect.StructField) string {
 }
 
 // hasJSONOption reports whether the json struct tag on f contains the
-// given option (e.g. "inline", "omitempty"). Options are the
+// given option (e.g. "embed", "omitempty"). Options are the
 // comma-separated tokens that follow the field name.
 func hasJSONOption(f reflect.StructField, opt string) bool {
 	tag := f.Tag.Get("json")

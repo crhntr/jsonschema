@@ -171,7 +171,7 @@ type SchemaObject struct {
 	// keyword. JSON Pointers may legitimately reference these (per
 	// RFC 6901 + JSON Schema's unknown-keyword behavior); resolver
 	// walks fall back to Extra when a normal field lookup misses.
-	Extra map[string]jsontext.Value `json:",inline"`
+	Extra map[string]jsontext.Value `json:",embed"`
 }
 
 // TypeBoolean returns the boolean payload and reports whether m is a

@@ -14,8 +14,7 @@ exec go test -count=1 ./model
       "type":       "string",
       "format":     "date-time",
       "goType":     "time.Time",
-      "goImports":  ["time"],
-      "goJSONTags": ["format:RFC3339Nano"]
+      "goImports":  ["time"]
     }
   },
   "required": ["created"]
@@ -32,6 +31,7 @@ package model
 import (
 	"encoding/json/v2"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -45,7 +45,7 @@ func TestEvent_FieldTypes(t *testing.T) {
 	if createdField.Type != reflect.TypeOf(time.Time{}) {
 		t.Errorf("Created type = %v, want time.Time", createdField.Type)
 	}
-	wantTag := `json:"created,format:RFC3339Nano"`
+	wantTag := `json:"created"`
 	if string(createdField.Tag) != wantTag {
 		t.Errorf("Created tag = %q, want %q", string(createdField.Tag), wantTag)
 	}
@@ -71,5 +71,13 @@ func TestEvent_RoundTrip(t *testing.T) {
 	}
 	if e.Created.Year() != 2026 {
 		t.Errorf("Created.Year = %d, want 2026", e.Created.Year())
+	}
+
+	out, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(out), `"created":"2026-04-26T15:00:00Z"`) {
+		t.Errorf("Marshal = %s, want RFC 3339 created member", out)
 	}
 }

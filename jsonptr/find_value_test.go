@@ -77,21 +77,21 @@ func TestFindValueRoot(t *testing.T) {
 	}
 }
 
-type inlineExtra struct {
+type embedExtra struct {
 	Tier  string `json:"tier"`
 	Score int    `json:"score"`
 }
 
-type inlineHost struct {
+type embedHost struct {
 	Name   string         `json:"name"`
-	Extra  inlineExtra    `json:",inline"`
-	Extras map[string]any `json:",inline"`
+	Extra  embedExtra     `json:",embed"`
+	Extras map[string]any `json:",embed"`
 }
 
 func TestFindValueInline(t *testing.T) {
-	h := inlineHost{
+	h := embedHost{
 		Name:   "Ada",
-		Extra:  inlineExtra{Tier: "gold", Score: 9},
+		Extra:  embedExtra{Tier: "gold", Score: 9},
 		Extras: map[string]any{"nick": "A"},
 	}
 	cases := []struct {

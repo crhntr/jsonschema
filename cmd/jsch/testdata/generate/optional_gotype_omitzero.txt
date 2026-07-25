@@ -10,8 +10,7 @@ exec go test -count=1 ./model
       "type":      "string",
       "format":    "date-time",
       "goType":    "time.Time",
-      "goImports": ["time"],
-      "goJSONTags": ["format:RFC3339"]
+      "goImports": ["time"]
     }
   }
 }
@@ -28,11 +27,9 @@ import (
 	"time"
 )
 
-// An optional field with an explicit goType + format tag must still
-// get omitzero, and the emitted tag must be valid jsonv2 (the format
-// option has to be last). A zero Event therefore marshals without the
-// createdAt member.
-func TestEvent_OptionalFormatOmitsZero(t *testing.T) {
+// An optional field with an explicit goType must still get omitzero.
+// A zero Event therefore marshals without the createdAt member.
+func TestEvent_OptionalGoTypeOmitsZero(t *testing.T) {
 	out, err := json.Marshal(Event{})
 	if err != nil {
 		t.Fatalf("Marshal zero: %v", err)

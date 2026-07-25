@@ -62,10 +62,10 @@ func Test(t *testing.T) {
 	e.Cmds = script.DefaultCmds()
 	e.Conds = script.DefaultConds()
 
-	// GOEXPERIMENT=jsonv2 makes encoding/json/v2 + encoding/json/jsontext
-	// resolvable to "exec go test" / "exec go build" inside fixtures.
+	// encoding/json/v2 + encoding/json/jsontext are enabled by default
+	// as of Go 1.27, so "exec go test" / "exec go build" inside
+	// fixtures resolve them without GOEXPERIMENT=jsonv2.
 	scriptEnv := []string{
-		"GOEXPERIMENT=jsonv2",
 		"HOME=" + os.Getenv("HOME"),
 		"PATH=" + os.Getenv("PATH"),
 	}

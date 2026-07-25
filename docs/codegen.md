@@ -52,7 +52,7 @@ TBD). Keywords are siblings of standard ones; absence is a no-op.
 | `goDoc`        | string           | Doc comment for the generated declaration. Falls back to `description`.                                                                                                                       |
 | `mapKeyType`   | string           | Go type for object map keys when the schema generates a map. Must be `string`, a stdlib-`strconv`-convertible primitive, or a type implementing `encoding.TextMarshaler` + `TextUnmarshaler`. |
 | `mapValueType` | string           | Go type for map values; same rules.                                                                                                                                                           |
-| `goJSONTags`   | array of string  | Extra struct-tag flags spliced verbatim into the `json:"…"` tag after the json name. e.g. `omitempty`, `omitzero`, `format:RFC3339`, `inline`. The generator does not validate flag spelling. |
+| `goJSONTags`   | array of string  | Extra struct-tag flags spliced verbatim into the `json:"…"` tag after the json name. e.g. `omitempty`, `omitzero`, `case:ignore`, `string`. The generator rejects options that Go 1.27's `encoding/json/v2` dropped: `format:…` (https://go.dev/issue/79071) and the experiment-era `inline`/`unknown`. Other spellings are not validated. |
 
 Optional fields are represented as `*T` and absent values as `nil` —
 no `Optional[T]` runtime type.
@@ -65,14 +65,14 @@ Example:
   "format": "date-time",
   "goType": "time.Time",
   "goImports": ["time"],
-  "goJSONTags": ["format:RFC3339Nano", "omitempty"]
+  "goJSONTags": ["omitempty", "case:ignore"]
 }
 ```
 
 emits:
 
 ```go
-Created time.Time `json:"created,format:RFC3339Nano,omitempty"`
+Created time.Time `json:"created,omitempty,case:ignore"`
 ```
 
 ### Document-level (root only)
@@ -97,9 +97,10 @@ overrides file.
 The generated package may **only** import:
 
 - The Go standard library, including `encoding/json/v2` and
-  `encoding/json/jsontext` (go1.26 + `GOEXPERIMENT=jsonv2`).
+  `encoding/json/jsontext` (enabled by default as of Go 1.27;
+  Go 1.26 needed `GOEXPERIMENT=jsonv2`).
 - `github.com/go-json-experiment/json` only as a fallback when the
-  user opts out of the experiment; default is the stdlib path.
+  user opts out of the stdlib path via `jsonPackage`.
 - `golang.org/x/*` (e.g. `golang.org/x/net/idna` for hostname
   validation).
 
@@ -264,7 +265,6 @@ The fixture authors the assertions; the generator only has to produce
 a package that compiles and behaves. Example skeleton:
 
 ```
-env GOEXPERIMENT=jsonv2
 jsch generate --schema schema.json --package model
 
 exec go test -cover
@@ -290,16 +290,15 @@ Lower-level package tests in `internal/generate/*_test.go` use
 `t.TempDir()` for unit coverage of derive/emit functions where the
 script harness would be overkill.
 
-The scripttest harness in `cmd/jsch/main_test.go` sets
-`GOEXPERIMENT=jsonv2` on `script.Engine.Env` (and propagates it into
-the `jsch` cmd handler) so:
+The scripttest harness in `cmd/jsch/main_test.go` needs no
+`GOEXPERIMENT` setup: as of Go 1.27 the v2 stdlib packages are
+enabled by default, so `exec go test` / `exec go build` and the
+generator's own `packages.Load` (which shells `go list`) resolve
+`encoding/json/v2` out of the box.
 
-- `exec go test` / `exec go build` see the v2 stdlib package.
-- The generator's own `packages.Load` (which shells `go list`) can
-  resolve `encoding/json/v2`.
-
-Fixture `go.mod` files declare `go 1.26`. Hand-written `_test.go`
-imports `encoding/json/v2` and `encoding/json/jsontext` directly.
+Fixture `go.mod` files declare `go 1.26` (any directive at or below
+the toolchain works). Hand-written `_test.go` imports
+`encoding/json/v2` and `encoding/json/jsontext` directly.
 
 Run `go test ./...` after every iteration so the existing 2061
 conformance cases never regress.
@@ -388,12 +387,12 @@ Each phase lands as its own commit.
 12. **Override config and JSON tag flags.** Document-level
     `goOverrides` + per-schema `goIdent`/`goType`/`fields`. Add the
     `goJSONTags` annotation (string list of jsonv2 tag flags like
-    `omitempty`, `omitzero`, `format:RFC3339`, `string`, `inline`)
+    `omitempty`, `omitzero`, `case:ignore`, `string`)
     and a per-field equivalent inside the override `fields` map. The
     generator splices them into the emitted struct tag verbatim,
     after the json name. Test: same input schema, two different
     override files, two different generated APIs (one using
-    `omitempty`, one using `format:RFC3339Nano` on a `time.Time`
+    `omitempty`, one using `case:ignore` on a `time.Time`
     field) — `_test.go` round-trips exercise both.
 
 13. **Constraint/type mismatch warnings.** `goType: int8` +
@@ -462,7 +461,7 @@ Each phase lands as its own commit.
     - ✅ `--overrides` shape gains `jsonPackage` ("stdlib" |
       "experiment" | custom path) so the generator can target
       `github.com/go-json-experiment/json` for projects that
-      can't enable `GOEXPERIMENT=jsonv2`.
+      predate Go 1.27's stdlib `encoding/json/v2`.
 
     Remaining gaps:
 

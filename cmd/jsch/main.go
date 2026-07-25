@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/crhntr/jsonschema"
-	gen "github.com/crhntr/jsonschema/internal/generate"
+	"github.com/crhntr/jsonschema/internal/generate"
 	"github.com/crhntr/jsonschema/internal/metaschema"
 )
 
@@ -46,13 +46,13 @@ func run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 	}
 	switch flagSet.Arg(0) {
 	case "validate":
-		if err := validate(ctx, wd, flagSet.Args()[1:], stdout, stderr, stdin, client); err != nil {
+		if err := validateCommand(ctx, wd, flagSet.Args()[1:], stdout, stderr, stdin, client); err != nil {
 			_, _ = io.WriteString(stderr, err.Error()+"\n")
 			return exitError
 		}
 		return exitOK
 	case "generate":
-		if err := generate(ctx, wd, flagSet.Args()[1:], stdout, stderr, client); err != nil {
+		if err := generateCommand(ctx, wd, flagSet.Args()[1:], stdout, stderr, client); err != nil {
 			_, _ = io.WriteString(stderr, err.Error()+"\n")
 			return exitError
 		}
@@ -62,7 +62,7 @@ func run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 	}
 }
 
-func validate(ctx context.Context, wd string, args []string, stdout, stderr io.Writer, stdin io.Reader, client *http.Client) error {
+func validateCommand(ctx context.Context, wd string, args []string, stdout, stderr io.Writer, stdin io.Reader, client *http.Client) error {
 	var (
 		schema               string
 		schema202012         bool
@@ -340,7 +340,7 @@ func readInstance(wd, arg string, stdin io.Reader) ([]byte, string, error) {
 	return buf, arg, nil
 }
 
-func generate(ctx context.Context, wd string, args []string, stdout, stderr io.Writer, client *http.Client) error {
+func generateCommand(ctx context.Context, wd string, args []string, stdout, stderr io.Writer, client *http.Client) error {
 	var (
 		schemaPath    string
 		overridesPath string
@@ -364,13 +364,13 @@ func generate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 	if err != nil {
 		return err
 	}
-	var overrides gen.Overrides
+	var overrides generate.Overrides
 	if overridesPath != "" {
 		buf, err := os.ReadFile(filepath.Join(wd, overridesPath))
 		if err != nil {
 			return fmt.Errorf("read overrides: %w", err)
 		}
-		overrides, err = gen.ParseOverrides(buf)
+		overrides, err = generate.ParseOverrides(buf)
 		if err != nil {
 			return positionJSONError(overridesPath, buf, err, "parse overrides "+overridesPath)
 		}
@@ -378,7 +378,7 @@ func generate(ctx context.Context, wd string, args []string, stdout, stderr io.W
 	if packageName == "" {
 		packageName = filepath.Base(filepath.Clean(filepath.Join(wd, outDir)))
 	}
-	src, err := gen.GenerateFromSchema(root, typeName, packageName, overrides)
+	src, err := generate.GenerateFromSchema(root, typeName, packageName, overrides)
 	if err != nil {
 		return err
 	}

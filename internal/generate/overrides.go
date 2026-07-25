@@ -17,11 +17,11 @@ type Overrides struct {
 	// any field collision.
 	Refs map[string]Annotations `json:"refs,omitempty"`
 	// JSONPackage selects which json/jsontext import paths the
-	// emitter should use. Empty defaults to the stdlib jsonv2
-	// path. "experiment" uses
-	// encoding/json/v2 (and its jsontext
-	// subpackage), which lets the output drop into projects that
-	// haven't enabled GOEXPERIMENT=jsonv2.
+	// emitter should use. Empty (or "stdlib") defaults to
+	// encoding/json/v2 and encoding/json/jsontext, which are enabled
+	// by default as of Go 1.27. "experiment" is an accepted alias
+	// kept from when the packages required GOEXPERIMENT=jsonv2 and
+	// also resolves to the stdlib paths.
 	JSONPackage string `json:"jsonPackage,omitempty"`
 }
 

@@ -32,7 +32,7 @@ func TestEmit_OptionalFieldWithTagsGetsOmitzero(t *testing.T) {
 				JSONName: "createdAt",
 				TypeExpr: &ast.SelectorExpr{X: &ast.Ident{Name: "time"}, Sel: &ast.Ident{Name: "Time"}},
 				Required: false,
-				JSONTags: []string{"format:RFC3339"},
+				JSONTags: []string{"case:ignore"},
 			},
 		},
 	}
@@ -40,9 +40,9 @@ func TestEmit_OptionalFieldWithTagsGetsOmitzero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("formatFile: %v", err)
 	}
-	// omitzero must lead the option list: jsonv2 requires the format
-	// option to be last, so format:RFC3339 stays at the end.
-	want := "json:\"createdAt,omitzero,format:RFC3339\""
+	// omitzero leads the option list; author-supplied options keep
+	// their position after it.
+	want := "json:\"createdAt,omitzero,case:ignore\""
 	if !strings.Contains(src, want) {
 		t.Errorf("optional field tag wrong\nwant substring: %s\nsrc:\n%s", want, src)
 	}

@@ -59,10 +59,9 @@ func emitStructType(t Type) (*ast.StructType, error) {
 		extras := f.JSONTags
 		// Optional fields omit their zero value unless the author
 		// already chose an omit strategy. omitzero is prepended even
-		// when explicit goJSONTags are present (e.g. a format flag),
-		// so an optional time.Time does not serialize as the zero
-		// instant. It must lead the option list because jsonv2
-		// requires the `format` option, when present, to come last.
+		// when explicit goJSONTags are present, so an optional
+		// time.Time does not serialize as the zero instant, and
+		// author-supplied options keep their relative order.
 		if !f.Required &&
 			!slices.Contains(extras, "omitzero") &&
 			!slices.Contains(extras, "omitempty") {

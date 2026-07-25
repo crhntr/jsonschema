@@ -168,6 +168,27 @@ func validateAdditionalFields(fields []GoAdditionalField, imports []string) erro
 	return nil
 }
 
+// validateGoJSONTags rejects goJSONTags entries that encoding/json/v2
+// (as shipped in Go 1.27) does not support on a named struct field.
+// The `format` tag option was dropped from the initial release
+// (https://go.dev/issue/79071) and makes marshal/unmarshal of the
+// whole struct fail at runtime, and the experiment-era `inline` and
+// `unknown` options were replaced by `embed`, which cannot be combined
+// with a JSON name. Failing at generate time beats emitting code that
+// breaks at runtime or silently drops the option.
+func validateGoJSONTags(tags []string) error {
+	for _, tag := range tags {
+		opt, _, _ := strings.Cut(tag, ":")
+		switch opt {
+		case "format":
+			return fmt.Errorf("goJSONTags entry %q: the `format` tag option is not supported by encoding/json/v2 as of Go 1.27 (https://go.dev/issue/79071); use a custom goType with its own marshaling instead", tag)
+		case "inline", "unknown":
+			return fmt.Errorf("goJSONTags entry %q: the `%s` tag option was removed from encoding/json/v2 as of Go 1.27; the `embed` replacement cannot be combined with a JSON name", tag, opt)
+		}
+	}
+	return nil
+}
+
 // deriveStructShape produces the IR Type for a non-composite,
 // non-scalar object schema. It reads the obj's properties / required
 // / additionalProperties / dependentRequired and returns a struct
@@ -229,6 +250,9 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 					goName = override.GoIdent
 				}
 				if len(override.GoJSONTags) > 0 {
+					if err := validateGoJSONTags(override.GoJSONTags); err != nil {
+						return Type{}, fmt.Errorf("property %q: %w", jsonName, err)
+					}
 					jsonTags = override.GoJSONTags
 				}
 			}
@@ -286,6 +310,9 @@ func deriveStructShape(name string, obj *jsonschema.SchemaObject, refs refMaps, 
 		goName := exportedIdent(jsonName)
 		if propAnnotations.GoIdent != "" {
 			goName = propAnnotations.GoIdent
+		}
+		if err := validateGoJSONTags(propAnnotations.GoJSONTags); err != nil {
+			return Type{}, fmt.Errorf("property %q: %w", jsonName, err)
 		}
 		t.Fields = append(t.Fields, Field{
 			GoName:   goName,

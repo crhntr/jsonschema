@@ -1,0 +1,19 @@
+# encoding/json/v2 shipped in Go 1.27 without the `format` tag option
+# (https://go.dev/issue/79071): a format-tagged field makes marshal and
+# unmarshal of the whole struct fail at runtime. The generator must
+# reject the annotation at generate time instead of emitting broken code.
+! jsch generate --schema schema.json --out ./model --package model --type Event
+stderr 'format'
+
+-- schema.json --
+{
+  "type": "object",
+  "properties": {
+    "created": {
+      "type":       "string",
+      "goType":     "time.Time",
+      "goImports":  ["time"],
+      "goJSONTags": ["format:RFC3339Nano"]
+    }
+  }
+}

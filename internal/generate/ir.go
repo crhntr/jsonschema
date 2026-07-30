@@ -97,7 +97,7 @@ type Field struct {
 	TypeExpr ast.Expr
 	Required bool
 	// JSONTags are additional jsonv2 struct-tag flags
-	// (e.g. "omitempty", "format:RFC3339Nano") spliced into the
+	// (e.g. "omitempty", "case:ignore") spliced into the
 	// emitted json tag verbatim, after the json name.
 	JSONTags []string
 }

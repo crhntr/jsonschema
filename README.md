@@ -15,7 +15,7 @@ Code generation is on the roadmap but **not yet implemented** — `jsch generate
 ```sh
 go install github.com/crhntr/jsonschema/cmd/jsch@latest
 
-# Sanity-check that a schema parses against the 2020-12 meta-schema.
+# Check if a schema parses against the 2020-12 meta-schema.
 jsch validate --schema-2020-12 my-schema.json
 
 # Validate an instance against your schema.

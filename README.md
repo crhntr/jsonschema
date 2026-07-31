@@ -10,15 +10,19 @@ A spec-compliant JSON Schema 2020-12 toolkit for Go, built on
 for 2020-12. `jsch generate` emits Go types for unmarshaling JSON shaped by
 the schema.
 
-`Schema.Validate` checks the whole schema. The generated types encode its
-shape — field names, nesting, JSON types — and their unmarshalers enforce
-`required`, `enum`, `pattern`, `minLength`/`maxLength`, `minimum`/`maximum`,
-`dependentRequired`, and `additionalProperties: false`. Every other keyword —
-`oneOf`, `not`, `multipleOf`, `uniqueItems`, and the rest — is the
-validator's job: validate first, then unmarshal. This cuts both ways — a
-generated type can also hold values the schema rejects, like a zero `int`
-where the schema says `minimum: 1`, because nothing constrains a value built
-in Go code.
+### Caveats for Generated Go Code
+
+[`Schema.Validate`](https://pkg.go.dev/github.com/crhntr/jsonschema#Schema.Validate)
+checks the whole schema. The generated types encode shape — field names, nesting,
+JSON types — and generated unmarshalers enforce `required`, `enum`, `pattern`,
+`minLength`/`maxLength`, `minimum`/`maximum`, `dependentRequired`, and
+`additionalProperties: false`.
+
+Other validations — `oneOf`, `not`, `multipleOf`, `uniqueItems`, and the rest —
+are currently the validator's job: validate first, then unmarshal. An Go value of a
+generated type can also hold values the schema rejects, like a zero `int` where
+the schema says `minimum: 1`. Nothing constrains a value built in Go code
+(setters that return an error are not implemented or planned for development).
 
 ## Requirements
 

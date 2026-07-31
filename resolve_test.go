@@ -166,3 +166,196 @@ func TestResolveDynamicRef(t *testing.T) {
 		t.Error("expected lexical fallback to be the resource root itself")
 	}
 }
+
+func TestResolveRefIntoUnknownKeyword(t *testing.T) {
+	// Draft-07-style documents keep subschemas under "definitions",
+	// which 2020-12 does not recognize; the whole subtree lands in
+	// SchemaObject.Extra. A $ref pointing inside it must still
+	// resolve to a parsed schema.
+	t.Run("ref one level into definitions", func(t *testing.T) {
+		body := []byte(`{
+			"$id": "https://example.com/legacy",
+			"definitions": {
+				"count": { "type": "integer" }
+			},
+			"items": { "$ref": "#/definitions/count" }
+		}`)
+
+		var r jsonschema.Resolver
+		if _, err := r.Load("https://example.com/legacy", body); err != nil {
+			t.Fatal(err)
+		}
+		schema, err := r.Resolve(t.Context(), "https://example.com/legacy")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		items := mustObject(t, schema).Items
+		if items == nil {
+			t.Fatal("items missing")
+		}
+		target := items.Resolved()
+		if target == nil {
+			t.Fatal("items.Resolved() is nil")
+		}
+		tobj := mustObject(t, target)
+		if tobj.Type == nil {
+			t.Fatal("target type is nil")
+		}
+		if got, _ := tobj.Type.TypeString(); string(got) != "integer" {
+			t.Errorf("target type = %q, want integer", got)
+		}
+	})
+
+	t.Run("nested ref inside lazily parsed schema links", func(t *testing.T) {
+		// Mirrors draft-07's schemaArray definition: the definition
+		// itself contains a $ref back to the resource root. The
+		// lazily parsed subtree must be linked like any other.
+		body := []byte(`{
+			"$id": "https://example.com/legacy-nested",
+			"definitions": {
+				"schemaArray": {
+					"type": "array",
+					"items": { "$ref": "#" }
+				}
+			},
+			"items": { "$ref": "#/definitions/schemaArray" }
+		}`)
+
+		var r jsonschema.Resolver
+		if _, err := r.Load("https://example.com/legacy-nested", body); err != nil {
+			t.Fatal(err)
+		}
+		schema, err := r.Resolve(t.Context(), "https://example.com/legacy-nested")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		target := mustObject(t, schema).Items.Resolved()
+		if target == nil {
+			t.Fatal("items.Resolved() is nil")
+		}
+		inner := mustObject(t, target).Items
+		if inner == nil {
+			t.Fatal("lazily parsed schema lost its items subschema")
+		}
+		if inner.Resolved() != schema {
+			t.Errorf("inner items.Resolved() = %p, want the resource root %p", inner.Resolved(), schema)
+		}
+	})
+
+	t.Run("two refs to the same definition share one schema", func(t *testing.T) {
+		body := []byte(`{
+			"$id": "https://example.com/legacy-shared",
+			"definitions": {
+				"count": { "type": "integer" }
+			},
+			"properties": {
+				"a": { "$ref": "#/definitions/count" },
+				"b": { "$ref": "#/definitions/count" }
+			}
+		}`)
+
+		var r jsonschema.Resolver
+		if _, err := r.Load("https://example.com/legacy-shared", body); err != nil {
+			t.Fatal(err)
+		}
+		schema, err := r.Resolve(t.Context(), "https://example.com/legacy-shared")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		props := mustObject(t, schema).Properties
+		a, b := props["a"].Resolved(), props["b"].Resolved()
+		if a == nil || b == nil {
+			t.Fatalf("Resolved() = %p, %p, want both non-nil", a, b)
+		}
+		if a != b {
+			t.Errorf("refs to the same pointer resolved to distinct schemas %p != %p", a, b)
+		}
+	})
+
+	t.Run("mutually referencing definitions terminate", func(t *testing.T) {
+		body := []byte(`{
+			"$id": "https://example.com/legacy-cycle",
+			"definitions": {
+				"a": { "items": { "$ref": "#/definitions/b" } },
+				"b": { "items": { "$ref": "#/definitions/a" } }
+			},
+			"items": { "$ref": "#/definitions/a" }
+		}`)
+
+		var r jsonschema.Resolver
+		if _, err := r.Load("https://example.com/legacy-cycle", body); err != nil {
+			t.Fatal(err)
+		}
+		schema, err := r.Resolve(t.Context(), "https://example.com/legacy-cycle")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		a := mustObject(t, schema).Items.Resolved()
+		if a == nil {
+			t.Fatal("items.Resolved() is nil")
+		}
+		b := mustObject(t, a).Items.Resolved()
+		if b == nil {
+			t.Fatal("a items.Resolved() is nil")
+		}
+		if got := mustObject(t, b).Items.Resolved(); got != a {
+			t.Errorf("cycle b -> a resolved to %p, want the memoized a %p", got, a)
+		}
+	})
+
+	t.Run("ref terminating exactly at an unknown keyword links too", func(t *testing.T) {
+		body := []byte(`{
+			"$id": "https://example.com/legacy-direct",
+			"x-legacy": {
+				"type": "array",
+				"items": { "$ref": "#" }
+			},
+			"items": { "$ref": "#/x-legacy" }
+		}`)
+
+		var r jsonschema.Resolver
+		if _, err := r.Load("https://example.com/legacy-direct", body); err != nil {
+			t.Fatal(err)
+		}
+		schema, err := r.Resolve(t.Context(), "https://example.com/legacy-direct")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		target := mustObject(t, schema).Items.Resolved()
+		if target == nil {
+			t.Fatal("items.Resolved() is nil")
+		}
+		inner := mustObject(t, target).Items
+		if inner == nil {
+			t.Fatal("lazily parsed schema lost its items subschema")
+		}
+		if inner.Resolved() != schema {
+			t.Errorf("inner items.Resolved() = %p, want the resource root %p", inner.Resolved(), schema)
+		}
+	})
+}
+
+// TestResolveDraft07MetaSchema covers resolving a schema whose $schema
+// declares the draft-07 dialect. The resolver fetches the draft-07
+// meta-schema, whose internal $refs all point into "definitions" — an
+// unknown keyword in 2020-12 — and must still link it rather than
+// failing the user's resolution.
+func TestResolveDraft07MetaSchema(t *testing.T) {
+	_, client := startSchemaServer(t)
+	schema, err := jsonschema.Resolve(t.Context(), client, "https://example.com/refs/draft-07")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if out := schema.Validate("ok.json", []byte(`{"name": "a"}`)); !out.Valid {
+		t.Errorf("Validate(valid instance) = invalid, want valid:\n%v", out.AsError())
+	}
+	if out := schema.Validate("bad.json", []byte(`{"name": 1}`)); out.Valid {
+		t.Error("Validate(invalid instance) = valid, want invalid")
+	}
+}

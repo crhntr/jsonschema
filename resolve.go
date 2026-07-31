@@ -705,7 +705,7 @@ func (r *Resolver) resolveReference(base, ref string, dynamic bool) (*Schema, bo
 		return nil, false, fmt.Errorf("resource %q not loaded", resourceURI)
 	}
 
-	target, isPlainName, err := resolveFragment(resource, frag)
+	target, isPlainName, err := r.resolveFragment(resource, frag)
 	if err != nil {
 		return nil, false, err
 	}
@@ -720,12 +720,12 @@ func (r *Resolver) resolveReference(base, ref string, dynamic bool) (*Schema, bo
 
 // resolveFragment resolves frag within resource. Returns target, whether
 // the fragment was a plain name (vs JSON Pointer or empty), and any error.
-func resolveFragment(resource *Schema, frag string) (*Schema, bool, error) {
+func (r *Resolver) resolveFragment(resource *Schema, frag string) (*Schema, bool, error) {
 	if frag == "" {
 		return resource, false, nil
 	}
 	if strings.HasPrefix(frag, "/") {
-		target, err := walkJSONPointer(resource, frag)
+		target, err := r.walkJSONPointer(resource, frag)
 		if err != nil {
 			return nil, false, err
 		}
@@ -772,7 +772,7 @@ func (m *Schema) FindJSONPtrValue(ptr jsonptr.Pointer, opts ...json.Options) (js
 // a *Schema, but JSON Schema allows refs into unknown keywords (whose
 // values are captured in SchemaObject.Extra as raw bytes); those are
 // lazily parsed into a fresh Schema.
-func walkJSONPointer(m *Schema, ptr string) (*Schema, error) {
+func (r *Resolver) walkJSONPointer(m *Schema, ptr string) (*Schema, error) {
 	p := jsonptr.Pointer(ptr)
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -784,10 +784,47 @@ func walkJSONPointer(m *Schema, ptr string) (*Schema, error) {
 	if target, ok := live.(*Schema); ok {
 		return target, nil
 	}
-	if raw, ok := live.(jsontext.Value); ok {
-		return Parse(raw)
+	// The target lies inside an unknown keyword (SchemaObject.Extra).
+	// Lazily parse it into a Schema, wire it into the resource, and
+	// link it like any indexed subtree.
+	if cached := m.resource.lazy[ptr]; cached != nil {
+		return cached, nil
 	}
-	return nil, fmt.Errorf("JSON Pointer %q: target is %T, not a schema", ptr, live)
+	raw, ok := live.(jsontext.Value)
+	if !ok {
+		// Deeper than one level into Extra, FindValue returns a decoded
+		// Go value rather than raw bytes. Marshal the schema (Extra
+		// round-trips verbatim) and re-find to recover faithful bytes.
+		buf, err := json.Marshal(m)
+		if err != nil {
+			return nil, fmt.Errorf("JSON Pointer %q: marshal schema: %w", ptr, err)
+		}
+		raw, err = jsonptr.Find(buf, p)
+		if err != nil {
+			return nil, fmt.Errorf("JSON Pointer %q: %w", ptr, err)
+		}
+	}
+	target, err := Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	// Memoize before linking so mutually referencing definitions
+	// resolve to the already-registered schema instead of recursing.
+	if m.resource.lazy == nil {
+		m.resource.lazy = map[string]*Schema{}
+	}
+	m.resource.lazy[ptr] = target
+	// The lazily parsed subtree is new to the resolver: give it the
+	// same base URI / resource / path wiring as any indexed subtree,
+	// then link its own $refs.
+	idx := indexState{seen: map[string]struct{}{}}
+	if err := r.indexSubtree(target, m.baseURI, m.resource, ptr, &idx); err != nil {
+		return nil, fmt.Errorf("JSON Pointer %q: index: %w", ptr, err)
+	}
+	if err := r.linkSubtree(target); err != nil {
+		return nil, fmt.Errorf("JSON Pointer %q: link: %w", ptr, err)
+	}
+	return target, nil
 }
 
 func resolveRelative(base, ref string) (string, error) {

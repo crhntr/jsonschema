@@ -56,7 +56,13 @@ type Schema struct {
 	resource       *Schema
 	anchors        map[string]*Schema
 	dynamicAnchors map[string]*Schema
-	source         []byte
+	// lazy memoizes subschemas parsed on demand from unknown-keyword
+	// (SchemaObject.Extra) subtrees, keyed by JSON Pointer from the
+	// resource root. Populated on resource roots only. Registering a
+	// lazy schema before linking it lets mutually referencing
+	// definitions terminate.
+	lazy   map[string]*Schema
+	source []byte
 	// vocabularies is populated on resource roots by applyVocabularies
 	// from the metaschema's $vocabulary declaration. nil means the
 	// resource takes the default 2020-12 set. A non-nil map gates

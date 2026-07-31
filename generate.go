@@ -2,10 +2,10 @@ package jsonschema
 
 import "os"
 
-// ToGo is a placeholder for the schema-to-Go-code generator that is
-// being developed on a separate branch. The implementation in this
-// package is a no-op; callers should not rely on it. It exists here
-// so the codegen branch can land without churning the public API.
+// ToGo is a placeholder for a library entry point to the
+// schema-to-Go-code generator. The generator currently lives in
+// internal/generate and is exposed through the jsch CLI; this
+// implementation is a no-op and callers should not rely on it.
 func ToGo(root *os.Root, m *SchemaObject) error {
 	return nil
 }

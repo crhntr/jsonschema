@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -289,5 +290,25 @@ func TestSubschemasYieldsEachChildExactlyOnce(t *testing.T) {
 	}
 	for d, n := range counts {
 		t.Errorf("unexpected description %q yielded %d time(s)", d, n)
+	}
+}
+
+// TestExtraCapturesUnknownKeywords guards the `json:",inline"` tag on
+// SchemaObject.Extra. Go 1.27's encoding/json/v2 renamed the "inline" tag
+// option to "embed" and silently ignores unknown options, so a go1.27+
+// toolchain quietly turns Extra into a regular named member and every
+// unknown-keyword feature (annotations, $ref into unknown keywords, the
+// go-codegen vocabulary) breaks at once.
+func TestExtraCapturesUnknownKeywords(t *testing.T) {
+	schema, err := jsonschema.Parse([]byte(`{"x-custom": true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj, ok := schema.TypeObject()
+	if !ok {
+		t.Fatal("schema is not an object")
+	}
+	if _, ok := obj.Extra["x-custom"]; !ok {
+		t.Fatalf("SchemaObject.Extra did not capture unknown keyword %q: toolchain %s likely ignores the jsonv2 `inline` tag option (renamed to `embed` in go1.27); build with a Go 1.26 toolchain (see .envrc)", "x-custom", runtime.Version())
 	}
 }

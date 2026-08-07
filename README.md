@@ -19,7 +19,7 @@ JSON types — and generated unmarshalers enforce `required`, `enum`, `pattern`,
 `additionalProperties: false`.
 
 Other validations — `oneOf`, `not`, `multipleOf`, `uniqueItems`, and the rest —
-are currently the validator's job: validate first, then unmarshal. An Go value of a
+are currently the validator's job: validate first, then unmarshal. A Go value of a
 generated type can also hold values the schema rejects, like a zero `int` where
 the schema says `minimum: 1`. Nothing constrains a value built in Go code
 (setters that return an error are not implemented or planned for development).

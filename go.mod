@@ -1,8 +1,6 @@
 module github.com/crhntr/jsonschema
 
-go 1.26
-
-toolchain go1.26.5
+go 1.27.1
 
 require (
 	golang.org/x/net v0.57.0

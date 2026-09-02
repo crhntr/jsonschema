@@ -5,7 +5,7 @@ exec go test -count=1 ./model
 -- go.mod --
 module example.com/embpkg
 
-go 1.26
+go 1.27
 -- model/model_test.go --
 package model
 

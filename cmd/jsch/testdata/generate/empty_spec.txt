@@ -7,4 +7,4 @@ exec go vet ./model
 -- go.mod --
 module example.com/empty
 
-go 1.26
+go 1.27

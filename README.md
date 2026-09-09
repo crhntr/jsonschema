@@ -1,5 +1,7 @@
 # jsonschema
 
+⚠️ mostly built with GenAI ⚠️
+
 A spec-compliant JSON Schema 2020-12 toolkit for Go, built on
 [`encoding/json/v2`](https://pkg.go.dev/encoding/json/v2).
 

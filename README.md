@@ -28,8 +28,7 @@ the schema says `minimum: 1`. Nothing constrains a value built in Go code
 
 ## Requirements
 
-Go 1.26 with `GOEXPERIMENT=jsonv2` set. This is required for building and
-if you use this as a dependency. With Go 1.27 this requirement will be removed.
+Go 1.27
 
 ## Quick start
 

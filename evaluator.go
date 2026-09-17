@@ -168,7 +168,6 @@ func (m *Schema) ValidateWithFormatAssertion(name string, in []byte) Output {
 
 func (m *Schema) validateRoot(ctx evalCtx, in []byte) Output {
 	dec := jsontext.NewDecoder(bytes.NewReader(in))
-	valOff := dec.InputOffset()
 	val, err := dec.ReadValue()
 	if err != nil {
 		off := dec.InputOffset()
@@ -188,8 +187,17 @@ func (m *Schema) validateRoot(ctx evalCtx, in []byte) Output {
 		}
 		return out
 	}
-	out, _ := m.evaluate(ctx, val, valOff)
+	out, _ := m.evaluate(ctx, val, valueStart(dec, val))
 	return out
+}
+
+// valueStart returns the offset, in dec's input, of the first byte of
+// v, which must be the value most recently returned by dec.ReadValue.
+// The decoder only reports the offset just past a value; since
+// ReadValue returns the exact input bytes with surrounding whitespace
+// stripped, the start is that end minus the value's length.
+func valueStart(dec *jsontext.Decoder, v jsontext.Value) int64 {
+	return dec.InputOffset() - int64(len(v))
 }
 
 // jsontextMessage formats a *jsontext.SyntacticError without the
@@ -797,7 +805,6 @@ func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff i
 		}
 		key := keyTok.String()
 		keys[key] = struct{}{}
-		propOff := dec.InputOffset()
 		propVal, err := dec.ReadValue()
 		if err != nil {
 			c := ctx.baseOutput(valOff)
@@ -805,7 +812,7 @@ func (o *SchemaObject) checkObjectBody(ctx evalCtx, val jsontext.Value, valOff i
 			c.Error = err.Error()
 			return []Output{c}, covered
 		}
-		entries = append(entries, propEntry{key: key, val: bytes.Clone(propVal), off: propOff})
+		entries = append(entries, propEntry{key: key, val: bytes.Clone(propVal), off: valOff + valueStart(dec, propVal)})
 	}
 
 	if len(o.Properties) > 0 {
@@ -1060,7 +1067,6 @@ func (o *SchemaObject) checkUnevaluatedProperties(ctx evalCtx, val jsontext.Valu
 			return parent, newCovered
 		}
 		key := keyTok.String()
-		propOff := dec.InputOffset()
 		propVal, err := dec.ReadValue()
 		if err != nil {
 			parent.Valid = false
@@ -1071,7 +1077,7 @@ func (o *SchemaObject) checkUnevaluatedProperties(ctx evalCtx, val jsontext.Valu
 			continue
 		}
 		subCtx := ctx.atKeyword("unevaluatedProperties").atInstanceKey(key)
-		subOut, _ := o.UnevaluatedProperties.evaluate(subCtx, bytes.Clone(propVal), propOff)
+		subOut, _ := o.UnevaluatedProperties.evaluate(subCtx, bytes.Clone(propVal), valOff+valueStart(dec, propVal))
 		newCovered.addProperty(key)
 		matchedKeys = append(matchedKeys, key)
 		subs = append(subs, subOut)
@@ -1107,7 +1113,6 @@ func (o *SchemaObject) checkArrayBody(ctx evalCtx, val jsontext.Value, valOff in
 	}
 	var items []item
 	for dec.PeekKind() != jsontext.KindEndArray {
-		off := dec.InputOffset()
 		v, err := dec.ReadValue()
 		if err != nil {
 			c := ctx.baseOutput(valOff)
@@ -1115,7 +1120,7 @@ func (o *SchemaObject) checkArrayBody(ctx evalCtx, val jsontext.Value, valOff in
 			c.Error = err.Error()
 			return []Output{c}, covered
 		}
-		items = append(items, item{val: bytes.Clone(v), off: off})
+		items = append(items, item{val: bytes.Clone(v), off: valOff + valueStart(dec, v)})
 	}
 
 	if len(o.MinItems) > 0 {
@@ -1281,7 +1286,6 @@ func (o *SchemaObject) checkUnevaluatedItems(ctx evalCtx, val jsontext.Value, va
 	}
 	i := 0
 	for dec.PeekKind() != jsontext.KindEndArray {
-		off := dec.InputOffset()
 		v, err := dec.ReadValue()
 		if err != nil {
 			parent.Valid = false
@@ -1290,7 +1294,7 @@ func (o *SchemaObject) checkUnevaluatedItems(ctx evalCtx, val jsontext.Value, va
 		}
 		if _, already := covered[i]; !already {
 			subCtx := ctx.atKeyword("unevaluatedItems").atInstanceIndex(i)
-			subOut, _ := o.UnevaluatedItems.evaluate(subCtx, bytes.Clone(v), off)
+			subOut, _ := o.UnevaluatedItems.evaluate(subCtx, bytes.Clone(v), valOff+valueStart(dec, v))
 			newCovered.addItem(i)
 			subs = append(subs, subOut)
 			applied = true

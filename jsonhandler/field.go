@@ -432,7 +432,7 @@ func (b *builder) collapsed(sh *shape, at site) *Field {
 		Pointer:     at.pointer,
 		ID:          b.id(at.path),
 		Label:       label(sh, at.label),
-		Description: sh.description,
+		Description: b.description(sh),
 		Class:       sh.ui.Class,
 		Deprecated:  sh.deprecated,
 		Collapsed:   true,

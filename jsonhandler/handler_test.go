@@ -491,7 +491,7 @@ func TestRoutes(t *testing.T) {
 	t.Run("mounted under a prefix", func(t *testing.T) {
 		mux := http.NewServeMux()
 		paths := TemplateRoutes(mux, newHandler(t, schema), "/people/new")
-		if got := paths.Form().String(); got != "/people/new/form" {
+		if got := paths.Form(); got != "/people/new/form" {
 			t.Errorf("Form path = %q", got)
 		}
 		rec := httptest.NewRecorder()

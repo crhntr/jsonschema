@@ -6,14 +6,14 @@
 
 {{define "GET /form Form(ctx)" -}}
 {{- if .Err}}{{template "jsonhandler-error" .Err}}
-{{- else}}{{template "jsonhandler-form" (.Result.WithActions .Path.SubmitForm.String .Path.Validate.String)}}
+{{- else}}{{template "jsonhandler-form" (.Result.WithActions .Path.SubmitForm .Path.Validate)}}
 {{- end}}
 {{- end}}
 
 {{define "POST /form SubmitForm(ctx, form)" -}}
 {{- if .Err}}{{template "jsonhandler-error" .Err}}
-{{- else if .Result.Valid}}{{template "jsonhandler-result" (.Result.WithActions .Path.SubmitForm.String .Path.Validate.String)}}
-{{- else}}{{template "jsonhandler-form" (.Result.WithActions .Path.SubmitForm.String .Path.Validate.String)}}
+{{- else if .Result.Valid}}{{template "jsonhandler-result" (.Result.WithActions .Path.SubmitForm .Path.Validate)}}
+{{- else}}{{template "jsonhandler-form" (.Result.WithActions .Path.SubmitForm .Path.Validate)}}
 {{- end}}
 {{- end}}
 

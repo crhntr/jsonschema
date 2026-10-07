@@ -14,7 +14,7 @@ import (
 	"github.com/crhntr/jsonschema/internal/metaschema"
 )
 
-//go:generate muxt generate --use-receiver-type=Handler --output-routes-func-with-path-prefix-param --output-htmx
+//go:generate go tool muxt generate --use-receiver-type=Handler --output-routes-func-with-path-prefix-param --output-htmx
 
 // Handler serves a form for editing a JSON value that Schema describes.
 // Register its routes with [TemplateRoutes]; README.md describes the

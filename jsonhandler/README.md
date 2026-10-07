@@ -95,7 +95,7 @@ paths := jsonhandler.TemplateRoutes(mux, h, "/settings")
 mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
 	f, err := h.Form(r.Context())
 	// handle err
-	f.WithActions(paths.SubmitForm().String(), paths.Validate().String())
+	f.WithActions(paths.SubmitForm(), paths.Validate())
 	err = t.ExecuteTemplate(w, "settings-page", f)
 	// handle err
 })

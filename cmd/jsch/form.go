@@ -184,7 +184,7 @@ func newFormServer(ctx context.Context, wd, schemaArg, instance string, write bo
 			return
 		}
 		data := page
-		data.Form = f.WithActions(paths.SubmitForm().String(), paths.Validate().String())
+		data.Form = f.WithActions(paths.SubmitForm(), paths.Validate())
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(f.StatusCode())
 		renderPage(w, pageTemplate, data)

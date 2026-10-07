@@ -90,7 +90,7 @@ const (
 	// the whole value as JSON.
 	ModeJSON = "json"
 	// ModeWizard is the value of the @mode control while the form shows
-	// one group at a time.
+	// one field at a time.
 	ModeWizard = "wizard"
 	metaMode   = "mode"
 )
@@ -105,7 +105,7 @@ type Form struct {
 	// SubmitLabel is the text of the submit button.
 	SubmitLabel string
 	// Mode is ModeJSON while the form shows the whole value as JSON,
-	// ModeWizard while it shows one group at a time, and empty while it
+	// ModeWizard while it shows one field at a time, and empty while it
 	// shows every field.
 	Mode string
 	// Root is the field for the whole value.
@@ -240,12 +240,18 @@ func (h *Handler) SubmitForm(ctx context.Context, form url.Values) (*Form, error
 	case ActionFields:
 		return h.showFields(sh, s), nil
 	default:
+		if op, _, _ := strings.Cut(action, "/"); op == "next" {
+			if f := h.refuseNext(sh, s); f != nil {
+				return f, nil
+			}
+		}
 		applyAction(s, action)
 		if mode, _ := s.meta(metaMode, ""); mode == ModeWizard {
-			// Moving between steps shows the errors a step has, the way
-			// validation as you type would, so a step listed as having
-			// errors shows them when you get there.
+			// Moving between steps shows what is wrong with the values
+			// filled in, so a step listed as having errors shows them
+			// when you get there; fields still blank are not flagged.
 			f, _, _ := h.check(sh, s, true)
+			f.quiet()
 			if f.status == http.StatusUnprocessableEntity {
 				f.status = http.StatusOK
 			}
@@ -286,6 +292,24 @@ names:
 		}
 	}
 	return f, nil
+}
+
+// refuseNext checks the wizard's current step before Next leaves it. It
+// returns the step again, with what is wrong, when a required field on it
+// is empty or it has errors; otherwise nil. Errors on other steps do not
+// hold it back.
+func (h *Handler) refuseNext(sh *shape, s state) *Form {
+	f, _, _ := h.check(sh, s, false)
+	if f.Root == nil || f.Wizard() == nil {
+		return nil
+	}
+	errs := problems(f.View(), true)
+	if len(errs) == 0 {
+		return nil
+	}
+	again := h.build(sh, s)
+	again.attach(errs, nil, false)
+	return again
 }
 
 // Validate checks the form without submitting it, so errors can be shown

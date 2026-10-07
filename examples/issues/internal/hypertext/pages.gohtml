@@ -14,12 +14,12 @@
 <script src="https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js" integrity="sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg" crossorigin="anonymous" defer></script>
 <style>
   body { display: grid; justify-items: center; padding: var(--size-5) var(--size-4); }
-  .page { display: grid; gap: var(--size-5); inline-size: min(100%, 64rem); }
+  .page { display: grid; align-content: start; gap: var(--size-5); inline-size: min(100%, 64rem); }
   .page > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--size-3); padding-block-end: var(--size-3); border-block-end: var(--border-size-1) solid var(--surface-3); }
   .page > header nav { display: flex; gap: var(--size-4); }
   .page > header nav a[aria-current="page"] { font-weight: var(--font-weight-7); text-decoration: underline; }
   .project { font-size: var(--font-size-4); font-weight: var(--font-weight-7); text-decoration: none; color: inherit; }
-  main { display: grid; gap: var(--size-4); }
+  main { display: grid; align-content: start; gap: var(--size-4); }
   main > * { margin: 0; }
   h1 { font-size: var(--font-size-5); max-inline-size: none; }
   h2 { font-size: var(--font-size-3); max-inline-size: none; }

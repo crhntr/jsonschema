@@ -588,6 +588,25 @@ div.jsonform-field:not(.jsonform-stub) > .jsonform-remove {
   margin-inline-start: auto;
 }
 
+.jsonform-progress {
+  margin: 0;
+  color: var(--jsonform-muted);
+  font-size: var(--font-size-1, 0.875rem);
+}
+
+.jsonform-progress-label {
+  color: var(--jsonform-text);
+  font-weight: var(--font-weight-6, 600);
+}
+
+/* Only the step's own controls are validated (hidden inputs never are), so
+   an invalid wizard form is a step that is not done yet: Next is greyed
+   out. It still responds, so pressing it shows the browser's message. */
+.jsonform[data-mode="wizard"]:invalid .jsonform-next {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Errors */
 .jsonform-errors {
   margin: 0;

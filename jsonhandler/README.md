@@ -231,20 +231,38 @@ it lasts across edits and submissions.
 
 ### Wizard
 
-Edit with wizard shows one group at a time. A step shows the group's own
-fields and, for each group inside it, a row with an Edit button that steps
-into it. A breadcrumb leads back up, Back and Next go through the groups in
-document order, and in the outline every group is a button that goes to its
-step. In the fields view, each outline entry has an Edit button that opens
-the wizard right at that group.
+Edit with wizard walks through the value one field at a time, with Back
+and Next ("Step 3 of 12: street"). The steps are the fields in document
+order:
 
-The page holds the whole value. Everything outside the current step is
+- a text, number, checkbox, enum or JSON field is a step;
+- an array, map or checkbox group is one step holding all of it;
+- a choice is a step with its variant picker; when the chosen variant is an
+  object, its properties are the steps after it, otherwise its input is on
+  the same step;
+- an optional value that is left out is a step with its Add button;
+- an object's undeclared properties, and a wide object's "Add a property"
+  picker, are a step each.
+
+Objects are not steps. They are where a step is, shown as a breadcrumb whose
+entries go to the object's first field. In the outline every group goes to
+its first field, and in the fields view each outline entry has an Edit
+button that opens the wizard there.
+
+Required fields cannot be skipped. Next has no `formnovalidate`, so the
+browser will not leave a required field on the step empty; the starter
+stylesheet greys Next out while the step has an invalid control; and the
+server refuses a Next from a step that has a required field left empty or
+any error, showing the step again (status 422) with what is wrong. A
+required field inside an optional object is not required until something
+in the object is filled in. Back, the breadcrumb and the outline go
+anywhere, and Submit validates the whole value from any step.
+
+The page holds the whole value. Everything not on the current step is
 carried as hidden inputs, so leaving a step loses nothing, and the step
-itself is two controls, `@mode=wizard` and `@step=/path`. Submit validates
-the whole value from any step. Errors on the step show on its fields, and
-the other steps with errors are listed with buttons that go to them (moving
-to a step checks it the way validation as you type does). Edit as form and
-Edit as JSON work from any step.
+itself is two controls, `@mode=wizard` and `@step=/path`. After a Submit
+with errors, the other steps with errors are listed with buttons that go to
+them. Edit as form and Edit as JSON work from any step.
 
 `writeOnly` values are never written into hidden inputs, so one entered on a
 step is kept only while that step is the one being submitted.
@@ -412,9 +430,10 @@ Every button has `jsonform-button` and one of: `jsonform-submit`,
 `jsonform-add`, `jsonform-expand`, `jsonform-remove`, `jsonform-up`,
 `jsonform-down`, `jsonform-refresh`, `jsonform-mode`, `jsonform-edit`,
 `jsonform-step`, `jsonform-fold`, `jsonform-unfold`, `jsonform-back`,
-`jsonform-up-step`, `jsonform-next`. Edit buttons carry `formnovalidate`,
-so the browser does not block an Add because some other field is not filled
-in yet. An Add button that cannot be used is `disabled` and
+`jsonform-next`. Edit buttons carry `formnovalidate`, so the browser does
+not block an Add because some other field is not filled in yet. The
+wizard's Next is the exception: it is the one button besides Submit that
+checks required fields. An Add button that cannot be used is `disabled` and
 `aria-describedby` a `<span class="jsonform-reason">` saying why.
 
 ### Reasons
@@ -426,15 +445,14 @@ use.
 
 ### Stubs
 
-A hidden group, or a group below the wizard's step, is one row:
+A hidden group is one row:
 
 ```html
 <div class="jsonform-field jsonform-stub" id="…_group" data-kind="object"
-     data-pointer="/address" data-stub data-folded? data-invalid?>
+     data-pointer="/address" data-stub data-folded data-invalid?>
   <span class="jsonform-label">address</span>
   <span class="jsonform-summary">3 items</span>                <!-- arrays, maps, choices -->
-  <button class="jsonform-button jsonform-unfold" value="unfold/address">Show</button>  <!-- hidden -->
-  <button class="jsonform-button jsonform-step" value="step/address">Edit</button>      <!-- wizard -->
+  <button class="jsonform-button jsonform-unfold" value="unfold/address">Show</button>
   <input type="hidden" name="$/address/street" value="…">…
 </div>
 ```
@@ -460,8 +478,9 @@ A hidden group, or a group below the wizard's step, is one row:
 The outline lists every object, map, array and choice, nested as they are.
 `data-invalid` marks a group with an error anywhere inside it. In the
 wizard the label is a `<button class="jsonform-button jsonform-step
-jsonform-outline-label">` that goes to the step, there is no separate Edit
-button, and `aria-current="step"` marks the current step.
+jsonform-outline-label">` that goes to the group's first field, there is no
+separate Edit button, and `aria-current="step"` marks the innermost group
+holding the current step.
 
 ### Wizard
 
@@ -469,26 +488,33 @@ In the wizard the form has `data-mode="wizard"` and its body starts with:
 
 ```html
 <input type="hidden" name="@mode" value="wizard">
-<input type="hidden" name="@step" value="/address">
-<nav class="jsonform-crumbs" aria-label="Steps">
+<input type="hidden" name="@step" value="/address/street">
+<p class="jsonform-progress" id="jsonform_progress">Step <span class="jsonform-progress-index">4</span>
+  of <span class="jsonform-progress-count">9</span>: <span class="jsonform-progress-label">street</span></p>
+<nav class="jsonform-crumbs" aria-label="Where this step is">     <!-- left out at the top level -->
   <ol>
     <li><button class="jsonform-button jsonform-step" value="step">Person</button></li>
-    <li aria-current="step"><span class="jsonform-label">address</span></li>
+    <li><button class="jsonform-button jsonform-step" value="step/address">address</button></li>
   </ol>
 </nav>
 <div class="jsonform-elsewhere" role="alert">                     <!-- other steps with errors -->
   <p>These steps have errors too:</p>
-  <ul><li><button class="jsonform-button jsonform-step" value="step/tags">tags</button></li></ul>
+  <ul><li><button class="jsonform-button jsonform-step" value="step/age">age</button></li></ul>
 </div>
-<input type="hidden" name="…" value="…">…                         <!-- everything outside the step -->
-<!-- the step's field -->
+<input type="hidden" name="…" value="…">…                         <!-- everything not on the step -->
+<!-- the step's field, with `required` on its control when it is required -->
 <div class="jsonform-actions">
-  <button class="jsonform-button jsonform-back" value="step">Back</button>
-  <button class="jsonform-button jsonform-up-step" value="step">Up to Person</button>
-  <button class="jsonform-button jsonform-next" value="step/tags">Next: tags</button>
+  <button class="jsonform-button jsonform-back" value="step/age" formnovalidate>Back</button>
+  <button class="jsonform-button jsonform-next" value="next/address/zip"
+          aria-describedby="jsonform_progress">Next: zip</button>     <!-- no formnovalidate -->
   <button type="submit" class="jsonform-button jsonform-submit">Submit</button>
 </div>
 ```
+
+The form's first, hidden submit button (the one Enter presses) is Next in
+the wizard. To grey Next out while the step is not done, style
+`.jsonform[data-mode="wizard"]:invalid .jsonform-next`: a form is `:invalid`
+when one of its controls is, and hidden inputs are never checked.
 
 ### Result
 
@@ -532,14 +558,16 @@ themselves form input. A pointer built from a property name escapes `~` as
 | `@pick/path` | the property to add to the wide object at `path` |
 | `@folded/path` | the group at `path` is hidden |
 | `@mode` | `json` while the form shows one JSON text area, `wizard` in the wizard |
-| `@step` | the form path of the wizard's current group |
+| `@step` | the wizard's current step: a field's form path, or an object's path followed by `/~entries` or `/~pick` |
 | `@action` | the edit an edit button asks for |
 
 `@action` values are an operation followed by a path:
 `add/tags`, `remove/tags/2`, `up/tags/2`, `down/tags/2`, `expand/next`,
 `pick/` + object path (`pick` alone for the root), `fold/address`,
-`unfold/address`, `step/address` (opens the wizard at that group; `step`
-alone is the root), `json`, `fields`, and `refresh` or `edit`, which change
+`unfold/address`, `step/address` (opens the wizard at that step, or at the
+first field inside an object; `step` alone is the first step),
+`next/address/zip` (the same, but only once the current step has no empty
+required field and no errors), `json`, `fields`, and `refresh` or `edit`, which change
 nothing and re-render.
 
 Other request fields are ignored, so a CSRF token field can sit in the same

@@ -24,7 +24,7 @@ import (
 //	@pick<path>     the optional property of the object at path to add
 //	@folded<path>   the group at path is hidden
 //	@mode           "json" or "wizard" while the form is in that mode
-//	@step           the form path of the group the wizard is on
+//	@step           the wizard's current step (see [Wizard.Step])
 //	@action         the edit an edit button asks for; see [applyAction]
 const (
 	valuePrefix  = "$"
@@ -214,7 +214,8 @@ func positionPath(parent string, i int, entry bool) string {
 //	pick<path>    include the optional property @pick<path> names
 //	fold<path>    hide the group at path
 //	unfold<path>  show the group at path again
-//	step<path>    edit the group at path with the wizard
+//	step<path>    open the wizard at the step for path (a field, or an object's first)
+//	next<path>    like step, but only once the current step is done
 //
 // Any other action, including the empty one, changes nothing; the form
 // is re-rendered with the submitted values, which is how a newly chosen
@@ -236,7 +237,7 @@ func applyAction(s state, action string) {
 		url.Values(s).Set(metaName(metaFolded, path), presentValue)
 	case "unfold":
 		delete(s, metaName(metaFolded, path))
-	case "step":
+	case "step", "next":
 		url.Values(s).Set(metaName(metaMode, ""), ModeWizard)
 		url.Values(s).Set(metaName(metaStep, ""), path)
 	case "expand":

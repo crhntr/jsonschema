@@ -6,38 +6,15 @@ import (
 )
 
 // view is what the templates render, derived from a form after its errors
-// are attached: a copy of the fields in which hidden groups (and, in the
-// wizard, every group below the current step) are stubs, plus the
-// controls the copy does not render, carried as hidden inputs so the page
-// holds the whole form state.
+// are attached: the fields, with hidden groups as stubs, or in the wizard
+// the current step's field; plus the controls that are not rendered,
+// carried as hidden inputs so the page holds the whole form state.
 type view struct {
 	root    *Field
 	hidden  []Control
 	wizard  *Wizard
 	outline []OutlineItem
 }
-
-// Wizard is what the wizard shows around the current step.
-type Wizard struct {
-	// Step is the form path of the group being edited.
-	Step string
-	// Crumbs lead from the root group to the step, which is last.
-	Crumbs []Crumb
-	// Back, Up and Next are the previous group in document order, the
-	// enclosing group, and the next group; nil where there is none.
-	Back, Up, Next *Crumb
-	// Elsewhere lists the other groups with errors of their own.
-	Elsewhere []Crumb
-}
-
-// Crumb names a group the wizard can go to.
-type Crumb struct {
-	Label, Path string
-	Current     bool
-}
-
-// Action is the value of the edit button that goes to the group.
-func (c Crumb) Action() string { return ActionWizard + c.Path }
 
 // OutlineItem is an entry in the form's outline for an object, array, map
 // or choice, with the groups inside it.
@@ -50,8 +27,8 @@ type OutlineItem struct {
 	// Folded reports a hidden group; its items are left out.
 	Folded bool
 	// Wizard reports that the form is in the wizard, where entries go to
-	// the group's step instead of linking to it, and Current marks the
-	// step.
+	// the group's first step instead of linking to it, and Current marks
+	// the innermost group holding the current step.
 	Wizard, Current bool
 	Items           []OutlineItem
 }
@@ -64,8 +41,8 @@ func (o OutlineItem) FoldAction() string {
 	return "fold" + o.Path
 }
 
-// StepAction is the value of the button that edits the group in the
-// wizard.
+// StepAction is the value of the button that opens the wizard at the
+// group's first field.
 func (o OutlineItem) StepAction() string { return ActionWizard + o.Path }
 
 // View returns the field to render: the root, or the wizard's step.
@@ -123,28 +100,10 @@ func (f *Form) prepare() *view {
 	for _, field := range f.fields(func(field *Field) bool { return field.WriteOnly }) {
 		secret = append(secret, field.Path)
 	}
-	groups := groupsOf(f.Root)
-	step := -1
 	if f.Mode == ModeWizard {
-		step = slices.IndexFunc(groups, func(g groupRef) bool { return g.field.Path == f.step })
-		if step < 0 && len(groups) > 0 {
-			step = 0
-		}
-	}
-	if step < 0 {
-		v.root = f.trim(f.Root, true, func(g *Field) bool { return f.folded(g.Path) }, secret)
+		v.root, v.hidden, v.wizard = f.wizard(secret)
 	} else {
-		at := groups[step].field
-		v.root = f.trim(at, true, isGroup, secret)
-		keyName := metaName(metaKey, at.Path)
-		v.hidden = f.controls(func(name, path string) bool {
-			return !within(path, at.Path) || name == keyName
-		}, secret)
-		v.wizard = wizardFor(groups, step)
-	}
-	if f.Mode == ModeWizard && step < 0 {
-		// A value with no groups is its own only step.
-		v.wizard = &Wizard{Crumbs: []Crumb{{Label: firstNonEmpty(f.Root.Label, "Value"), Current: true}}}
+		v.root = f.trim(f.Root, true, func(g *Field) bool { return f.folded(g.Path) }, secret)
 	}
 	v.outline = f.outline(f.Root, v.wizard)
 	return v
@@ -230,80 +189,6 @@ func summary(f *Field) string {
 	return ""
 }
 
-type groupRef struct {
-	field  *Field
-	parent int // index of the enclosing group, or -1
-}
-
-// groupsOf lists the groups in document order: the wizard's steps.
-func groupsOf(root *Field) []groupRef {
-	var out []groupRef
-	var walk func(f *Field, parent int)
-	walk = func(f *Field, parent int) {
-		if isGroup(f) {
-			out = append(out, groupRef{field: f, parent: parent})
-			parent = len(out) - 1
-		}
-		content := f
-		if f.Choice != nil {
-			content = f.Choice
-		}
-		for _, c := range content.Fields {
-			walk(c, parent)
-		}
-		for _, c := range content.Entries {
-			walk(c, parent)
-		}
-	}
-	walk(root, -1)
-	return out
-}
-
-func wizardFor(groups []groupRef, step int) *Wizard {
-	crumb := func(i int) *Crumb {
-		if i < 0 || i >= len(groups) {
-			return nil
-		}
-		g := groups[i].field
-		return &Crumb{Label: firstNonEmpty(g.Label, g.Pointer, "Value"), Path: g.Path, Current: i == step}
-	}
-	w := &Wizard{
-		Step: groups[step].field.Path,
-		Back: crumb(step - 1),
-		Up:   crumb(groups[step].parent),
-		Next: crumb(step + 1),
-	}
-	for i := step; i >= 0; i = groups[i].parent {
-		w.Crumbs = append([]Crumb{*crumb(i)}, w.Crumbs...)
-	}
-	for i, g := range groups {
-		if i != step && ownsErrors(g.field, true) {
-			w.Elsewhere = append(w.Elsewhere, *crumb(i))
-		}
-	}
-	return w
-}
-
-// ownsErrors reports errors on a group or on the fields its own step
-// shows, not counting the groups inside it, which are steps of their own.
-func ownsErrors(f *Field, top bool) bool {
-	if !top && isGroup(f) {
-		return false
-	}
-	if len(f.Errors) > 0 || (f.Key != nil && len(f.Key.Errors) > 0) {
-		return true
-	}
-	if f.Choice != nil && ownsErrors(f.Choice, true) {
-		return true
-	}
-	for _, c := range append(slices.Clip(f.Fields), f.Entries...) {
-		if ownsErrors(c, false) {
-			return true
-		}
-	}
-	return false
-}
-
 // invalidWithin reports errors on the field or any field inside it.
 func (f *Field) invalidWithin() bool {
 	if f.Invalid() || (f.Key != nil && len(f.Key.Errors) > 0) {
@@ -333,13 +218,16 @@ func (f *Form) outline(field *Field, w *Wizard) []OutlineItem {
 			Invalid: c.invalidWithin(),
 			Folded:  f.folded(c.Path),
 			Wizard:  w != nil,
-			Current: w != nil && w.Step == c.Path,
 		}
 		if c.Choice != nil {
 			item.Note = c.Choice.Label
 		}
 		if !item.Folded {
 			item.Items = f.outline(c, w)
+		}
+		// The current step is marked on the innermost group holding it.
+		if w != nil && within(w.Step, c.Path) {
+			item.Current = !slices.ContainsFunc(item.Items, func(i OutlineItem) bool { return within(w.Step, i.Path) })
 		}
 		items = append(items, item)
 	}

@@ -78,9 +78,9 @@ type Field struct {
 	// Collapsed reports an optional value that is left out; it renders
 	// as a button that adds it.
 	Collapsed bool
-	// Stub reports a group shown as one summary row: a hidden group
-	// (Folded), or a group below the wizard's current step. Its controls
-	// are carried in Hidden so nothing is lost while it is not shown.
+	// Stub reports a group shown as one summary row because it is hidden
+	// (Folded). Its controls are carried in Hidden so nothing is lost
+	// while it is not shown.
 	Stub, Folded bool
 	Hidden       []Control
 	// Summary describes a stub's contents: how many items or entries, or

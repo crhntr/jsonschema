@@ -2,7 +2,7 @@
 
 {{define "jsonhandler-form" -}}
 <form class="jsonform" id="{{.ID}}" method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="this" hx-swap="outerHTML"{{with .Mode}} data-mode="{{.}}"{{end}}{{if .Invalid}} data-invalid{{end}}>
-<button type="submit" hidden tabindex="-1" aria-hidden="true"></button>
+<button type="submit" hidden tabindex="-1" aria-hidden="true"{{with .Wizard}}{{if .Next}} name="@action" value="{{.NextAction}}"{{end}}{{end}}></button>
 {{- with .ValidateAction}}
 <div class="jsonform-live" hidden hx-post="{{.}}" hx-trigger="keyup delay:400ms from:closest form, change from:closest form" hx-include="closest form" hx-swap="none"></div>
 {{- end}}
@@ -30,16 +30,18 @@
 {{- with .Wizard}}
 <input type="hidden" name="@mode" value="wizard">
 <input type="hidden" name="@step" value="{{.Step}}">
-<nav class="jsonform-crumbs" aria-label="Steps">
+{{- if .Count}}
+<p class="jsonform-progress" id="{{$.ID}}_progress">Step <span class="jsonform-progress-index">{{.Index}}</span> of <span class="jsonform-progress-count">{{.Count}}</span>: <span class="jsonform-progress-label">{{.Label}}</span></p>
+{{- end}}
+{{- with .Crumbs}}
+<nav class="jsonform-crumbs" aria-label="Where this step is">
 <ol>
-{{- range .Crumbs}}
-<li{{if .Current}} aria-current="step"{{end}}>
-{{- if .Current}}<span class="jsonform-label">{{.Label}}</span>
-{{- else}}<button type="submit" class="jsonform-button jsonform-step" name="@action" value="{{.Action}}" formnovalidate>{{.Label}}</button>
-{{- end}}</li>
+{{- range .}}
+<li><button type="submit" class="jsonform-button jsonform-step" name="@action" value="{{.Action}}" formnovalidate>{{.Label}}</button></li>
 {{- end}}
 </ol>
 </nav>
+{{- end}}
 {{- with .Elsewhere}}
 <div class="jsonform-elsewhere" role="alert">
 <p>These steps have errors too:</p>
@@ -63,11 +65,9 @@
 {{- with .Back}}
 <button type="submit" class="jsonform-button jsonform-back" name="@action" value="{{.Action}}" formnovalidate>Back</button>
 {{- end}}
-{{- with .Up}}
-<button type="submit" class="jsonform-button jsonform-up-step" name="@action" value="{{.Action}}" formnovalidate>Up to {{.Label}}</button>
-{{- end}}
-{{- with .Next}}
-<button type="submit" class="jsonform-button jsonform-next" name="@action" value="{{.Action}}" formnovalidate>Next: {{.Label}}</button>
+{{- if .Next}}
+{{- /* No formnovalidate: the browser will not leave a required field empty. */}}
+<button type="submit" class="jsonform-button jsonform-next" name="@action" value="{{.NextAction}}" aria-describedby="{{$.ID}}_progress">Next: {{.Next.Label}}</button>
 {{- end}}
 {{- end}}
 <button type="submit" class="jsonform-button jsonform-submit">{{.SubmitLabel}}</button>
@@ -94,19 +94,15 @@
 </ol>
 {{- end}}
 
-{{- /* A group shown as one row: hidden by the outline's Hide button, or
-       below the wizard's current step. Its controls ride along hidden. */ -}}
+{{- /* A group shown as one row, hidden by the outline's Hide button. Its
+       controls ride along hidden. */ -}}
 {{define "jsonhandler-stub" -}}
-<div class="jsonform-field jsonform-stub{{with .Class}} {{.}}{{end}}" id="{{.GroupID}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}" data-stub{{if .Folded}} data-folded{{end}}{{if .StubInvalid}} data-invalid{{end}}{{if .Required}} data-required{{end}}{{if .Deprecated}} data-deprecated{{end}}>
+<div class="jsonform-field jsonform-stub{{with .Class}} {{.}}{{end}}" id="{{.GroupID}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}" data-stub data-folded{{if .StubInvalid}} data-invalid{{end}}{{if .Required}} data-required{{end}}{{if .Deprecated}} data-deprecated{{end}}>
 <span class="jsonform-label" id="{{.LabelID}}">{{template "jsonhandler-label" .}}</span>
 {{- with .Summary}}
 <span class="jsonform-summary">{{.}}</span>
 {{- end}}
-{{- if .Folded}}
 <button type="submit" class="jsonform-button jsonform-unfold" name="@action" value="{{.Action "unfold"}}" formnovalidate aria-describedby="{{.LabelID}}">Show</button>
-{{- else}}
-<button type="submit" class="jsonform-button jsonform-step" name="@action" value="{{.Action "step"}}" formnovalidate aria-describedby="{{.LabelID}}">Edit</button>
-{{- end}}
 {{- range .Hidden}}
 <input type="hidden" name="{{.Name}}" value="{{.Value}}">
 {{- end}}
@@ -355,7 +351,7 @@
 {{- end}}
 {{- if .CanAdd}}
 <button type="submit" class="jsonform-button jsonform-add" name="@action" value="{{.Action "add"}}" formnovalidate>Add property</button>
-{{- else if .AddReason}}
+{{- else}}
 <button type="button" class="jsonform-button jsonform-add" disabled aria-describedby="{{.ID}}_reason">Add property</button>
 <span class="jsonform-reason" id="{{.ID}}_reason">{{.AddReason}}</span>
 {{- end}}
@@ -384,7 +380,7 @@
 {{- end}}
 {{- if .CanAdd}}
 <button type="submit" class="jsonform-button jsonform-add" name="@action" value="{{.Action "add"}}" formnovalidate>Add item</button>
-{{- else if .AddReason}}
+{{- else}}
 <button type="button" class="jsonform-button jsonform-add" disabled aria-describedby="{{.ID}}_reason">Add item</button>
 <span class="jsonform-reason" id="{{.ID}}_reason">{{.AddReason}}</span>
 {{- end}}

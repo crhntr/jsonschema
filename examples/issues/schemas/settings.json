@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/issues/settings.json",
+  "title": "Settings",
+  "type": "object",
+  "required": ["project"],
+  "properties": {
+    "project": {"type": "string", "minLength": 1, "default": "My project"},
+    "defaultSeverity": {"type": "string", "enum": ["low", "medium", "high", "critical"], "default": "medium"},
+    "labels": {
+      "description": "Colors for issue tags.",
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z]+$"},
+      "additionalProperties": {"type": "string", "x-form": {"widget": "color"}},
+      "maxProperties": 8
+    },
+    "notifications": {
+      "type": "object",
+      "properties": {
+        "email": {"type": "boolean"},
+        "digest": {"type": "string", "enum": ["daily", "weekly"]}
+      }
+    }
+  },
+  "additionalProperties": false
+}

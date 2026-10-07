@@ -1,0 +1,297 @@
+{{- /* Frame */ -}}
+
+{{define "head" -}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{with .Project}}{{.}}{{else}}Issues{{end}}</title>
+<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"413","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+<link rel="stylesheet" href="https://unpkg.com/open-props@1.7.23/open-props.min.css" integrity="sha384-fsyUJwnN3qLArJUL5oaEYS3/WnhCmI4K5x+oB8wFigOMTJaIvys56ozH3+nE/qcf" crossorigin="anonymous">
+<link rel="stylesheet" href="https://unpkg.com/open-props@1.7.23/normalize.min.css" integrity="sha384-sddBOogFG2pe9DuB3k3ekS4as3O4oEzrarCR1HkYLY5Z/7pFYJt54z8VD1yGM7JF" crossorigin="anonymous">
+<link rel="stylesheet" href="/jsonform.css">
+<script src="https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js" integrity="sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg" crossorigin="anonymous" defer></script>
+<style>
+  body { display: grid; justify-items: center; padding: var(--size-5) var(--size-4); }
+  .page { display: grid; gap: var(--size-5); inline-size: min(100%, 64rem); }
+  .page > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--size-3); padding-block-end: var(--size-3); border-block-end: var(--border-size-1) solid var(--surface-3); }
+  .page > header nav { display: flex; gap: var(--size-4); }
+  .page > header nav a[aria-current="page"] { font-weight: var(--font-weight-7); text-decoration: underline; }
+  .project { font-size: var(--font-size-4); font-weight: var(--font-weight-7); text-decoration: none; color: inherit; }
+  main { display: grid; gap: var(--size-4); }
+  main > * { margin: 0; }
+  h1 { font-size: var(--font-size-5); max-inline-size: none; }
+  h2 { font-size: var(--font-size-3); max-inline-size: none; }
+  table { inline-size: 100%; border-collapse: collapse; }
+  th, td { text-align: start; padding: var(--size-2); border-block-end: var(--border-size-1) solid var(--surface-3); }
+  .badge { display: inline-block; padding: 0 var(--size-2); border-radius: var(--radius-round); background: var(--surface-3); font-size: var(--font-size-0); }
+  .badge[data-severity="critical"], .badge[data-severity="high"] { background: var(--red-7); color: white; }
+  .badge[data-status="closed"] { background: var(--green-7); color: white; }
+  .tag { display: inline-block; padding: 0 var(--size-2); border-radius: var(--radius-2); border: var(--border-size-1) solid var(--tag, var(--surface-4)); font-size: var(--font-size-0); }
+  dl { display: grid; grid-template-columns: max-content 1fr; align-items: baseline; gap: var(--size-1) var(--size-4); }
+  dl > * { margin: 0; }
+  dt { color: var(--text-2); }
+  .actions { display: flex; gap: var(--size-3); align-items: center; }
+  .counts { display: flex; flex-wrap: wrap; gap: var(--size-3); padding: 0; list-style: none; }
+  .counts li { padding: var(--size-3) var(--size-4); border-radius: var(--radius-2); background: var(--surface-2); max-inline-size: none; }
+  .counts strong { display: block; font-size: var(--font-size-5); }
+  .description { white-space: pre-wrap; }
+  .danger { color: var(--red-7); }
+</style>
+</head>
+<body>
+<div class="page">
+<header>
+<a class="project" href="/">{{with .Project}}{{.}}{{else}}Issues{{end}}</a>
+<nav aria-label="Sections">
+<a href="/issues"{{if eq .Section "issues"}} aria-current="page"{{end}}>Issues</a>
+<a href="/contacts"{{if eq .Section "contacts"}} aria-current="page"{{end}}>Contacts</a>
+<a href="/settings"{{if eq .Section "settings"}} aria-current="page"{{end}}>Settings</a>
+</nav>
+</header>
+<main>
+{{- end}}
+
+{{define "foot" -}}
+</main>
+</div>
+</body>
+</html>
+{{- end}}
+
+{{define "error-page" -}}
+{{template "head" .Layout}}
+<h1>{{.Message}}</h1>
+<p><a href="/">Back to the dashboard</a></p>
+{{template "foot"}}
+{{- end}}
+
+{{define "form-page" -}}
+{{template "head" .Layout}}
+<h1>{{.Title}}</h1>
+{{.Form}}
+{{template "foot"}}
+{{- end}}
+
+{{- /* A post of a form: after a save, go to the next page; otherwise
+       answer htmx with the form alone, and a browser with the page. */ -}}
+{{define "form-response" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}
+{{- else if .Result.Location}}{{if .HXRequest}}{{.HXRedirect .Result.Location}}{{else}}{{.RedirectSeeOther .Result.Location}}{{end}}
+{{- else if .HXRequest}}{{.Result.Form}}
+{{- else}}{{template "form-page" .Result.FormPage}}
+{{- end}}
+{{- end}}
+
+{{- /* Dashboard */ -}}
+
+{{define "GET /{$} Home(ctx)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}
+{{- with .Result}}
+{{template "head" .Layout}}
+<h1>{{.Project}}</h1>
+<ul class="counts" aria-label="Issues by status">
+{{- range .Counts}}
+<li><strong>{{.Count}}</strong> {{.Status}}</li>
+{{- else}}
+<li>No issues yet.</li>
+{{- end}}
+</ul>
+<section aria-labelledby="recent">
+<h2 id="recent">Open issues</h2>
+{{- if .Recent}}
+<ul>
+{{- range .Recent}}
+<li><a href="/issues/{{.ID}}">{{.Title}}</a> <span class="badge" data-severity="{{.Severity}}">{{.Severity}}</span></li>
+{{- end}}
+</ul>
+{{- else}}
+<p>Nothing is open.</p>
+{{- end}}
+</section>
+<p class="actions"><a href="/issues/new">New issue</a> <a href="/contacts/new">New contact</a></p>
+{{template "foot"}}
+{{- end}}
+{{- end}}
+{{- end}}
+
+{{- /* Issues */ -}}
+
+{{define "GET /issues Issues(ctx)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}
+{{- with .Result}}
+{{template "head" .Layout}}
+<h1>Issues</h1>
+<p class="actions"><a href="/issues/new">New issue</a></p>
+{{- if .Issues}}
+<table>
+<thead><tr><th>Title</th><th>Severity</th><th>Status</th><th>Assignee</th><th>Updated</th></tr></thead>
+<tbody>
+{{- range .Issues}}
+<tr>
+<td><a href="/issues/{{.ID}}">{{.Title}}</a></td>
+<td><span class="badge" data-severity="{{.Severity}}">{{.Severity}}</span></td>
+<td><span class="badge" data-status="{{.Status}}">{{.Status}}</span></td>
+<td>{{if .AssigneeID.Valid}}<a href="/contacts/{{.AssigneeID.Int64}}">{{.AssigneeName.String}}</a>{{else if .Assignee.Valid}}{{.Assignee.String}}{{end}}</td>
+<td>{{.UpdatedAt}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+{{- else}}
+<p>No issues yet.</p>
+{{- end}}
+{{template "foot"}}
+{{- end}}
+{{- end}}
+{{- end}}
+
+{{define "GET /issues/new NewIssue(ctx)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "form-page" .Result}}{{end}}
+{{- end}}
+
+{{define "POST /issues/new/form SubmitNewIssue(ctx, form)" -}}{{template "form-response" .}}{{- end}}
+
+{{define "POST /issues/new/form/validate ValidateNewIssue(ctx, form)" -}}{{.Result}}{{- end}}
+
+{{define "GET /issues/{id} Issue(ctx, id)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}
+{{- with .Result}}
+{{template "head" .Layout}}
+<h1>{{.Issue.Title}}</h1>
+<p><span class="badge" data-severity="{{.Issue.Severity}}">{{.Issue.Severity}}</span> <span class="badge" data-status="{{.Issue.Status}}">{{.Issue.Status}}</span></p>
+<dl>
+<dt>Assignee</dt>
+<dd>{{with .Assignee}}<a href="/contacts/{{.ID}}">{{.Name}}</a>{{else}}{{with .Issue.Assignee.String}}{{.}}{{else}}Nobody{{end}}{{end}}</dd>
+{{- with .Doc.Due}}
+<dt>Due</dt><dd>{{.}}</dd>
+{{- end}}
+{{- with .Environment}}
+<dt>Environment</dt><dd>{{.}}</dd>
+{{- end}}
+{{- with .Tags}}
+<dt>Tags</dt><dd>{{range .}}<span class="tag"{{with .Color}} style="--tag: {{.}}"{{end}}>{{.Name}}</span> {{end}}</dd>
+{{- end}}
+</dl>
+{{- with .Doc.Description}}
+<p class="description">{{.}}</p>
+{{- end}}
+{{- with .Doc.Steps}}
+<h2>Steps to reproduce</h2>
+<ol>
+{{- range .}}
+<li>{{.Action}}{{with .Expected}} (expected: {{.}}){{end}}</li>
+{{- end}}
+</ol>
+{{- end}}
+<section aria-labelledby="edit">
+<h2 id="edit">Edit</h2>
+{{.Form}}
+</section>
+<form method="post" action="/issues/{{.Issue.ID}}/delete"><button type="submit" class="danger">Delete issue</button></form>
+{{template "foot"}}
+{{- end}}
+{{- end}}
+{{- end}}
+
+{{define "POST /issues/{id}/form SubmitIssue(ctx, id, form)" -}}{{template "form-response" .}}{{- end}}
+
+{{define "POST /issues/{id}/form/validate ValidateIssue(ctx, id, form)" -}}{{.Result}}{{- end}}
+
+{{define "POST /issues/{id}/delete DeleteIssue(ctx, id)" -}}
+{{- /* A method returning only an error hands it over as .Result. */ -}}
+{{- with .Result}}{{$.StatusCode (status .)}}{{template "error-page" (errorPage .)}}{{else}}{{.RedirectSeeOther "/issues"}}{{end}}
+{{- end}}
+
+{{- /* Contacts */ -}}
+
+{{define "GET /contacts Contacts(ctx)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}
+{{- with .Result}}
+{{template "head" .Layout}}
+<h1>Contacts</h1>
+<p class="actions"><a href="/contacts/new">New contact</a></p>
+{{- if .Contacts}}
+<table>
+<thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Open issues</th></tr></thead>
+<tbody>
+{{- range .Contacts}}
+<tr>
+<td><a href="/contacts/{{.ID}}">{{.Name}}</a></td>
+<td>{{.Email}}</td>
+<td>{{.Role.String}}</td>
+<td>{{.OpenIssues}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+{{- else}}
+<p>No contacts yet.</p>
+{{- end}}
+{{template "foot"}}
+{{- end}}
+{{- end}}
+{{- end}}
+
+{{define "GET /contacts/new NewContact(ctx)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "form-page" .Result}}{{end}}
+{{- end}}
+
+{{define "POST /contacts/new/form SubmitNewContact(ctx, form)" -}}{{template "form-response" .}}{{- end}}
+
+{{define "POST /contacts/new/form/validate ValidateNewContact(ctx, form)" -}}{{.Result}}{{- end}}
+
+{{define "GET /contacts/{id} Contact(ctx, id)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}
+{{- with .Result}}
+{{template "head" .Layout}}
+<h1>{{.Contact.Name}}</h1>
+<dl>
+<dt>Email</dt><dd><a href="mailto:{{.Contact.Email}}">{{.Contact.Email}}</a></dd>
+{{- with .Doc.Role}}
+<dt>Role</dt><dd>{{.}}</dd>
+{{- end}}
+{{- with .Doc.Phone}}
+<dt>Phone</dt><dd>{{.}}</dd>
+{{- end}}
+</dl>
+<section aria-labelledby="assigned">
+<h2 id="assigned">Assigned issues</h2>
+{{- if .Issues}}
+<ul>
+{{- range .Issues}}
+<li><a href="/issues/{{.ID}}">{{.Title}}</a> <span class="badge" data-status="{{.Status}}">{{.Status}}</span></li>
+{{- end}}
+</ul>
+{{- else}}
+<p>None.</p>
+{{- end}}
+</section>
+<section aria-labelledby="edit">
+<h2 id="edit">Edit</h2>
+{{.Form}}
+</section>
+<form method="post" action="/contacts/{{.Contact.ID}}/delete"><button type="submit" class="danger">Delete contact</button></form>
+{{template "foot"}}
+{{- end}}
+{{- end}}
+{{- end}}
+
+{{define "POST /contacts/{id}/form SubmitContact(ctx, id, form)" -}}{{template "form-response" .}}{{- end}}
+
+{{define "POST /contacts/{id}/form/validate ValidateContact(ctx, id, form)" -}}{{.Result}}{{- end}}
+
+{{define "POST /contacts/{id}/delete DeleteContact(ctx, id)" -}}
+{{- with .Result}}{{$.StatusCode (status .)}}{{template "error-page" (errorPage .)}}{{else}}{{.RedirectSeeOther "/contacts"}}{{end}}
+{{- end}}
+
+{{- /* Settings */ -}}
+
+{{define "GET /settings Settings(ctx)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "form-page" .Result}}{{end}}
+{{- end}}
+
+{{define "POST /settings/form SubmitSettings(ctx, form)" -}}{{template "form-response" .}}{{- end}}
+
+{{define "POST /settings/form/validate ValidateSettings(ctx, form)" -}}{{.Result}}{{- end}}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/issues/contact.json",
+  "title": "Contact",
+  "type": "object",
+  "required": ["name", "email"],
+  "properties": {
+    "name": {"type": "string", "minLength": 1},
+    "email": {"type": "string", "format": "email"},
+    "role": {"type": "string", "enum": ["developer", "designer", "manager", "support"]},
+    "phone": {"type": "string", "x-form": {"widget": "tel"}},
+    "notes": {"type": "string", "x-form": {"widget": "textarea"}}
+  },
+  "additionalProperties": false
+}

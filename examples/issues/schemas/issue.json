@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/issues/issue.json",
+  "title": "Issue",
+  "type": "object",
+  "required": ["title", "severity", "status"],
+  "x-form": {"order": ["title", "severity", "status", "assignee", "due"]},
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 120,
+      "x-form": {"placeholder": "What went wrong?"}
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"],
+      "default": "medium",
+      "x-form": {"widget": "radio"}
+    },
+    "status": {
+      "type": "string",
+      "enum": ["open", "in progress", "closed"],
+      "default": "open"
+    },
+    "assignee": {
+      "description": "The email address of the contact working on it.",
+      "type": "string",
+      "format": "email"
+    },
+    "due": {
+      "type": "string",
+      "format": "date"
+    },
+    "description": {
+      "type": "string",
+      "x-form": {"widget": "textarea", "rows": 5}
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "enum": ["bug", "feature", "docs", "ux", "security"]}
+    },
+    "steps": {
+      "title": "Steps to reproduce",
+      "type": "array",
+      "items": {"$ref": "#/$defs/step"}
+    },
+    "environment": {
+      "description": "Where it happens.",
+      "oneOf": [
+        {"$ref": "#/$defs/browser"},
+        {"$ref": "#/$defs/server"}
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "step": {
+      "title": "Step",
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {"type": "string"},
+        "expected": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "browser": {
+      "title": "Browser",
+      "type": "object",
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": {"type": "string", "const": "browser"},
+        "name": {"type": "string", "enum": ["Chrome", "Firefox", "Safari", "Edge"]},
+        "version": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "server": {
+      "title": "Server",
+      "type": "object",
+      "required": ["kind", "os"],
+      "properties": {
+        "kind": {"type": "string", "const": "server"},
+        "os": {"type": "string", "enum": ["linux", "darwin", "windows"]},
+        "arch": {"type": "string", "enum": ["amd64", "arm64"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}

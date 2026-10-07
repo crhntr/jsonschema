@@ -242,7 +242,7 @@
 <button type="submit" class="jsonform-button jsonform-add" name="@action" value="{{.Action "pick"}}" formnovalidate hx-post="{{.FormAction}}" hx-trigger="click, change from:#{{.PickID}}" hx-target="closest form" hx-swap="outerHTML">Add</button>
 </div>
 {{- end}}
-{{- if or .LenName (eq .Kind "map")}}
+{{- if .LenName}}
 {{template "jsonhandler-entries" .}}
 {{- end}}
 {{- template "jsonhandler-remove" .}}

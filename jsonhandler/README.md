@@ -511,6 +511,31 @@ Some things it does that you may want to keep in your own:
 - **Schemas.** `New` resolves references only within the document and to the
   built-in 2020-12 meta-schemas, and never fetches over the network.
 
+## Testing
+
+`go test ./jsonhandler` renders forms over HTTP and parses them with
+[`typelate/dom`](https://github.com/typelate/dom). The tests round-trip
+values (including every 2020-12 meta-schema document through the
+meta-schema's own form), check the markup contract above for every kind,
+and fuzz both submissions (`FuzzSubmitForm`) and encodings (`FuzzEncode`).
+
+Two kinds of mutation testing check that the tests notice changes:
+
+```sh
+# Go code
+gremlins unleash ./jsonhandler --exclude-files 'template_routes\.go$' --timeout-coefficient 30
+
+# Templates
+go tool muxt -C jsonhandler test-template-mutations
+```
+
+muxt is pinned in `go.mod` as a tool. Its template checker,
+`github.com/typelate/check` v0.8.1, recurses without end on templates
+that invoke themselves, as `jsonhandler-field` does, so `muxt check` and
+`test-template-mutations` overflow the stack until it learns to stop at a
+template already being checked with the same type of dot. `muxt generate`
+is not affected.
+
 ## Limitations
 
 - `if`/`then`/`else`, `not`, `dependentSchemas`, `patternProperties`,

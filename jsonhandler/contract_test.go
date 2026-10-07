@@ -3,6 +3,7 @@ package jsonhandler
 import (
 	"context"
 	"encoding/json/jsontext"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -542,6 +543,113 @@ func TestMarkupDetails(t *testing.T) {
 		res := serve(t, &Handler{}, formRequest(nil))
 		if el := fragment(t, res).QuerySelector(".jsonform-failure"); el == nil || el.TextContent() != errNoSchema.Error() {
 			t.Errorf("failure = %v", el)
+		}
+	})
+}
+
+func TestMarkupEdges(t *testing.T) {
+	t.Run("every kind can be removed from a wide object", func(t *testing.T) {
+		props := map[string]string{
+			"t": `{"type":"string"}`,
+			"x": `{"type":"string","x-form":{"widget":"textarea"}}`,
+			"s": `{"enum":["a","b"]}`,
+			"r": `{"enum":["a","b"],"x-form":{"widget":"radio"}}`,
+			"c": `{"type":"array","uniqueItems":true,"items":{"enum":["a","b"]}}`,
+			"a": `{"type":"array","items":{"type":"string"}}`,
+			"o": `{"oneOf":[{"type":"string"},{"type":"integer"}]}`,
+			"m": `{"type":"object","additionalProperties":{"type":"string"}}`,
+		}
+		value := `{"t":"v","x":"v","s":"a","r":"a","c":["a"],"a":["v"],"o":"v","m":{"k":"v"}}`
+		var fields []string
+		for name, schema := range props {
+			fields = append(fields, `"`+name+`":`+schema)
+		}
+		for i := range foldThreshold {
+			fields = append(fields, fmt.Sprintf(`"pad%d":{"type":"string"}`, i))
+		}
+		doc := render(t, `{"type":"object","properties":{`+strings.Join(fields, ",")+`}}`, value)
+		for name := range props {
+			b := doc.QuerySelector(`[data-pointer="/` + name + `"] > .jsonform-remove`)
+			if b == nil || b.GetAttribute("value") != "remove/"+name {
+				t.Errorf("/%s has no remove button", name)
+			}
+		}
+	})
+
+	t.Run("controls without optional attributes", func(t *testing.T) {
+		doc := render(t, `{"type":"object","properties":{"t":{"type":"string"},"s":{"enum":["a","b"]},"r":{"enum":["a","b"],"x-form":{"widget":"radio"}}}}`, "")
+		if el := doc.QuerySelector(`[name="$/t"]`); el.HasAttribute("autocomplete") {
+			t.Errorf("a plain input has autocomplete")
+		}
+		if n := len(selectAll(doc, `[data-pointer="/s"] input`)); n != 0 {
+			t.Errorf("an editable select has %d hidden inputs", n)
+		}
+		for el := range doc.QuerySelectorSequence(`[data-pointer="/r"] input`) {
+			if el.HasAttribute("required") {
+				t.Errorf("an optional radio is required")
+			}
+		}
+	})
+
+	t.Run("read-only unchecked checkbox", func(t *testing.T) {
+		doc := render(t, `{"type":"object","properties":{"b":{"type":"boolean","readOnly":true}}}`, `{"b":false}`)
+		box := doc.QuerySelector(`[data-pointer="/b"] input[type="checkbox"]`)
+		label := doc.QuerySelector(`[data-pointer="/b"] label`)
+		if box == nil || box.HasAttribute("checked") || box.ID() == "" || label.GetAttribute("for") != box.ID() {
+			t.Errorf("read-only unchecked box = %v", box)
+		}
+		if hidden := doc.QuerySelector(`[data-pointer="/b"] input[type="hidden"]`); hidden == nil || hidden.GetAttribute("value") != "false" {
+			t.Errorf("read-only hidden value = %v", hidden)
+		}
+	})
+
+	t.Run("an invalid checkbox describes its errors", func(t *testing.T) {
+		h := newHandler(t, `{"type":"object","required":["b"],"properties":{"b":{"type":"boolean","not":true}}}`)
+		doc := fragment(t, postForm(t, h, url.Values{"$/b": {"false", "true"}}))
+		box := doc.QuerySelector(`[data-pointer="/b"] input[type="checkbox"]`)
+		errs := doc.QuerySelector(`[data-pointer="/b"] ul.jsonform-errors`)
+		if !slices.Contains(strings.Fields(box.GetAttribute("aria-describedby")), errs.ID()) {
+			t.Errorf("aria-describedby = %q, errors id %q", box.GetAttribute("aria-describedby"), errs.ID())
+		}
+	})
+
+	t.Run("an invalid choice", func(t *testing.T) {
+		h := newHandler(t, `{"type":"object","properties":{"v":{"oneOf":[{"type":"string","minLength":3},{"type":"integer"}]}}}`)
+		doc := fragment(t, postForm(t, h, url.Values{"@variant/v": {"0"}, "$/v": {"ab"}}))
+		if el := doc.QuerySelector(`[data-pointer="/v"]`); el.GetAttribute("data-kind") != "choice" || !el.HasAttribute("data-invalid") {
+			t.Errorf("choice is not marked invalid: %s", el.OuterHTML()[:200])
+		}
+		doc = fragment(t, postForm(t, h, url.Values{"@variant/v": {"1"}, "$/v": {"4"}, ActionName: {"refresh"}}))
+		if el := doc.QuerySelector(`[data-pointer="/v"]`); el.HasAttribute("data-invalid") {
+			t.Errorf("valid choice is marked invalid")
+		}
+	})
+
+	t.Run("live validation of key and form errors", func(t *testing.T) {
+		h := newHandler(t, `{"type":"object","additionalProperties":{"type":"string"}}`)
+		validate := func(form url.Values) spec.DocumentFragment {
+			req := formRequest(form)
+			req.URL.Path = "/form/validate"
+			return fragment(t, serve(t, h, req))
+		}
+		doc := validate(url.Values{"@len": {"1"}, "@key/~k0": {""}, "$/~k0": {"v"}})
+		key := doc.QuerySelector("#jsonform-_7ek0_key_errors")
+		if key == nil || key.HasAttribute("hidden") || key.QuerySelector("li").TextContent() != messageKey {
+			t.Errorf("key errors = %v", key)
+		}
+		doc = validate(url.Values{"@len": {"1"}, "@key/~k0": {"k"}, "$/~k0": {"v"}})
+		if key := doc.QuerySelector("#jsonform-_7ek0_key_errors"); key == nil || !key.HasAttribute("hidden") || key.QuerySelector("li") != nil {
+			t.Errorf("key errors of a valid key = %v", key)
+		}
+		if form := doc.QuerySelector("#jsonform_errors"); form == nil || !form.HasAttribute("hidden") {
+			t.Errorf("form errors of a valid form = %v", form)
+		}
+
+		h.MaxFields = 1
+		doc = validate(url.Values{"@len": {"3"}})
+		form := doc.QuerySelector("#jsonform_errors")
+		if form == nil || form.HasAttribute("hidden") || form.QuerySelector("li").TextContent() != "the form would have more than 1 fields" {
+			t.Errorf("form errors = %v", form)
 		}
 	})
 }

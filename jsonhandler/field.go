@@ -119,8 +119,11 @@ type Key struct {
 	Errors                        []string
 }
 
-// Invalid reports that the field has errors to show.
-func (f *Field) Invalid() bool { return len(f.Errors) > 0 }
+// Invalid reports that the field has errors to show. A choice is invalid
+// when its chosen variant is, since that is where its errors are shown.
+func (f *Field) Invalid() bool {
+	return len(f.Errors) > 0 || (f.Choice != nil && f.Choice.Invalid())
+}
 
 // ErrorsID is the id of the field's error list, which is always rendered
 // (empty when there are no errors) so live validation can replace it.

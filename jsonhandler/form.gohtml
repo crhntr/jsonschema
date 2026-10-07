@@ -1,0 +1,285 @@
+{{- /* Partials. README.md documents the markup; keep the two in step. */ -}}
+
+{{define "jsonhandler-form" -}}
+<form class="jsonform" id="{{.ID}}" method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="this" hx-swap="outerHTML"{{if .Invalid}} data-invalid{{end}}>
+<button type="submit" hidden tabindex="-1" aria-hidden="true"></button>
+{{- with .Errors}}
+<ul class="jsonform-errors" role="alert">{{range .}}<li>{{.}}</li>{{end}}</ul>
+{{- end}}
+{{template "jsonhandler-field" .Root}}
+<div class="jsonform-actions"><button type="submit" class="jsonform-button jsonform-submit">{{.SubmitLabel}}</button></div>
+</form>
+{{- end}}
+
+{{define "jsonhandler-result" -}}
+<div class="jsonform-result" id="{{.ID}}">
+<output class="jsonform-output" form="{{.ID}}-edit"><pre><code>{{.JSON}}</code></pre></output>
+{{- with .Message}}
+<p class="jsonform-message" role="status">{{.}}</p>
+{{- end}}
+<form id="{{.ID}}-edit" method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="closest .jsonform-result" hx-swap="outerHTML">
+{{- range .State}}
+<input type="hidden" name="{{.Name}}" value="{{.Value}}">
+{{- end}}
+<button type="submit" class="jsonform-button jsonform-edit" name="@action" value="edit">Edit</button>
+</form>
+</div>
+{{- end}}
+
+{{define "jsonhandler-error" -}}
+<div class="jsonform-failure" role="alert">{{.}}</div>
+{{- end}}
+
+{{define "jsonhandler-field" -}}
+{{- if .Collapsed}}{{template "jsonhandler-collapsed" .}}
+{{- else if eq .Kind "text"}}{{template "jsonhandler-text" .}}
+{{- else if eq .Kind "number"}}{{template "jsonhandler-text" .}}
+{{- else if eq .Kind "textarea"}}{{template "jsonhandler-textarea" .}}
+{{- else if eq .Kind "json"}}{{template "jsonhandler-textarea" .}}
+{{- else if eq .Kind "checkbox"}}{{template "jsonhandler-checkbox" .}}
+{{- else if eq .Kind "select"}}{{template "jsonhandler-select" .}}
+{{- else if eq .Kind "radio"}}{{template "jsonhandler-options" .}}
+{{- else if eq .Kind "checkboxes"}}{{template "jsonhandler-options" .}}
+{{- else if eq .Kind "const"}}{{template "jsonhandler-output" .}}
+{{- else if eq .Kind "null"}}{{template "jsonhandler-output" .}}
+{{- else if eq .Kind "object"}}{{template "jsonhandler-object" .}}
+{{- else if eq .Kind "map"}}{{template "jsonhandler-object" .}}
+{{- else if eq .Kind "array"}}{{template "jsonhandler-array" .}}
+{{- else if eq .Kind "choice"}}{{template "jsonhandler-choice" .}}
+{{- end}}
+{{- end}}
+
+{{define "jsonhandler-label" -}}
+{{.Label}}{{if .Required}} <abbr class="jsonform-required" title="required">*</abbr>{{end}}
+{{- end}}
+
+{{define "jsonhandler-help" -}}
+{{- with .Description}}
+<p class="jsonform-description" id="{{$.ID}}-description">{{.}}</p>
+{{- end}}
+{{- with .Errors}}
+<ul class="jsonform-errors" id="{{$.ID}}-errors">{{range .}}<li>{{.}}</li>{{end}}</ul>
+{{- end}}
+{{- end}}
+
+{{define "jsonhandler-remove" -}}
+{{- if .Removable}}
+<button type="submit" class="jsonform-button jsonform-remove" name="@action" value="{{.Action "remove"}}" formnovalidate>Remove {{.Label}}</button>
+{{- end}}
+{{- end}}
+
+{{define "jsonhandler-collapsed" -}}
+<div class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}" data-collapsed{{if .Deprecated}} data-deprecated{{end}}>
+<span class="jsonform-label" id="{{.ID}}-label">{{.Label}}</span>
+<button type="submit" class="jsonform-button jsonform-expand" name="@action" value="{{.Action "expand"}}" formnovalidate aria-describedby="{{.ID}}-label">Add</button>
+{{- with .Description}}
+<p class="jsonform-description">{{.}}</p>
+{{- end}}
+</div>
+{{- end}}
+
+{{define "jsonhandler-text" -}}
+<div class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}>
+<label class="jsonform-label" for="{{.ID}}">{{template "jsonhandler-label" .}}</label>
+<input class="jsonform-control" id="{{.ID}}" name="{{.Name}}" type="{{.Type}}" value="{{.Value}}"
+{{- with .Placeholder}} placeholder="{{.}}"{{end}}
+{{- with .Min}} min="{{.}}"{{end}}
+{{- with .Max}} max="{{.}}"{{end}}
+{{- with .Step}} step="{{.}}"{{end}}
+{{- with .MinLength}} minlength="{{.}}"{{end}}
+{{- with .MaxLength}} maxlength="{{.}}"{{end}}
+{{- with .Pattern}} pattern="{{.}}"{{end}}
+{{- if .HTMLRequired}} required{{end}}
+{{- if .ReadOnly}} readonly{{end}}
+{{- if .WriteOnly}} autocomplete="new-password"{{end}}
+{{- if .Invalid}} aria-invalid="true"{{end}}
+{{- with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{- template "jsonhandler-help" .}}
+{{- template "jsonhandler-remove" .}}
+</div>
+{{- end}}
+
+{{define "jsonhandler-textarea" -}}
+<div class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}>
+<label class="jsonform-label" for="{{.ID}}">{{template "jsonhandler-label" .}}</label>
+<textarea class="jsonform-control" id="{{.ID}}" name="{{.Name}}" rows="{{.Rows}}"
+{{- if eq .Kind "json"}} spellcheck="false"{{end}}
+{{- with .Placeholder}} placeholder="{{.}}"{{end}}
+{{- with .MinLength}} minlength="{{.}}"{{end}}
+{{- with .MaxLength}} maxlength="{{.}}"{{end}}
+{{- if .HTMLRequired}} required{{end}}
+{{- if .ReadOnly}} readonly{{end}}
+{{- if .Invalid}} aria-invalid="true"{{end}}
+{{- with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{.Value}}</textarea>
+{{- template "jsonhandler-help" .}}
+{{- template "jsonhandler-remove" .}}
+</div>
+{{- end}}
+
+{{define "jsonhandler-checkbox" -}}
+<div class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}>
+{{- if .ReadOnly}}
+<input type="hidden" name="{{.Name}}" value="{{.Checked}}">
+<input class="jsonform-control" id="{{.ID}}" type="checkbox" disabled{{if .Checked}} checked{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{- else}}
+<input type="hidden" name="{{.Name}}" value="false">
+<input class="jsonform-control" id="{{.ID}}" name="{{.Name}}" type="checkbox" value="true"{{if .Checked}} checked{{end}}{{if .Invalid}} aria-invalid="true"{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{- end}}
+<label class="jsonform-label" for="{{.ID}}">{{template "jsonhandler-label" .}}</label>
+{{- template "jsonhandler-help" .}}
+</div>
+{{- end}}
+
+{{define "jsonhandler-select" -}}
+<div class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}>
+<label class="jsonform-label" for="{{.ID}}">{{template "jsonhandler-label" .}}</label>
+{{- if .ReadOnly}}
+<input type="hidden" name="{{.Name}}" value="{{.Value}}">
+{{- end}}
+<select class="jsonform-control" id="{{.ID}}"{{if .ReadOnly}} disabled{{else}} name="{{.Name}}"{{end}}
+{{- if .HTMLRequired}} required{{end}}
+{{- if .Invalid}} aria-invalid="true"{{end}}
+{{- with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{- range .Options}}
+<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+{{- end}}
+</select>
+{{- template "jsonhandler-help" .}}
+{{- template "jsonhandler-remove" .}}
+</div>
+{{- end}}
+
+{{define "jsonhandler-options" -}}
+<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+<legend class="jsonform-label">{{template "jsonhandler-label" .}}</legend>
+{{- if eq .Kind "checkboxes"}}
+<input type="hidden" name="{{.Name}}" value="">
+{{- with .PresentName}}
+<input type="hidden" name="{{.}}" value="1">
+{{- end}}
+{{- end}}
+<div class="jsonform-options">
+{{- $field := .}}
+{{- range .Options}}
+<label class="jsonform-option"><input class="jsonform-control" type="{{if eq $field.Kind "radio"}}radio{{else}}checkbox{{end}}" name="{{$field.Name}}" value="{{.Value}}"{{if .Selected}} checked{{end}}{{if and $field.HTMLRequired (eq $field.Kind "radio")}} required{{end}}{{if $field.ReadOnly}} disabled{{end}}> {{.Label}}</label>
+{{- end}}
+</div>
+{{- template "jsonhandler-help" .}}
+{{- template "jsonhandler-remove" .}}
+</fieldset>
+{{- end}}
+
+{{define "jsonhandler-output" -}}
+<div class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}>
+<span class="jsonform-label" id="{{.ID}}-label">{{.Label}}</span>
+<output class="jsonform-{{.Kind}}" aria-labelledby="{{.ID}}-label">{{if eq .Kind "null"}}null{{else}}{{.Value}}{{end}}</output>
+{{- template "jsonhandler-help" .}}
+</div>
+{{- end}}
+
+{{define "jsonhandler-object" -}}
+<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{- with .Label}}
+<legend class="jsonform-label">{{template "jsonhandler-label" $}}</legend>
+{{- end}}
+{{- with .PresentName}}
+<input type="hidden" name="{{.}}" value="1">
+{{- end}}
+{{- template "jsonhandler-help" .}}
+{{- range .Fields}}
+{{template "jsonhandler-field" .}}
+{{- end}}
+{{- if or .LenName (eq .Kind "map")}}
+{{template "jsonhandler-entries" .}}
+{{- end}}
+{{- template "jsonhandler-remove" .}}
+</fieldset>
+{{- end}}
+
+{{define "jsonhandler-entries" -}}
+<div class="jsonform-entries">
+<input type="hidden" name="{{.LenName}}" value="{{.Len}}">
+{{- if .Entries}}
+<ol class="jsonform-items">
+{{- range .Entries}}
+<li class="jsonform-item jsonform-entry">
+<div class="jsonform-key">
+<label class="jsonform-label" for="{{.Key.ID}}">Property name</label>
+<input class="jsonform-control" id="{{.Key.ID}}" name="{{.Key.Name}}" type="text" value="{{.Key.Value}}" required
+{{- with .Key.Pattern}} pattern="{{.}}"{{end}}
+{{- with .Key.MinLength}} minlength="{{.}}"{{end}}
+{{- with .Key.MaxLength}} maxlength="{{.}}"{{end}}
+{{- if .Key.Errors}} aria-invalid="true" aria-describedby="{{.Key.ID}}-errors"{{end}}>
+{{- with .Key.Errors}}
+<ul class="jsonform-errors" id="{{$.Key.ID}}-errors">{{range .}}<li>{{.}}</li>{{end}}</ul>
+{{- end}}
+</div>
+{{template "jsonhandler-field" .}}
+{{template "jsonhandler-item-actions" .}}
+</li>
+{{- end}}
+</ol>
+{{- end}}
+{{- if .CanAdd}}
+<button type="submit" class="jsonform-button jsonform-add" name="@action" value="{{.Action "add"}}" formnovalidate>Add property</button>
+{{- end}}
+</div>
+{{- end}}
+
+{{define "jsonhandler-array" -}}
+<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{- with .Label}}
+<legend class="jsonform-label">{{template "jsonhandler-label" $}}</legend>
+{{- end}}
+<input type="hidden" name="{{.LenName}}" value="{{.Len}}">
+{{- with .PresentName}}
+<input type="hidden" name="{{.}}" value="1">
+{{- end}}
+{{- template "jsonhandler-help" .}}
+{{- if .Fields}}
+<ol class="jsonform-items">
+{{- range .Fields}}
+<li class="jsonform-item">
+{{template "jsonhandler-field" .}}
+{{template "jsonhandler-item-actions" .}}
+</li>
+{{- end}}
+</ol>
+{{- end}}
+{{- if .CanAdd}}
+<button type="submit" class="jsonform-button jsonform-add" name="@action" value="{{.Action "add"}}" formnovalidate>Add item</button>
+{{- end}}
+{{- template "jsonhandler-remove" .}}
+</fieldset>
+{{- end}}
+
+{{define "jsonhandler-item-actions" -}}
+<div class="jsonform-item-actions">
+<button type="submit" class="jsonform-button jsonform-up" name="@action" value="{{.Action "up"}}" formnovalidate{{if .First}} disabled{{end}} aria-label="Move {{.Label}} up">Move up</button>
+<button type="submit" class="jsonform-button jsonform-down" name="@action" value="{{.Action "down"}}" formnovalidate{{if .Last}} disabled{{end}} aria-label="Move {{.Label}} down">Move down</button>
+<button type="submit" class="jsonform-button jsonform-remove" name="@action" value="{{.Action "remove"}}" formnovalidate aria-label="Remove {{.Label}}">Remove</button>
+</div>
+{{- end}}
+
+{{define "jsonhandler-choice" -}}
+<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{- with .Label}}
+<legend class="jsonform-label">{{template "jsonhandler-label" $}}</legend>
+{{- end}}
+{{- template "jsonhandler-help" .}}
+<div class="jsonform-variant">
+<label class="jsonform-label" for="{{.ID}}">Variant</label>
+<select class="jsonform-control" id="{{.ID}}" name="{{.VariantName}}" hx-post="{{.FormAction}}" hx-trigger="change" hx-target="closest form" hx-swap="outerHTML" hx-vals='{"@action": "refresh"}'>
+{{- range .Options}}
+<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+{{- end}}
+</select>
+<button type="submit" class="jsonform-button jsonform-refresh" name="@action" value="refresh" formnovalidate>Change</button>
+</div>
+{{- with .Choice}}
+{{template "jsonhandler-field" .}}
+{{- end}}
+{{- template "jsonhandler-remove" .}}
+</fieldset>
+{{- end}}

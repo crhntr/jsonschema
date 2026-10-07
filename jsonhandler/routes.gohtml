@@ -1,0 +1,18 @@
+{{- /*
+	Routes. Each template name is a muxt route: method, path, and the
+	Handler method that supplies the data. Both routes respond with a
+	partial (no <html> or <body>) so a page can load it or swap it in.
+*/ -}}
+
+{{define "GET /form Form(ctx)" -}}
+{{- if .Err}}{{template "jsonhandler-error" .Err}}
+{{- else}}{{template "jsonhandler-form" (.Result.WithAction .Path.SubmitForm.String)}}
+{{- end}}
+{{- end}}
+
+{{define "POST /form SubmitForm(ctx, form)" -}}
+{{- if .Err}}{{template "jsonhandler-error" .Err}}
+{{- else if .Result.Valid}}{{template "jsonhandler-result" (.Result.WithAction .Path.SubmitForm.String)}}
+{{- else}}{{template "jsonhandler-form" (.Result.WithAction .Path.SubmitForm.String)}}
+{{- end}}
+{{- end}}

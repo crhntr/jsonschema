@@ -101,7 +101,9 @@ answers to `localhost` or an IP address and refuses cross-origin posts.
 [`jsonhandler`](jsonhandler/README.md) renders a hypermedia form for any
 schema and decodes the submission to JSON that matches it. It is what
 `jsch form` uses, and it documents its endpoints and markup for use in other
-web applications.
+web applications. [`examples/issues`](examples/issues) is a small issue
+tracker built on it, with Go types from `jsch generate` and queries from
+sqlc.
 
 ## License
 

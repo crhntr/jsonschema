@@ -22,6 +22,9 @@ import (
 //	@present<path>  the optional object, array or map at path is included
 //	@key<path>      the property name of the map entry at path
 //	@pick<path>     the optional property of the object at path to add
+//	@folded<path>   the group at path is hidden
+//	@mode           "json" or "wizard" while the form is in that mode
+//	@step           the form path of the group the wizard is on
 //	@action         the edit an edit button asks for; see [applyAction]
 const (
 	valuePrefix  = "$"
@@ -31,6 +34,8 @@ const (
 	metaPresent  = "present"
 	metaKey      = "key"
 	metaPick     = "pick"
+	metaFolded   = "folded"
+	metaStep     = "step"
 	ActionName   = "@action"
 	entryToken   = "~k"
 	maxItems     = 1000 // upper bound on @len so a request cannot ask for unbounded work
@@ -207,6 +212,9 @@ func positionPath(parent string, i int, entry bool) string {
 //	down<path>    swap an array item or map entry with the one after it
 //	expand<path>  include a collapsed optional value
 //	pick<path>    include the optional property @pick<path> names
+//	fold<path>    hide the group at path
+//	unfold<path>  show the group at path again
+//	step<path>    edit the group at path with the wizard
 //
 // Any other action, including the empty one, changes nothing; the form
 // is re-rendered with the submitted values, which is how a newly chosen
@@ -224,6 +232,13 @@ func applyAction(s state, action string) {
 			url.Values(s).Set(metaName(metaLen, path), strconv.Itoa(n+1))
 		}
 		url.Values(s).Set(metaName(metaPresent, path), presentValue)
+	case "fold":
+		url.Values(s).Set(metaName(metaFolded, path), presentValue)
+	case "unfold":
+		delete(s, metaName(metaFolded, path))
+	case "step":
+		url.Values(s).Set(metaName(metaMode, ""), ModeWizard)
+		url.Values(s).Set(metaName(metaStep, ""), path)
 	case "expand":
 		url.Values(s).Set(metaName(metaPresent, path), presentValue)
 	case "pick":

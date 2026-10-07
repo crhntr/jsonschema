@@ -469,9 +469,9 @@ func TestRender_structure(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := []OutlineItem{
-			{Label: "a", Href: "#jsonform-a_group", Invalid: true, Items: []OutlineItem{{Label: "b", Href: "#jsonform-a-b_group"}}},
-			{Label: "c", Href: "#jsonform-c_group", Items: []OutlineItem{{Label: "d", Href: "#jsonform-c-d_group"}}},
-			{Label: "m", Href: "#jsonform-m_group", Items: []OutlineItem{{Label: "k", Href: "#jsonform-m-_7ek0_group"}}},
+			{Label: "a", Href: "#jsonform-a_group", Path: "/a", Invalid: true, Items: []OutlineItem{{Label: "b", Href: "#jsonform-a-b_group", Path: "/a/b"}}},
+			{Label: "c", Href: "#jsonform-c_group", Path: "/c", Note: "object", Items: []OutlineItem{{Label: "d", Href: "#jsonform-c-d_group", Path: "/c/d"}}},
+			{Label: "m", Href: "#jsonform-m_group", Path: "/m", Items: []OutlineItem{{Label: "k", Href: "#jsonform-m-_7ek0_group", Path: "/m/~k0"}}},
 		}
 		if got := f.Outline(); !reflect.DeepEqual(got, want) {
 			t.Errorf("outline =\n%+v\nwant\n%+v", got, want)

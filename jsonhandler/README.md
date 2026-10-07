@@ -220,6 +220,50 @@ and validated like any other JSON field. Switching to JSON fails, keeping the
 fields, if a field cannot be decoded; switching back fails, keeping the text,
 if it does not parse.
 
+### Hiding groups
+
+With `Handler.Outline` on, each outline entry has a Hide button. A hidden
+group shrinks to one row, in the outline and in the form, with a summary (how
+many items or properties, or the chosen variant) and a Show button. Hiding
+changes nothing about the value: the group's controls stay in the page as
+hidden inputs, and the hidden state is itself a control (`@folded/path`), so
+it lasts across edits and submissions.
+
+### Wizard
+
+Edit with wizard shows one group at a time. A step shows the group's own
+fields and, for each group inside it, a row with an Edit button that steps
+into it. A breadcrumb leads back up, Back and Next go through the groups in
+document order, and in the outline every group is a button that goes to its
+step. In the fields view, each outline entry has an Edit button that opens
+the wizard right at that group.
+
+The page holds the whole value. Everything outside the current step is
+carried as hidden inputs, so leaving a step loses nothing, and the step
+itself is two controls, `@mode=wizard` and `@step=/path`. Submit validates
+the whole value from any step. Errors on the step show on its fields, and
+the other steps with errors are listed with buttons that go to them (moving
+to a step checks it the way validation as you type does). Edit as form and
+Edit as JSON work from any step.
+
+`writeOnly` values are never written into hidden inputs, so one entered on a
+step is kept only while that step is the one being submitted.
+
+### Why something is not available
+
+The form says why a control does nothing rather than leaving it out without
+a word:
+
+- An Add item or Add property button that would break `maxItems`,
+  `maxProperties`, a closed tuple (`items: false`) or
+  `additionalProperties: false` is rendered disabled, with the reason next to
+  it.
+- A `readOnly` field says "Read-only".
+- Only the chosen `oneOf`/`anyOf` variant's fields are rendered, and the
+  choice says which variants are not in use and that switching the variant
+  is how to fill them in instead. The outline shows the chosen variant next
+  to each choice and only its branch of the tree.
+
 ## Markup reference
 
 This is the contract a stylesheet can rely on. Class names start with
@@ -366,24 +410,85 @@ alone re-renders the form.
 
 Every button has `jsonform-button` and one of: `jsonform-submit`,
 `jsonform-add`, `jsonform-expand`, `jsonform-remove`, `jsonform-up`,
-`jsonform-down`, `jsonform-refresh`, `jsonform-mode`, `jsonform-edit`. Edit
-buttons carry `formnovalidate`, so the browser does not block an Add because
-some other field is not filled in yet.
+`jsonform-down`, `jsonform-refresh`, `jsonform-mode`, `jsonform-edit`,
+`jsonform-step`, `jsonform-fold`, `jsonform-unfold`, `jsonform-back`,
+`jsonform-up-step`, `jsonform-next`. Edit buttons carry `formnovalidate`,
+so the browser does not block an Add because some other field is not filled
+in yet. An Add button that cannot be used is `disabled` and
+`aria-describedby` a `<span class="jsonform-reason">` saying why.
+
+### Reasons
+
+`<span class="jsonform-reason">` explains a disabled Add button or a
+`readOnly` field ("Read-only"). A choice with more than one variant has
+`<p class="jsonform-reason jsonform-inactive">` naming the variants not in
+use.
+
+### Stubs
+
+A hidden group, or a group below the wizard's step, is one row:
+
+```html
+<div class="jsonform-field jsonform-stub" id="…_group" data-kind="object"
+     data-pointer="/address" data-stub data-folded? data-invalid?>
+  <span class="jsonform-label">address</span>
+  <span class="jsonform-summary">3 items</span>                <!-- arrays, maps, choices -->
+  <button class="jsonform-button jsonform-unfold" value="unfold/address">Show</button>  <!-- hidden -->
+  <button class="jsonform-button jsonform-step" value="step/address">Edit</button>      <!-- wizard -->
+  <input type="hidden" name="$/address/street" value="…">…
+</div>
+```
+
+`data-invalid` on a stub means there are errors somewhere inside it.
 
 ### Outline
 
 ```html
 <nav class="jsonform-outline" aria-label="Outline">
   <ol>
-    <li data-invalid?><a href="#jsonform-address_group">address</a>
-      <ol>…</ol>
+    <li data-invalid? data-folded? aria-current="step"?>
+      <a class="jsonform-outline-label" href="#jsonform-address_group">address</a>
+      <span class="jsonform-note">Dog</span>                      <!-- a choice's variant -->
+      <button class="jsonform-button jsonform-step" value="step/address">Edit</button>
+      <button class="jsonform-button jsonform-fold" value="fold/address">Hide</button>
+      <ol>…</ol>                                                  <!-- left out when hidden -->
     </li>
   </ol>
 </nav>
 ```
 
-The outline links to every object, map, array and choice, nested as they
-are. `data-invalid` marks a group with an error anywhere inside it.
+The outline lists every object, map, array and choice, nested as they are.
+`data-invalid` marks a group with an error anywhere inside it. In the
+wizard the label is a `<button class="jsonform-button jsonform-step
+jsonform-outline-label">` that goes to the step, there is no separate Edit
+button, and `aria-current="step"` marks the current step.
+
+### Wizard
+
+In the wizard the form has `data-mode="wizard"` and its body starts with:
+
+```html
+<input type="hidden" name="@mode" value="wizard">
+<input type="hidden" name="@step" value="/address">
+<nav class="jsonform-crumbs" aria-label="Steps">
+  <ol>
+    <li><button class="jsonform-button jsonform-step" value="step">Person</button></li>
+    <li aria-current="step"><span class="jsonform-label">address</span></li>
+  </ol>
+</nav>
+<div class="jsonform-elsewhere" role="alert">                     <!-- other steps with errors -->
+  <p>These steps have errors too:</p>
+  <ul><li><button class="jsonform-button jsonform-step" value="step/tags">tags</button></li></ul>
+</div>
+<input type="hidden" name="…" value="…">…                         <!-- everything outside the step -->
+<!-- the step's field -->
+<div class="jsonform-actions">
+  <button class="jsonform-button jsonform-back" value="step">Back</button>
+  <button class="jsonform-button jsonform-up-step" value="step">Up to Person</button>
+  <button class="jsonform-button jsonform-next" value="step/tags">Next: tags</button>
+  <button type="submit" class="jsonform-button jsonform-submit">Submit</button>
+</div>
+```
 
 ### Result
 
@@ -425,13 +530,17 @@ themselves form input. A pointer built from a property name escapes `~` as
 | `@present/path` | an optional object, array or map that was added |
 | `@key/path` | the property name of the map entry at `path` |
 | `@pick/path` | the property to add to the wide object at `path` |
-| `@mode` | `json` while the form shows one JSON text area |
+| `@folded/path` | the group at `path` is hidden |
+| `@mode` | `json` while the form shows one JSON text area, `wizard` in the wizard |
+| `@step` | the form path of the wizard's current group |
 | `@action` | the edit an edit button asks for |
 
 `@action` values are an operation followed by a path:
 `add/tags`, `remove/tags/2`, `up/tags/2`, `down/tags/2`, `expand/next`,
-`pick/` + object path (`pick` alone for the root), `json`, `fields`, and
-`refresh` or `edit`, which change nothing and re-render.
+`pick/` + object path (`pick` alone for the root), `fold/address`,
+`unfold/address`, `step/address` (opens the wizard at that group; `step`
+alone is the root), `json`, `fields`, and `refresh` or `edit`, which change
+nothing and re-render.
 
 Other request fields are ignored, so a CSRF token field can sit in the same
 form.

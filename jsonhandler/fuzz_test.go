@@ -70,6 +70,11 @@ func FuzzSubmitForm(f *testing.F) {
 		"$/when=2024-01-01T10:00&$/name=%FF",
 		"@action=remove&@action=add/tags",
 		"$/id=forged&$/secret=s&$/name=n",
+		"@mode=wizard&@step=/next&$/name=n&@present/next=1&@action=step/next/tags",
+		"@mode=wizard&@step=/labels/~k0&@len/labels=1&@key/labels/~k0=a&$/labels/~k0=1",
+		"@folded/labels=1&@len/labels=1&@key/labels/~k0=a&@action=unfold/labels",
+		"$/name=n&@action=fold/tags&@action=step",
+		"@mode=wizard&@action=fields&$/name=x",
 	} {
 		f.Add(seed)
 	}

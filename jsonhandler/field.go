@@ -2,6 +2,7 @@ package jsonhandler
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
 	"math"
 	"slices"
 	"strconv"
@@ -77,6 +78,22 @@ type Field struct {
 	// Collapsed reports an optional value that is left out; it renders
 	// as a button that adds it.
 	Collapsed bool
+	// Stub reports a group shown as one summary row: a hidden group
+	// (Folded), or a group below the wizard's current step. Its controls
+	// are carried in Hidden so nothing is lost while it is not shown.
+	Stub, Folded bool
+	Hidden       []Control
+	// Summary describes a stub's contents: how many items or entries, or
+	// the chosen variant.
+	Summary string
+	// StubInvalid reports errors anywhere inside a stub.
+	StubInvalid bool
+
+	// AddReason says why an array or map cannot get another item or
+	// entry when CanAdd is false.
+	AddReason string
+	// Inactive names a choice's variants other than the chosen one.
+	Inactive []string
 	// Removable reports an optional value that was added with its add
 	// button and can be collapsed again.
 	Removable bool
@@ -449,6 +466,15 @@ func (b *builder) entries(f *Field, sh *shape, at site, depth int) {
 	f.LenName, f.Len = metaName(metaLen, at.path), n
 	maxProps, hasMax := integerKeyword(sh.maxProps)
 	f.CanAdd = !sh.closed && (!hasMax || n < maxProps) && n < maxItems
+	switch {
+	case f.CanAdd:
+	case sh.closed:
+		f.AddReason = "No other properties are allowed."
+	case hasMax && n >= maxProps:
+		f.AddReason = fmt.Sprintf("At most %d %s.", maxProps, plural(maxProps, "property", "properties"))
+	default:
+		f.AddReason = fmt.Sprintf("At most %d entries.", maxItems)
+	}
 	values := sh.additional
 	if len(values) == 0 {
 		values = []node{{}} // no schema: any JSON value
@@ -498,6 +524,15 @@ func (b *builder) array(f *Field, sh *shape, at site, depth int) {
 	maximum, hasMax := integerKeyword(sh.maxItems)
 	itemsClosed := len(sh.items) > 0 && flatten(sh.items...).never
 	f.CanAdd = (!hasMax || n < maximum) && n < maxItems && (!itemsClosed || n < len(sh.prefixItems))
+	switch {
+	case f.CanAdd:
+	case hasMax && n >= maximum:
+		f.AddReason = fmt.Sprintf("At most %d %s.", maximum, plural(maximum, "item", "items"))
+	case itemsClosed:
+		f.AddReason = fmt.Sprintf("Exactly %d %s.", len(sh.prefixItems), plural(len(sh.prefixItems), "item", "items"))
+	default:
+		f.AddReason = fmt.Sprintf("At most %d items.", maxItems)
+	}
 	b.ancestors = append(b.ancestors, sh)
 	defer func() { b.ancestors = b.ancestors[:len(b.ancestors)-1] }()
 	for i := range n {
@@ -530,6 +565,9 @@ func (b *builder) choice(f *Field, sh *shape, at site, depth int) {
 	f.variant = idx
 	for i, c := range choices {
 		f.Options = append(f.Options, Option{Value: strconv.Itoa(i), Label: c.label, Selected: i == idx})
+		if i != idx {
+			f.Inactive = append(f.Inactive, c.label)
+		}
 	}
 	if len(choices) == 0 {
 		f.Kind = KindJSON
@@ -595,6 +633,13 @@ func (b *builder) description(sh *shape) string {
 // else the property name, else a title inherited through a reference.
 func label(sh *shape, name string) string {
 	return firstNonEmpty(sh.ui.Label, sh.ownTitle, name, sh.title)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func firstNonEmpty(values ...string) string {

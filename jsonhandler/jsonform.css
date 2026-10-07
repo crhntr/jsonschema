@@ -87,9 +87,34 @@
   padding-inline-start: 0;
 }
 
+/* Each row: the label and note, then the buttons pushed to the end. */
 .jsonform-outline li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--size-1, 0.25rem);
   padding-block: 0.1em;
   max-inline-size: none;
+}
+
+.jsonform-outline .jsonform-outline-label {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jsonform-outline li > .jsonform-outline-label ~ .jsonform-button:not(.jsonform-outline-label) {
+  margin-inline-start: auto;
+}
+
+.jsonform-outline li > .jsonform-step:not(.jsonform-outline-label) + .jsonform-fold {
+  margin-inline-start: 0;
+}
+
+.jsonform-outline li > ol {
+  flex-basis: 100%;
 }
 
 .jsonform-outline a {
@@ -110,6 +135,39 @@
 .jsonform-outline li[data-invalid] > a::after {
   content: " !";
   font-weight: var(--font-weight-7, 700);
+}
+
+/* Outline buttons stay small and quiet until hovered. */
+.jsonform-outline .jsonform-button {
+  padding: 0 var(--size-1, 0.25rem);
+  border-color: transparent;
+  background: none;
+  font-size: var(--font-size-0, 0.75rem);
+  color: var(--jsonform-muted);
+}
+
+.jsonform-outline .jsonform-step.jsonform-outline-label {
+  font-size: inherit;
+  color: var(--jsonform-text);
+}
+
+.jsonform-outline li[aria-current="step"] > .jsonform-step {
+  font-weight: var(--font-weight-7, 700);
+  color: var(--jsonform-accent);
+}
+
+.jsonform-outline li[data-folded] > .jsonform-outline-label {
+  color: var(--jsonform-muted);
+  font-style: italic;
+}
+
+.jsonform-note {
+  color: var(--jsonform-muted);
+  font-size: var(--font-size-0, 0.75rem);
+}
+
+.jsonform-note::before {
+  content: "· ";
 }
 
 /* Land a little below the top when following an outline link. */
@@ -378,16 +436,16 @@ select.jsonform-control {
 }
 
 /* An optional value's remove button sits on its label's row. */
-div.jsonform-field:has(> .jsonform-remove) {
+div.jsonform-field:not(.jsonform-stub):has(> .jsonform-remove) {
   grid-template-columns: 1fr auto;
   align-items: center;
 }
 
-div.jsonform-field:has(> .jsonform-remove) > :not(.jsonform-label, .jsonform-remove) {
+div.jsonform-field:not(.jsonform-stub):has(> .jsonform-remove) > :not(.jsonform-label, .jsonform-remove) {
   grid-column: 1 / -1;
 }
 
-div.jsonform-field > .jsonform-remove {
+div.jsonform-field:not(.jsonform-stub) > .jsonform-remove {
   grid-row: 1;
   grid-column: 2;
 }
@@ -440,6 +498,94 @@ div.jsonform-field > .jsonform-remove {
 .jsonform-actions {
   display: flex;
   gap: var(--size-2, 0.5rem);
+}
+
+/* A group shown as one row: hidden, or below the wizard's step. */
+.jsonform-stub {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-auto-flow: column;
+  align-items: center;
+  column-gap: var(--size-2, 0.5rem);
+  padding: var(--size-2, 0.5rem) var(--size-3, 1rem);
+  border: var(--border-size-1, 1px) solid var(--jsonform-border);
+  border-radius: var(--jsonform-radius);
+  background: var(--jsonform-surface);
+}
+
+.jsonform-stub[data-folded] {
+  border-style: dashed;
+}
+
+.jsonform-stub[data-invalid] {
+  border-color: var(--jsonform-error);
+}
+
+.jsonform-summary {
+  color: var(--jsonform-muted);
+  font-size: var(--font-size-1, 0.875rem);
+}
+
+/* Why a control is disabled, or which variants are not in use. */
+.jsonform-reason {
+  color: var(--jsonform-muted);
+  font-size: var(--font-size-0, 0.75rem);
+  font-style: italic;
+  max-inline-size: none;
+}
+
+.jsonform-inactive {
+  margin: 0;
+}
+
+/* The wizard: where you are, and the other steps that need fixing. */
+.jsonform-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-1, 0.25rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jsonform-crumbs li + li::before {
+  content: "›";
+  margin-inline-end: var(--size-1, 0.25rem);
+  color: var(--jsonform-muted);
+}
+
+.jsonform-crumbs .jsonform-button {
+  border-color: transparent;
+  background: none;
+  padding-inline: var(--size-1, 0.25rem);
+}
+
+.jsonform-elsewhere {
+  padding: var(--size-2, 0.5rem) var(--size-3, 1rem);
+  border: var(--border-size-1, 1px) solid var(--jsonform-error);
+  border-radius: var(--jsonform-radius);
+  color: var(--jsonform-error);
+}
+
+.jsonform-elsewhere p,
+.jsonform-elsewhere ul {
+  margin: 0;
+}
+
+.jsonform-elsewhere ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2, 0.5rem);
+  padding: 0;
+  list-style: none;
+}
+
+.jsonform[data-mode="wizard"] .jsonform-actions {
+  flex-wrap: wrap;
+}
+
+.jsonform[data-mode="wizard"] .jsonform-submit {
+  margin-inline-start: auto;
 }
 
 /* Errors */

@@ -11,7 +11,11 @@
 {{- if eq .Mode "json"}}
 <input type="hidden" name="@mode" value="json">
 <button type="submit" class="jsonform-button jsonform-mode" name="@action" value="fields" formnovalidate>Edit as form</button>
+{{- else if eq .Mode "wizard"}}
+<button type="submit" class="jsonform-button jsonform-mode" name="@action" value="fields" formnovalidate>Edit as form</button>
+<button type="submit" class="jsonform-button jsonform-mode" name="@action" value="json" formnovalidate>Edit as JSON</button>
 {{- else}}
+<button type="submit" class="jsonform-button jsonform-mode" name="@action" value="step" formnovalidate>Edit with wizard</button>
 <button type="submit" class="jsonform-button jsonform-mode" name="@action" value="json" formnovalidate>Edit as JSON</button>
 {{- end}}
 </div>
@@ -23,9 +27,51 @@
 {{- end}}{{end}}
 <div class="jsonform-body">
 {{template "jsonhandler-form-errors" .}}
-{{- with .Root}}
+{{- with .Wizard}}
+<input type="hidden" name="@mode" value="wizard">
+<input type="hidden" name="@step" value="{{.Step}}">
+<nav class="jsonform-crumbs" aria-label="Steps">
+<ol>
+{{- range .Crumbs}}
+<li{{if .Current}} aria-current="step"{{end}}>
+{{- if .Current}}<span class="jsonform-label">{{.Label}}</span>
+{{- else}}<button type="submit" class="jsonform-button jsonform-step" name="@action" value="{{.Action}}" formnovalidate>{{.Label}}</button>
+{{- end}}</li>
+{{- end}}
+</ol>
+</nav>
+{{- with .Elsewhere}}
+<div class="jsonform-elsewhere" role="alert">
+<p>These steps have errors too:</p>
+<ul>
+{{- range .}}
+<li><button type="submit" class="jsonform-button jsonform-step" name="@action" value="{{.Action}}" formnovalidate>{{.Label}}</button></li>
+{{- end}}
+</ul>
+</div>
+{{- end}}
+{{- end}}
+{{- range .Hidden}}
+<input type="hidden" name="{{.Name}}" value="{{.Value}}">
+{{- end}}
+{{- with .View}}
 {{template "jsonhandler-field" .}}
-<div class="jsonform-actions"><button type="submit" class="jsonform-button jsonform-submit">{{$.SubmitLabel}}</button></div>
+{{- end}}
+{{- if .Root}}
+<div class="jsonform-actions">
+{{- with .Wizard}}
+{{- with .Back}}
+<button type="submit" class="jsonform-button jsonform-back" name="@action" value="{{.Action}}" formnovalidate>Back</button>
+{{- end}}
+{{- with .Up}}
+<button type="submit" class="jsonform-button jsonform-up-step" name="@action" value="{{.Action}}" formnovalidate>Up to {{.Label}}</button>
+{{- end}}
+{{- with .Next}}
+<button type="submit" class="jsonform-button jsonform-next" name="@action" value="{{.Action}}" formnovalidate>Next: {{.Label}}</button>
+{{- end}}
+{{- end}}
+<button type="submit" class="jsonform-button jsonform-submit">{{.SubmitLabel}}</button>
+</div>
 {{- end}}
 </div>
 </form>
@@ -34,10 +80,44 @@
 {{define "jsonhandler-outline-items" -}}
 <ol>
 {{- range .}}
-<li{{if .Invalid}} data-invalid{{end}}><a href="{{.Href}}">{{.Label}}</a>
+<li{{if .Invalid}} data-invalid{{end}}{{if .Folded}} data-folded{{end}}{{if .Current}} aria-current="step"{{end}}>
+{{- if .Wizard}}<button type="submit" class="jsonform-button jsonform-step jsonform-outline-label" name="@action" value="{{.StepAction}}" formnovalidate>{{.Label}}</button>
+{{- else}}<a class="jsonform-outline-label" href="{{.Href}}">{{.Label}}</a>
+{{- end}}
+{{- with .Note}} <span class="jsonform-note">{{.}}</span>{{end}}
+{{- if not .Wizard}}
+<button type="submit" class="jsonform-button jsonform-step" name="@action" value="{{.StepAction}}" formnovalidate aria-label="Edit {{.Label}} with the wizard">Edit</button>
+{{- end}}
+<button type="submit" class="jsonform-button jsonform-fold" name="@action" value="{{.FoldAction}}" formnovalidate aria-label="{{if .Folded}}Show{{else}}Hide{{end}} {{.Label}}">{{if .Folded}}Show{{else}}Hide{{end}}</button>
 {{- with .Items}}{{template "jsonhandler-outline-items" .}}{{end}}</li>
 {{- end}}
 </ol>
+{{- end}}
+
+{{- /* A group shown as one row: hidden by the outline's Hide button, or
+       below the wizard's current step. Its controls ride along hidden. */ -}}
+{{define "jsonhandler-stub" -}}
+<div class="jsonform-field jsonform-stub{{with .Class}} {{.}}{{end}}" id="{{.GroupID}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}" data-stub{{if .Folded}} data-folded{{end}}{{if .StubInvalid}} data-invalid{{end}}{{if .Required}} data-required{{end}}{{if .Deprecated}} data-deprecated{{end}}>
+<span class="jsonform-label" id="{{.LabelID}}">{{template "jsonhandler-label" .}}</span>
+{{- with .Summary}}
+<span class="jsonform-summary">{{.}}</span>
+{{- end}}
+{{- if .Folded}}
+<button type="submit" class="jsonform-button jsonform-unfold" name="@action" value="{{.Action "unfold"}}" formnovalidate aria-describedby="{{.LabelID}}">Show</button>
+{{- else}}
+<button type="submit" class="jsonform-button jsonform-step" name="@action" value="{{.Action "step"}}" formnovalidate aria-describedby="{{.LabelID}}">Edit</button>
+{{- end}}
+{{- range .Hidden}}
+<input type="hidden" name="{{.Name}}" value="{{.Value}}">
+{{- end}}
+{{- template "jsonhandler-remove" .}}
+</div>
+{{- end}}
+
+{{define "jsonhandler-reason" -}}
+{{- if .ReadOnly}}
+<span class="jsonform-reason">Read-only</span>
+{{- end}}
 {{- end}}
 
 {{define "jsonhandler-form-errors" -}}
@@ -76,7 +156,8 @@
 {{- end}}
 
 {{define "jsonhandler-field" -}}
-{{- if .Collapsed}}{{template "jsonhandler-collapsed" .}}
+{{- if .Stub}}{{template "jsonhandler-stub" .}}
+{{- else if .Collapsed}}{{template "jsonhandler-collapsed" .}}
 {{- else if eq .Kind "text"}}{{template "jsonhandler-text" .}}
 {{- else if eq .Kind "number"}}{{template "jsonhandler-text" .}}
 {{- else if eq .Kind "textarea"}}{{template "jsonhandler-textarea" .}}
@@ -99,6 +180,7 @@
 {{- end}}
 
 {{define "jsonhandler-help" -}}
+{{- template "jsonhandler-reason" .}}
 {{- with .Description}}
 <p class="jsonform-description" id="{{$.HelpID}}">{{.}}</p>
 {{- end}}
@@ -273,6 +355,9 @@
 {{- end}}
 {{- if .CanAdd}}
 <button type="submit" class="jsonform-button jsonform-add" name="@action" value="{{.Action "add"}}" formnovalidate>Add property</button>
+{{- else if .AddReason}}
+<button type="button" class="jsonform-button jsonform-add" disabled aria-describedby="{{.ID}}_reason">Add property</button>
+<span class="jsonform-reason" id="{{.ID}}_reason">{{.AddReason}}</span>
 {{- end}}
 </div>
 {{- end}}
@@ -299,6 +384,9 @@
 {{- end}}
 {{- if .CanAdd}}
 <button type="submit" class="jsonform-button jsonform-add" name="@action" value="{{.Action "add"}}" formnovalidate>Add item</button>
+{{- else if .AddReason}}
+<button type="button" class="jsonform-button jsonform-add" disabled aria-describedby="{{.ID}}_reason">Add item</button>
+<span class="jsonform-reason" id="{{.ID}}_reason">{{.AddReason}}</span>
 {{- end}}
 {{- template "jsonhandler-remove" .}}
 </fieldset>
@@ -327,6 +415,9 @@
 </select>
 <button type="submit" class="jsonform-button jsonform-refresh" name="@action" value="refresh" formnovalidate>Change</button>
 </div>
+{{- with .Inactive}}
+<p class="jsonform-reason jsonform-inactive">Only one variant applies. Not in use: {{range $i, $label := .}}{{if $i}}, {{end}}{{$label}}{{end}}. Choose one under Variant to fill in its fields instead.</p>
+{{- end}}
 {{- with .Choice}}
 {{template "jsonhandler-field" .}}
 {{- end}}

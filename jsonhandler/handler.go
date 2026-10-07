@@ -78,15 +78,21 @@ func (offline) RoundTrip(req *http.Request) (*http.Response, error) {
 
 var errNoSchema = errors.New("jsonhandler: Handler.Schema is nil")
 
-// Edit actions that switch between the fields and one JSON text area for
-// the whole value. Other edit actions are described at [applyAction].
+// Edit actions that switch between the fields, one JSON text area for the
+// whole value, and the wizard. Other edit actions are described at
+// [applyAction]; "step" followed by a form path opens the wizard at that
+// group.
 const (
 	ActionJSON   = "json"
 	ActionFields = "fields"
+	ActionWizard = "step"
 	// ModeJSON is the value of the @mode control while the form shows
 	// the whole value as JSON.
 	ModeJSON = "json"
-	metaMode = "mode"
+	// ModeWizard is the value of the @mode control while the form shows
+	// one group at a time.
+	ModeWizard = "wizard"
+	metaMode   = "mode"
 )
 
 // Form is what the form templates render.
@@ -98,8 +104,9 @@ type Form struct {
 	Action, ValidateAction string
 	// SubmitLabel is the text of the submit button.
 	SubmitLabel string
-	// Mode is ModeJSON while the form shows the whole value as JSON, and
-	// empty while it shows fields.
+	// Mode is ModeJSON while the form shows the whole value as JSON,
+	// ModeWizard while it shows one group at a time, and empty while it
+	// shows every field.
 	Mode string
 	// Root is the field for the whole value.
 	Root *Field
@@ -119,6 +126,10 @@ type Form struct {
 
 	status    int
 	writeOnly map[string]bool // pointers of writeOnly values, hidden by JSON
+
+	state state // the form state the fields were built from
+	step  string
+	view  *view
 }
 
 // Control is a hidden form control that carries form state.
@@ -151,64 +162,6 @@ func (f *Form) Invalid() bool { return f.status == http.StatusUnprocessableEntit
 
 // ErrorsID is the id of the list of form-level errors.
 func (f *Form) ErrorsID() string { return f.ID + "_errors" }
-
-// AllFields returns every rendered field, outermost first.
-func (f *Form) AllFields() []*Field {
-	return f.fields(func(field *Field) bool { return !field.Collapsed })
-}
-
-// OutlineItem is a link in the form's outline to an object, array, map or
-// choice, with links to the groups inside it.
-type OutlineItem struct {
-	Label, Href string
-	// Invalid reports errors in the group or anywhere inside it.
-	Invalid bool
-	Items   []OutlineItem
-}
-
-// Outline returns links to the groups in the form, nested as they are.
-func (f *Form) Outline() []OutlineItem {
-	if f.Root == nil {
-		return nil
-	}
-	return outline(f.Root)
-}
-
-func outline(field *Field) []OutlineItem {
-	if field.Choice != nil {
-		return outline(field.Choice)
-	}
-	var items []OutlineItem
-	for _, c := range append(slices.Clip(field.Fields), field.Entries...) {
-		switch {
-		case c.Collapsed:
-		case c.Kind == KindObject, c.Kind == KindMap, c.Kind == KindArray, c.Kind == KindChoice:
-			items = append(items, OutlineItem{
-				Label:   firstNonEmpty(c.Label, c.Pointer),
-				Href:    "#" + c.GroupID(),
-				Invalid: c.invalidWithin(),
-				Items:   outline(c),
-			})
-		}
-	}
-	return items
-}
-
-// invalidWithin reports errors on the field or any field inside it.
-func (f *Field) invalidWithin() bool {
-	if f.Invalid() || (f.Key != nil && len(f.Key.Errors) > 0) {
-		return true
-	}
-	if f.Choice != nil && f.Choice.invalidWithin() {
-		return true
-	}
-	for _, c := range append(slices.Clip(f.Fields), f.Entries...) {
-		if c.invalidWithin() {
-			return true
-		}
-	}
-	return false
-}
 
 // JSON returns the submitted value, indented, with writeOnly values
 // replaced by "********".
@@ -288,6 +241,16 @@ func (h *Handler) SubmitForm(ctx context.Context, form url.Values) (*Form, error
 		return h.showFields(sh, s), nil
 	default:
 		applyAction(s, action)
+		if mode, _ := s.meta(metaMode, ""); mode == ModeWizard {
+			// Moving between steps shows the errors a step has, the way
+			// validation as you type would, so a step listed as having
+			// errors shows them when you get there.
+			f, _, _ := h.check(sh, s, true)
+			if f.status == http.StatusUnprocessableEntity {
+				f.status = http.StatusOK
+			}
+			return f, nil
+		}
 		return h.build(sh, s), nil
 	}
 	f, value, ok := h.check(sh, s, false)
@@ -407,13 +370,19 @@ func (h *Handler) showJSON(sh *shape, s state) *Form {
 	return h.build(sh, state{metaName(metaMode, ""): {ModeJSON}, valueName(""): {text}})
 }
 
-// showFields switches the form back from JSON to fields. JSON that does
-// not parse keeps the text area, with the error.
+// showFields switches the form back to every field, from the wizard or
+// from JSON. JSON that does not parse keeps the text area, with the error.
 func (h *Handler) showFields(sh *shape, s state) *Form {
-	text, _ := s.value("")
-	if _, json := s.meta(metaMode, ""); !json {
+	switch mode, _ := s.meta(metaMode, ""); mode {
+	case ModeJSON:
+	case ModeWizard:
+		delete(s, metaName(metaMode, ""))
+		delete(s, metaName(metaStep, ""))
+		return h.build(sh, s)
+	default:
 		return h.build(sh, s)
 	}
+	text, _ := s.value("")
 	v := jsontext.Value(strings.TrimSpace(text))
 	if len(v) > 0 && !v.IsValid() {
 		f := h.build(sh, s)
@@ -461,10 +430,15 @@ func (h *Handler) build(sh *shape, s state) *Form {
 	if limit <= 0 {
 		limit = defaultMaxFields
 	}
+	f.state = s
 	b := builder{state: s, idPrefix: f.ID, form: f, remaining: limit}
-	if mode, _ := s.meta(metaMode, ""); mode == ModeJSON {
+	switch mode, _ := s.meta(metaMode, ""); mode {
+	case ModeJSON:
 		f.Mode = ModeJSON
 		b.jsonRoot = true
+	case ModeWizard:
+		f.Mode = ModeWizard
+		f.step, _ = s.meta(metaStep, "")
 	}
 	f.Root = b.build(sh, site{required: true, htmlRequired: true}, 0)
 	if b.tooLarge {

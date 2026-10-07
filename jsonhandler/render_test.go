@@ -401,6 +401,12 @@ func TestRender_labels(t *testing.T) {
 			want:   []string{"v", "Variant", "T"},
 		},
 		{
+			name:   "items named by a referenced title",
+			schema: `{"$defs":{"s":{"title":"Step","type":"string"}},"type":"object","properties":{"steps":{"type":"array","items":{"$ref":"#/$defs/s"}}}}`,
+			value:  `{"steps":["a","b"]}`,
+			want:   []string{"steps", "Step 1", "Step 2"},
+		},
+		{
 			name:   "items and entries",
 			schema: `{"type":"object","properties":{"list":{"type":"array","items":{"type":"string"}},"tagged":{"type":"array","items":{"title":"Tag","type":"string"}},"m":{"type":"object","additionalProperties":{"title":"Ignored","type":"string"}}}}`,
 			value:  `{"list":["x"],"tagged":["y"],"m":{"k":"z"}}`,

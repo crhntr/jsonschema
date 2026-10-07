@@ -545,7 +545,9 @@ func (b *builder) array(f *Field, sh *shape, at site, depth int) {
 			required:     true,
 			htmlRequired: true,
 		}, depth+1)
-		cf.Label = ordinal(firstNonEmpty(item.ui.Label, item.ownTitle, f.Label), i)
+		// An item is named by its own schema, even through $ref ("Step 1"),
+		// before the array ("Steps 1").
+		cf.Label = ordinal(firstNonEmpty(item.ui.Label, item.title, f.Label), i)
 		cf.Implied = true
 		cf.First, cf.Last = i == 0, i == n-1
 		f.Fields = append(f.Fields, cf)

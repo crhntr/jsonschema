@@ -37,9 +37,9 @@ type Field struct {
 	// Implied reports a location that exists because its container does:
 	// an array item, a map entry, or the chosen variant of a choice. Its
 	// label gets no required mark.
-	Implied bool
-	ReadOnly, WriteOnly    bool
-	Deprecated             bool
+	Implied             bool
+	ReadOnly, WriteOnly bool
+	Deprecated          bool
 
 	// Type is the type attribute of an <input>.
 	Type string

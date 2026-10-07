@@ -84,7 +84,24 @@ echo '{"name":"alice"}' | jsch validate --schema my-schema.json --output basic -
 
 # Generate Go types from a schema.
 jsch generate --schema my-schema.json --out ./model --package model --type Config
+
+# Edit a schema in the browser, with forms generated from the meta-schema,
+# and save each valid submission back to the file.
+jsch form --write my-schema.json
+
+# Edit a value against your schema; valid submissions print to stdout.
+jsch form --schema my-schema.json instance.json
 ```
+
+`jsch form` serves http://localhost:8080/ (change it with `--addr`). It only
+answers to `localhost` or an IP address and refuses cross-origin posts.
+
+### Forms
+
+[`jsonhandler`](jsonhandler/README.md) renders a hypermedia form for any
+schema and decodes the submission to JSON that matches it. It is what
+`jsch form` uses, and it documents its endpoints and markup for use in other
+web applications.
 
 ## License
 

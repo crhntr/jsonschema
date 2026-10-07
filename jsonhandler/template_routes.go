@@ -20,6 +20,7 @@ import (
 type RoutesReceiver interface {
 	Form(ctx context.Context) (*Form, error)
 	SubmitForm(ctx context.Context, form url.Values) (*Form, error)
+	Validate(ctx context.Context, form url.Values) (*Form, error)
 }
 
 func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver, pathsPrefix string) TemplateRoutePaths {
@@ -81,6 +82,46 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver, pathsPrefix str
 			}
 		}
 		if err := templates.ExecuteTemplate(buf, "POST /form SubmitForm(ctx, form)", &td); err != nil {
+			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
+			http.Error(response, "failed to render page", http.StatusInternalServerError)
+			return
+		}
+		defaultStatusCode := http.StatusOK
+		if buf.Len() == 0 {
+			defaultStatusCode = http.StatusNoContent
+		}
+		statusCode := cmp.Or(td.statusCode, td.errStatusCode, td.result.StatusCode(), defaultStatusCode)
+		if td.redirectURL != "" {
+			http.Redirect(response, request, td.redirectURL, statusCode)
+			return
+		}
+		if contentType := response.Header().Get("content-type"); contentType == "" {
+			response.Header().Set("content-type", "text/html; charset=utf-8")
+		}
+		response.Header().Set("content-length", strconv.Itoa(buf.Len()))
+		response.WriteHeader(statusCode)
+		_, _ = buf.WriteTo(response)
+	})
+	mux.HandleFunc("POST "+path.Join(pathsPrefix, "/form/validate"), func(response http.ResponseWriter, request *http.Request) {
+		var td = TemplateData[RoutesReceiver, *Form]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
+		ctx := request.Context()
+		if err := request.ParseForm(); err != nil {
+			http.Error(response, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var form url.Values = request.Form
+		buf := bytesBufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer bytesBufferPool.Put(buf)
+		if len(td.errList) == 0 {
+			var err error
+			td.result, err = receiver.Validate(ctx, form)
+			if err != nil {
+				td.errList = append(td.errList, err)
+				td.errStatusCode = http.StatusInternalServerError
+			}
+		}
+		if err := templates.ExecuteTemplate(buf, "POST /form/validate Validate(ctx, form)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -282,4 +323,8 @@ func (routePaths TemplateRoutePaths) Form() TemplateRoute {
 
 func (routePaths TemplateRoutePaths) SubmitForm() TemplateRoute {
 	return TemplateRoute{method: "POST", path: path.Join(cmp.Or(routePaths.pathsPrefix, "/"), "form")}
+}
+
+func (routePaths TemplateRoutePaths) Validate() TemplateRoute {
+	return TemplateRoute{method: "POST", path: path.Join(cmp.Or(routePaths.pathsPrefix, "/"), "form/validate")}
 }

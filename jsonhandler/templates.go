@@ -27,12 +27,9 @@ func Templates() (*template.Template, error) {
 // describedBy lists the ids of a field's description and errors, for
 // aria-describedby.
 func describedBy(f *Field) string {
-	var ids []string
+	ids := []string{f.ErrorsID()}
 	if f.Description != "" {
-		ids = append(ids, f.ID+"-description")
-	}
-	if len(f.Errors) > 0 {
-		ids = append(ids, f.ID+"-errors")
+		ids = append([]string{f.HelpID()}, ids...)
 	}
 	return strings.Join(ids, " ")
 }

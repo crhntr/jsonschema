@@ -22,7 +22,7 @@ type Field struct {
 	// position.
 	Pointer string
 	// ID is the id of the field's control; derived ids add a suffix
-	// (ID-description, ID-errors, …).
+	// (see [Field.ErrorsID], [Field.HelpID] and [Field.LabelID]).
 	ID string
 
 	Label, Description string
@@ -113,6 +113,19 @@ type Key struct {
 // Invalid reports that the field has errors to show.
 func (f *Field) Invalid() bool { return len(f.Errors) > 0 }
 
+// ErrorsID is the id of the field's error list, which is always rendered
+// (empty when there are no errors) so live validation can replace it.
+func (f *Field) ErrorsID() string { return f.ID + "_errors" }
+
+// HelpID is the id of the field's description.
+func (f *Field) HelpID() string { return f.ID + "_help" }
+
+// LabelID is the id of a label that is not a <label> element.
+func (f *Field) LabelID() string { return f.ID + "_label" }
+
+// ErrorsID is the id of the property name's error list.
+func (k *Key) ErrorsID() string { return k.ID + "_errors" }
+
 // Action returns the value of an edit button that applies op to the field.
 func (f *Field) Action(op string) string { return op + f.Path }
 
@@ -126,6 +139,8 @@ type builder struct {
 	// a limit a request could ask for any amount of work.
 	remaining int
 	tooLarge  bool
+	// jsonRoot renders the whole value as one JSON text area.
+	jsonRoot bool
 }
 
 type site struct {
@@ -154,7 +169,7 @@ func (b *builder) build(sh *shape, at site, depth int) *Field {
 		form:         b.form,
 	}
 	f.Kind = sh.kind()
-	if depth > maxDepth {
+	if depth > maxDepth || (depth == 0 && b.jsonRoot) {
 		f.Kind = KindJSON
 	}
 	if b.remaining--; b.remaining < 0 {
@@ -407,7 +422,7 @@ func (b *builder) entries(f *Field, sh *shape, at site, depth int) {
 	for i := range n {
 		path := entryPath(at.path, i)
 		key, _ := b.state.meta(metaKey, path)
-		k := &Key{Name: metaName(metaKey, path), ID: b.id(path) + "-key", Value: key}
+		k := &Key{Name: metaName(metaKey, path), ID: b.id(path) + "_key", Value: key}
 		if names.pattern != "" {
 			k.Pattern = ".*(?:" + names.pattern + ").*"
 		}
@@ -488,26 +503,31 @@ func (b *builder) choice(f *Field, sh *shape, at site, depth int) {
 		required:     at.required,
 		htmlRequired: at.htmlRequired,
 	}, depth+1)
-	chosen.ID = f.ID + "-value"
+	chosen.ID = f.ID + "_value"
 	chosen.Label = firstNonEmpty(choices[idx].shape.ui.Label, choices[idx].label)
 	f.Choice = chosen
 }
 
-// id derives an element id from a form path. Letters, digits and "-" are
-// kept, "/" becomes ".", and every other byte is written as "_" and two
-// hex digits, so distinct paths always get distinct ids.
+// id derives an element id from a form path: the form's id, then the path
+// with "/" written as "-", letters and digits kept, and every other byte
+// written as "_" and two hex digits. The root is "_root". Distinct paths
+// get distinct ids, every id is a CSS identifier, and the suffixes added
+// for related elements ("_errors", "_help", …) start with "_" and a
+// letter that is not a hex digit, so they cannot collide either.
 func (b *builder) id(path string) string {
 	const hex = "0123456789abcdef"
+	if path == "" {
+		return b.idPrefix + "_root"
+	}
 	var sb strings.Builder
 	sb.WriteString(b.idPrefix)
-	sb.WriteByte('-')
 	for i := 0; i < len(path); i++ {
 		c := path[i]
 		switch {
-		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '-':
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
 			sb.WriteByte(c)
 		case c == '/':
-			sb.WriteByte('.')
+			sb.WriteByte('-')
 		default:
 			sb.WriteByte('_')
 			sb.WriteByte(hex[c>>4])

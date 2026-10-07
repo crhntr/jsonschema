@@ -1,11 +1,22 @@
 {{- /* Partials. README.md documents the markup; keep the two in step. */ -}}
 
 {{define "jsonhandler-form" -}}
-<form class="jsonform" id="{{.ID}}" method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="this" hx-swap="outerHTML"{{if .Invalid}} data-invalid{{end}}>
+<form class="jsonform" id="{{.ID}}" method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="this" hx-swap="outerHTML"{{with .Mode}} data-mode="{{.}}"{{end}}{{if .Invalid}} data-invalid{{end}}>
 <button type="submit" hidden tabindex="-1" aria-hidden="true"></button>
-{{- with .Errors}}
-<ul class="jsonform-errors" role="alert">{{range .}}<li>{{.}}</li>{{end}}</ul>
+{{- with .ValidateAction}}
+<div class="jsonform-live" hidden hx-post="{{.}}" hx-trigger="keyup delay:400ms from:closest form, change from:closest form" hx-include="closest form" hx-swap="none"></div>
 {{- end}}
+{{- if .Root}}
+<div class="jsonform-toolbar">
+{{- if eq .Mode "json"}}
+<input type="hidden" name="@mode" value="json">
+<button type="submit" class="jsonform-button jsonform-mode" name="@action" value="fields" formnovalidate>Edit as form</button>
+{{- else}}
+<button type="submit" class="jsonform-button jsonform-mode" name="@action" value="json" formnovalidate>Edit as JSON</button>
+{{- end}}
+</div>
+{{- end}}
+{{template "jsonhandler-form-errors" .}}
 {{- with .Root}}
 {{template "jsonhandler-field" .}}
 <div class="jsonform-actions"><button type="submit" class="jsonform-button jsonform-submit">{{$.SubmitLabel}}</button></div>
@@ -13,13 +24,29 @@
 </form>
 {{- end}}
 
+{{define "jsonhandler-form-errors" -}}
+<ul class="jsonform-errors" id="{{.ErrorsID}}"{{if not .Errors}} hidden{{end}} role="alert">{{range .Errors}}<li>{{.}}</li>{{end}}</ul>
+{{- end}}
+
+{{- /* The response to live validation: every error list, swapped in by id
+       out of band so the controls (and the caret) are left alone. */ -}}
+{{define "jsonhandler-validation" -}}
+<ul class="jsonform-errors" id="{{.ErrorsID}}"{{if not .Errors}} hidden{{end}} role="alert" hx-swap-oob="true">{{range .Errors}}<li>{{.}}</li>{{end}}</ul>
+{{- range .AllFields}}
+<ul class="jsonform-errors" id="{{.ErrorsID}}"{{if not .Errors}} hidden{{end}} hx-swap-oob="true">{{range .Errors}}<li>{{.}}</li>{{end}}</ul>
+{{- with .Key}}
+<ul class="jsonform-errors" id="{{.ErrorsID}}"{{if not .Errors}} hidden{{end}} hx-swap-oob="true">{{range .Errors}}<li>{{.}}</li>{{end}}</ul>
+{{- end}}
+{{- end}}
+{{- end}}
+
 {{define "jsonhandler-result" -}}
 <div class="jsonform-result" id="{{.ID}}">
-<output class="jsonform-output" form="{{.ID}}-edit"><pre><code>{{.JSON}}</code></pre></output>
+<output class="jsonform-output" form="{{.ID}}_edit"><pre><code>{{.JSON}}</code></pre></output>
 {{- with .Message}}
 <p class="jsonform-message" role="status">{{.}}</p>
 {{- end}}
-<form id="{{.ID}}-edit" method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="closest .jsonform-result" hx-swap="outerHTML">
+<form id="{{.ID}}_edit" method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="closest .jsonform-result" hx-swap="outerHTML">
 {{- range .State}}
 <input type="hidden" name="{{.Name}}" value="{{.Value}}">
 {{- end}}
@@ -57,11 +84,9 @@
 
 {{define "jsonhandler-help" -}}
 {{- with .Description}}
-<p class="jsonform-description" id="{{$.ID}}-description">{{.}}</p>
+<p class="jsonform-description" id="{{$.HelpID}}">{{.}}</p>
 {{- end}}
-{{- with .Errors}}
-<ul class="jsonform-errors" id="{{$.ID}}-errors">{{range .}}<li>{{.}}</li>{{end}}</ul>
-{{- end}}
+<ul class="jsonform-errors" id="{{.ErrorsID}}"{{if not .Errors}} hidden{{end}}>{{range .Errors}}<li>{{.}}</li>{{end}}</ul>
 {{- end}}
 
 {{define "jsonhandler-remove" -}}
@@ -72,8 +97,8 @@
 
 {{define "jsonhandler-collapsed" -}}
 <div class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}" data-collapsed{{if .Deprecated}} data-deprecated{{end}}>
-<span class="jsonform-label" id="{{.ID}}-label">{{.Label}}</span>
-<button type="submit" class="jsonform-button jsonform-expand" name="@action" value="{{.Action "expand"}}" formnovalidate aria-describedby="{{.ID}}-label">Add</button>
+<span class="jsonform-label" id="{{.LabelID}}">{{.Label}}</span>
+<button type="submit" class="jsonform-button jsonform-expand" name="@action" value="{{.Action "expand"}}" formnovalidate aria-describedby="{{.LabelID}}">Add</button>
 {{- with .Description}}
 <p class="jsonform-description">{{.}}</p>
 {{- end}}
@@ -94,8 +119,7 @@
 {{- if .HTMLRequired}} required{{end}}
 {{- if .ReadOnly}} readonly{{end}}
 {{- if .WriteOnly}} autocomplete="new-password"{{end}}
-{{- if .Invalid}} aria-invalid="true"{{end}}
-{{- with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{- if .Invalid}} aria-invalid="true"{{end}} aria-describedby="{{describedBy .}}">
 {{- template "jsonhandler-help" .}}
 {{- template "jsonhandler-remove" .}}
 </div>
@@ -111,8 +135,7 @@
 {{- with .MaxLength}} maxlength="{{.}}"{{end}}
 {{- if .HTMLRequired}} required{{end}}
 {{- if .ReadOnly}} readonly{{end}}
-{{- if .Invalid}} aria-invalid="true"{{end}}
-{{- with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{- if .Invalid}} aria-invalid="true"{{end}} aria-describedby="{{describedBy .}}">
 {{.Value}}</textarea>
 {{- template "jsonhandler-help" .}}
 {{- template "jsonhandler-remove" .}}
@@ -123,10 +146,10 @@
 <div class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}>
 {{- if .ReadOnly}}
 <input type="hidden" name="{{.Name}}" value="{{.Checked}}">
-<input class="jsonform-control" id="{{.ID}}" type="checkbox" disabled{{if .Checked}} checked{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+<input class="jsonform-control" id="{{.ID}}" type="checkbox" disabled{{if .Checked}} checked{{end}} aria-describedby="{{describedBy .}}">
 {{- else}}
 <input type="hidden" name="{{.Name}}" value="false">
-<input class="jsonform-control" id="{{.ID}}" name="{{.Name}}" type="checkbox" value="true"{{if .Checked}} checked{{end}}{{if .Invalid}} aria-invalid="true"{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+<input class="jsonform-control" id="{{.ID}}" name="{{.Name}}" type="checkbox" value="true"{{if .Checked}} checked{{end}}{{if .Invalid}} aria-invalid="true"{{end}} aria-describedby="{{describedBy .}}">
 {{- end}}
 <label class="jsonform-label" for="{{.ID}}">{{template "jsonhandler-label" .}}</label>
 {{- template "jsonhandler-help" .}}
@@ -141,8 +164,7 @@
 {{- end}}
 <select class="jsonform-control" id="{{.ID}}"{{if .ReadOnly}} disabled{{else}} name="{{.Name}}"{{end}}
 {{- if .HTMLRequired}} required{{end}}
-{{- if .Invalid}} aria-invalid="true"{{end}}
-{{- with describedBy .}} aria-describedby="{{.}}"{{end}}>
+{{- if .Invalid}} aria-invalid="true"{{end}} aria-describedby="{{describedBy .}}">
 {{- range .Options}}
 <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
 {{- end}}
@@ -153,7 +175,7 @@
 {{- end}}
 
 {{define "jsonhandler-options" -}}
-<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}} aria-describedby="{{describedBy .}}">
 <legend class="jsonform-label">{{template "jsonhandler-label" .}}</legend>
 {{- if eq .Kind "checkboxes"}}
 <input type="hidden" name="{{.Name}}" value="">
@@ -174,14 +196,14 @@
 
 {{define "jsonhandler-output" -}}
 <div class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}>
-<span class="jsonform-label" id="{{.ID}}-label">{{.Label}}</span>
-<output class="jsonform-{{.Kind}}" aria-labelledby="{{.ID}}-label">{{if eq .Kind "null"}}null{{else}}{{.Value}}{{end}}</output>
+<span class="jsonform-label" id="{{.LabelID}}">{{.Label}}</span>
+<output class="jsonform-{{.Kind}}" aria-labelledby="{{.LabelID}}">{{if eq .Kind "null"}}null{{else}}{{.Value}}{{end}}</output>
 {{- template "jsonhandler-help" .}}
 </div>
 {{- end}}
 
 {{define "jsonhandler-object" -}}
-<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}} aria-describedby="{{describedBy .}}">
 {{- with .Label}}
 <legend class="jsonform-label">{{template "jsonhandler-label" $}}</legend>
 {{- end}}
@@ -212,10 +234,8 @@
 {{- with .Key.Pattern}} pattern="{{.}}"{{end}}
 {{- with .Key.MinLength}} minlength="{{.}}"{{end}}
 {{- with .Key.MaxLength}} maxlength="{{.}}"{{end}}
-{{- if .Key.Errors}} aria-invalid="true" aria-describedby="{{.Key.ID}}-errors"{{end}}>
-{{- with .Key.Errors}}
-<ul class="jsonform-errors" id="{{$.Key.ID}}-errors">{{range .}}<li>{{.}}</li>{{end}}</ul>
-{{- end}}
+{{- if .Key.Errors}} aria-invalid="true"{{end}} aria-describedby="{{.Key.ErrorsID}}">
+<ul class="jsonform-errors" id="{{.Key.ErrorsID}}"{{if not .Key.Errors}} hidden{{end}}>{{range .Key.Errors}}<li>{{.}}</li>{{end}}</ul>
 </div>
 {{template "jsonhandler-field" .}}
 {{template "jsonhandler-item-actions" .}}
@@ -230,7 +250,7 @@
 {{- end}}
 
 {{define "jsonhandler-array" -}}
-<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}} aria-describedby="{{describedBy .}}">
 {{- with .Label}}
 <legend class="jsonform-label">{{template "jsonhandler-label" $}}</legend>
 {{- end}}
@@ -265,7 +285,7 @@
 {{- end}}
 
 {{define "jsonhandler-choice" -}}
-<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}}{{with describedBy .}} aria-describedby="{{.}}"{{end}}>
+<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}} aria-describedby="{{describedBy .}}">
 {{- with .Label}}
 <legend class="jsonform-label">{{template "jsonhandler-label" $}}</legend>
 {{- end}}

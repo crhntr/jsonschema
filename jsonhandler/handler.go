@@ -27,9 +27,9 @@ type Handler struct {
 	//
 	// Value is also what readOnly locations keep: whatever a submission
 	// says for them is replaced by what Value (or the default) has there,
-	// so a client cannot change them. writeOnly locations are never sent
-	// to the browser, so they start empty and are left out of the result
-	// unless something is entered.
+	// so a client cannot change, add or remove them. writeOnly locations
+	// are never sent to the browser, so they start empty and are left out
+	// of the result unless something is entered.
 	Value jsontext.Value
 	// MaxFields limits how many fields one form may have, since the
 	// submitted form state decides how many array items and map entries
@@ -75,14 +75,29 @@ func (offline) RoundTrip(req *http.Request) (*http.Response, error) {
 
 var errNoSchema = errors.New("jsonhandler: Handler.Schema is nil")
 
+// Edit actions that switch between the fields and one JSON text area for
+// the whole value. Other edit actions are described at [applyAction].
+const (
+	ActionJSON   = "json"
+	ActionFields = "fields"
+	// ModeJSON is the value of the @mode control while the form shows
+	// the whole value as JSON.
+	ModeJSON = "json"
+	metaMode = "mode"
+)
+
 // Form is what the form templates render.
 type Form struct {
 	// ID is the form element's id.
 	ID string
-	// Action is the URL the form posts to; see [Form.WithAction].
-	Action string
+	// Action is the URL the form posts to and ValidateAction the URL that
+	// checks it as the user types; see [Form.WithActions].
+	Action, ValidateAction string
 	// SubmitLabel is the text of the submit button.
 	SubmitLabel string
+	// Mode is ModeJSON while the form shows the whole value as JSON, and
+	// empty while it shows fields.
+	Mode string
 	// Root is the field for the whole value.
 	Root *Field
 	// Errors are problems that belong to no single field.
@@ -104,16 +119,18 @@ type Form struct {
 // Control is a hidden form control that carries form state.
 type Control struct{ Name, Value string }
 
-// WithAction sets the URL the form posts to and returns f. Route
-// templates call it with the generated path; a page rendering the form
-// itself passes wherever it registered the routes.
-func (f *Form) WithAction(action string) *Form {
-	f.Action = action
+// WithActions sets the URLs the form posts to and returns f: action for
+// submissions and edits, validate for checking as the user types (empty
+// turns that off). Route templates call it with the generated paths; a
+// page rendering the form itself passes wherever it registered the routes.
+func (f *Form) WithActions(action, validate string) *Form {
+	f.Action, f.ValidateAction = action, validate
 	return f
 }
 
 // StatusCode is the response status: 422 when a submission has errors,
-// 500 when there is no form, otherwise 200.
+// 413 when the form is too large, 500 when there is no form, otherwise
+// 200.
 func (f *Form) StatusCode() int {
 	switch {
 	case f == nil:
@@ -126,6 +143,14 @@ func (f *Form) StatusCode() int {
 
 // Invalid reports that the form has errors to show.
 func (f *Form) Invalid() bool { return f.status == http.StatusUnprocessableEntity }
+
+// ErrorsID is the id of the list of form-level errors.
+func (f *Form) ErrorsID() string { return f.ID + "_errors" }
+
+// AllFields returns every rendered field, outermost first.
+func (f *Form) AllFields() []*Field {
+	return f.fields(func(field *Field) bool { return !field.Collapsed })
+}
 
 // JSON returns the submitted value, indented, with writeOnly values
 // replaced by "********".
@@ -142,17 +167,13 @@ func redact(v jsontext.Value, ptr string, hidden map[string]bool) jsontext.Value
 		for name, raw := range objectMembers(v) {
 			members = append(members, member{name: name, value: redact(raw, propertyPath(ptr, name), hidden)})
 		}
-		if out, err := objectJSON(members); err == nil {
-			return out
-		}
+		return mustObject(members, v)
 	case '[':
 		items := arrayElements(v)
 		for i, item := range items {
 			items[i] = redact(item, itemPath(ptr, i), hidden)
 		}
-		if out, err := arrayJSON(items); err == nil {
-			return out
-		}
+		return mustArray(items, v)
 	}
 	return v
 }
@@ -171,16 +192,18 @@ func (h *Handler) Form(ctx context.Context) (*Form, error) {
 		return nil, errNoSchema
 	}
 	sh := h.root()
-	return h.build(sh, h.initialState(sh)), nil
+	return h.build(sh, encodeState(sh, h.initialValue(sh))), nil
 }
 
-// initialState is the form state for h.Value, or for the schema default.
-func (h *Handler) initialState(sh *shape) state {
-	s := state{}
-	v := h.Value
-	if len(v) == 0 {
-		v = sh.def
+func (h *Handler) initialValue(sh *shape) jsontext.Value {
+	if len(h.Value) > 0 {
+		return h.Value
 	}
+	return sh.def
+}
+
+func encodeState(sh *shape, v jsontext.Value) state {
+	s := state{}
 	if len(v) > 0 {
 		e := encoder{state: s}
 		e.encode(sh, "", v, 0)
@@ -198,49 +221,23 @@ func (h *Handler) SubmitForm(ctx context.Context, form url.Values) (*Form, error
 		return nil, errNoSchema
 	}
 	sh := h.root()
-	s := state{}
-	for name, values := range form {
-		if _, _, ok := parseName(name); ok {
-			s[name] = slices.Clone(values)
-		}
-	}
-	if action := form.Get(ActionName); action != "" {
+	s := submittedControls(form)
+	switch action := form.Get(ActionName); action {
+	case "":
+	case ActionJSON:
+		return h.showJSON(sh, s), nil
+	case ActionFields:
+		return h.showFields(sh, s), nil
+	default:
 		applyAction(s, action)
 		return h.build(sh, s), nil
 	}
-	f := h.build(sh, s)
-	if f.Root == nil {
-		return f, nil
-	}
-	if locked := f.paths(func(field *Field) bool { return field.ReadOnly }); len(locked) > 0 {
-		initial := h.initialState(sh)
-		for _, path := range locked {
-			s.remove(path)
-			for name, values := range initial {
-				if _, p, ok := parseName(name); ok && within(p, path) {
-					s[name] = values
-				}
-			}
-		}
-		f = h.build(sh, s)
-	}
-	r := f.Root.decode()
-	if r.missing {
-		r.errs = append(r.errs, fieldError{path: "", message: messageRequired})
-	}
-	if len(r.errs) > 0 {
-		f.attach(r.errs, nil)
-		return f, nil
-	}
-	if r.value == nil {
-		r.value = jsontext.Value("null")
-	}
-	if out := h.Schema.Validate("form", r.value); !out.Valid {
-		f.attach(nil, &out)
+	f, value, ok := h.check(sh, s, false)
+	if !ok {
 		return f, nil
 	}
 	if h.OnSubmit != nil {
-		message, err := h.OnSubmit(ctx, r.value)
+		message, err := h.OnSubmit(ctx, value)
 		if err != nil {
 			f.Errors = append(f.Errors, err.Error())
 			f.status = http.StatusUnprocessableEntity
@@ -248,11 +245,12 @@ func (h *Handler) SubmitForm(ctx context.Context, form url.Values) (*Form, error
 		}
 		f.Message = message
 	}
-	f.Valid, f.Value = true, r.value
-	secret := f.paths(func(field *Field) bool { return field.WriteOnly })
+	f.Valid, f.Value = true, value
 	f.writeOnly = map[string]bool{}
+	var secret []string
 	for _, field := range f.fields(func(field *Field) bool { return field.WriteOnly }) {
 		f.writeOnly[field.Pointer] = true
+		secret = append(secret, field.Path)
 	}
 names:
 	for _, name := range s.sortedNames() {
@@ -267,6 +265,104 @@ names:
 		}
 	}
 	return f, nil
+}
+
+// Validate checks the form without submitting it, so errors can be shown
+// as the user types. Values that are only missing are not reported yet;
+// the submission will. The response status is 200 unless the form is too
+// large.
+func (h *Handler) Validate(ctx context.Context, form url.Values) (*Form, error) {
+	if h.Schema == nil {
+		return nil, errNoSchema
+	}
+	f, _, _ := h.check(h.root(), submittedControls(form), true)
+	if f.status == http.StatusUnprocessableEntity {
+		f.status = http.StatusOK
+	}
+	return f, nil
+}
+
+// submittedControls keeps the form controls of a submission and drops anything
+// else posted with it.
+func submittedControls(form url.Values) state {
+	s := state{}
+	for name, values := range form {
+		if _, _, ok := parseName(name); ok {
+			s[name] = slices.Clone(values)
+		}
+	}
+	return s
+}
+
+// check builds the form for s, decodes it, keeps readOnly values and
+// validates the result. live leaves out errors about missing values.
+func (h *Handler) check(sh *shape, s state, live bool) (*Form, jsontext.Value, bool) {
+	f := h.build(sh, s)
+	if f.Root == nil {
+		return f, nil, false
+	}
+	r := f.Root.decode()
+	if r.missing {
+		r.errs = append(r.errs, fieldError{path: "", message: messageRequired})
+	}
+	errs := r.errs
+	if live {
+		errs = slices.DeleteFunc(slices.Clone(errs), func(e fieldError) bool { return e.message == messageRequired })
+	}
+	if len(errs) > 0 || (len(r.errs) > 0 && !live) {
+		f.attach(errs, nil, live)
+		return f, nil, false
+	}
+	value := r.value
+	if value == nil {
+		value = jsontext.Value("null")
+	}
+	value = keepReadOnly(sh, h.initialValue(sh), value)
+	if out := h.Schema.Validate("form", value); !out.Valid {
+		f.attach(nil, &out, live)
+		return f, nil, false
+	}
+	return f, value, len(r.errs) == 0
+}
+
+// showJSON switches the form to one JSON text area holding the value the
+// fields decode to. Fields that cannot be decoded keep the form as it is,
+// with their errors. writeOnly values are left out of the text.
+func (h *Handler) showJSON(sh *shape, s state) *Form {
+	f := h.build(sh, s)
+	if f.Root == nil || f.Mode == ModeJSON {
+		return f
+	}
+	r := f.Root.decode()
+	if errs := slices.DeleteFunc(r.errs, func(e fieldError) bool { return e.message == messageRequired }); len(errs) > 0 {
+		f.attach(errs, nil, false)
+		return f
+	}
+	value := r.value
+	for _, field := range f.fields(func(field *Field) bool { return field.WriteOnly }) {
+		value = deleteAt(value, slices.Collect(pointerTokens(field.Pointer)))
+	}
+	text := ""
+	if len(value) > 0 {
+		text = indentJSON(value)
+	}
+	return h.build(sh, state{metaName(metaMode, ""): {ModeJSON}, valueName(""): {text}})
+}
+
+// showFields switches the form back from JSON to fields. JSON that does
+// not parse keeps the text area, with the error.
+func (h *Handler) showFields(sh *shape, s state) *Form {
+	text, _ := s.value("")
+	if _, json := s.meta(metaMode, ""); !json {
+		return h.build(sh, s)
+	}
+	v := jsontext.Value(strings.TrimSpace(text))
+	if len(v) > 0 && !v.IsValid() {
+		f := h.build(sh, s)
+		f.attach([]fieldError{{path: "", message: messageJSON}}, nil, false)
+		return f
+	}
+	return h.build(sh, encodeState(sh, v))
 }
 
 // fields returns the fields that match, outermost first.
@@ -293,15 +389,6 @@ func (f *Form) fields(match func(*Field) bool) []*Field {
 	return out
 }
 
-// paths returns the form paths of the fields that match.
-func (f *Form) paths(match func(*Field) bool) []string {
-	var out []string
-	for _, field := range f.fields(match) {
-		out = append(out, field.Path)
-	}
-	return out
-}
-
 func (h *Handler) root() *shape {
 	return flatten(node{schema: h.Schema})
 }
@@ -316,6 +403,10 @@ func (h *Handler) build(sh *shape, s state) *Form {
 		limit = defaultMaxFields
 	}
 	b := builder{state: s, idPrefix: f.ID, form: f, remaining: limit}
+	if mode, _ := s.meta(metaMode, ""); mode == ModeJSON {
+		f.Mode = ModeJSON
+		b.jsonRoot = true
+	}
 	f.Root = b.build(sh, site{required: true, htmlRequired: true}, 0)
 	if b.tooLarge {
 		f.Root = nil
@@ -329,8 +420,10 @@ const defaultMaxFields = 10000
 
 // attach puts decoding errors and validation errors on the fields they
 // are about. A validation error at a location with no field of its own
-// goes to the nearest enclosing field.
-func (f *Form) attach(errs []fieldError, out *jsonschema.Output) {
+// goes to the nearest enclosing field, prefixed with its location. live
+// leaves out errors from the required keyword, which only say a value is
+// missing.
+func (f *Form) attach(errs []fieldError, out *jsonschema.Output, live bool) {
 	f.status = http.StatusUnprocessableEntity
 	byPath := map[string]*Field{}
 	byPointer := map[string]*Field{}
@@ -358,17 +451,22 @@ func (f *Form) attach(errs []fieldError, out *jsonschema.Output) {
 	if out == nil {
 		return
 	}
-	collect(*out, choices, func(pointer, message string) {
-		for {
-			if field, ok := byPointer[pointer]; ok {
+	collect(*out, choices, func(pointer, keyword, message string) {
+		if live && (keyword == "required" || keyword == "dependentRequired") {
+			return
+		}
+		for at := pointer; ; at, _ = splitLast(at) {
+			if at != pointer {
+				message = pointer + ": " + strings.TrimPrefix(message, pointer+": ")
+			}
+			if field, ok := byPointer[at]; ok {
 				field.Errors = appendNew(field.Errors, message)
 				return
 			}
-			if pointer == "" {
+			if at == "" {
 				f.Errors = appendNew(f.Errors, message)
 				return
 			}
-			pointer, _ = splitLast(pointer)
 		}
 	})
 }
@@ -378,7 +476,7 @@ func (f *Form) attach(errs []fieldError, out *jsonschema.Output) {
 // Under a oneOf or anyOf whose location is a choice field, only the
 // branch for the chosen variant is reported; the others failing is
 // expected.
-func collect(o jsonschema.Output, choices map[string]*Field, report func(pointer, message string)) int {
+func collect(o jsonschema.Output, choices map[string]*Field, report func(pointer, keyword, message string)) int {
 	if o.Valid {
 		return 0
 	}
@@ -394,15 +492,16 @@ func collect(o jsonschema.Output, choices map[string]*Field, report func(pointer
 		n += collect(child, choices, report)
 	}
 	if n == 0 && o.Error != "" {
-		report(o.InstanceLocation, o.Error)
+		report(o.InstanceLocation, keyword, o.Error)
 		n = 1
 	}
 	return n
 }
 
 func appendNew(list []string, s string) []string {
+	s = strings.TrimSpace(s)
 	if slices.Contains(list, s) {
 		return list
 	}
-	return append(list, strings.TrimSpace(s))
+	return append(list, s)
 }

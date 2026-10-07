@@ -107,7 +107,7 @@ func TestSubmitForm_errors(t *testing.T) {
 			name:   "validation error below a JSON field goes to the field",
 			schema: `{"type":"object","properties":{"v":{"x-form":{"widget":"json"},"type":"object","properties":{"a":{"type":"string"}}}}}`,
 			form:   url.Values{"$/v": {`{"a":1}`}},
-			want:   map[string][]string{"/v": {"type string does not match number"}},
+			want:   map[string][]string{"/v": {"/v/a: type string does not match number"}},
 		},
 		{
 			name:   "errors only from the chosen variant",
@@ -396,10 +396,10 @@ func TestRoutes(t *testing.T) {
 		if got := input.GetAttribute("aria-invalid"); got != "true" {
 			t.Errorf("aria-invalid = %q, want true", got)
 		}
-		if got := input.GetAttribute("aria-describedby"); got != "jsonform-.name-errors" {
+		if got := input.GetAttribute("aria-describedby"); got != "jsonform-name_errors" {
 			t.Errorf("aria-describedby = %q", got)
 		}
-		if el := doc.QuerySelector("#jsonform-\\.name-errors li"); el == nil {
+		if el := doc.QuerySelector("#jsonform-name_errors li"); el == nil {
 			t.Errorf("no error list item")
 		}
 	})

@@ -28,6 +28,18 @@ func TestReadOnlyCannotBeChanged(t *testing.T) {
 			form: url.Values{"$/id": {"hacked"}, "$/name": {"b"}, "$/audit/by": {"me"}},
 			want: `{"name":"b"}`,
 		},
+		{
+			name:  "puts back a value whose parent was left out",
+			value: `{"id":"42","name":"a","audit":{"by":"ops"}}`,
+			form:  url.Values{"$/name": {"b"}},
+			want:  `{"id":"42","name":"b","audit":{"by":"ops"}}`,
+		},
+		{
+			name:  "puts back a value deleted in JSON mode",
+			value: `{"id":"42","name":"a"}`,
+			form:  url.Values{"@mode": {ModeJSON}, "$": {`{"name":"b","id":"7","audit":{"by":"me"}}`}},
+			want:  `{"id":"42","name":"b"}`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHandler(t, schema)
@@ -37,6 +49,40 @@ func TestReadOnlyCannotBeChanged(t *testing.T) {
 			assertJSONEqual(t, submit(t, h, tc.form), tc.want)
 		})
 	}
+
+	t.Run("map entries are matched by name", func(t *testing.T) {
+		h := newHandler(t, `{"type":"object","additionalProperties":{"type":"string","readOnly":true}}`)
+		h.Value = jsontext.Value(`{"a":"1","b":"2"}`)
+		got := submit(t, h, url.Values{"@len": {"3"}, "@key/~k0": {"b"}, "$/~k0": {"1"}, "@key/~k1": {"a"}, "$/~k1": {"2"}, "@key/~k2": {"c"}, "$/~k2": {"3"}})
+		assertJSONEqual(t, got, `{"a":"1","b":"2"}`)
+	})
+
+	t.Run("array items are matched by position", func(t *testing.T) {
+		h := newHandler(t, `{"type":"array","items":{"type":"string","readOnly":true}}`)
+		h.Value = jsontext.Value(`["a","b","c"]`)
+		for _, tc := range []struct {
+			form url.Values
+			want string
+		}{
+			{url.Values{"@len": {"1"}, "$/0": {"x"}}, `["a","b","c"]`},
+			{url.Values{"@len": {"5"}, "$/0": {"x"}, "$/1": {"x"}, "$/2": {"x"}, "$/3": {"x"}, "$/4": {"y"}}, `["a","b","c"]`},
+		} {
+			assertJSONEqual(t, submit(t, h, tc.form), tc.want)
+		}
+	})
+
+	t.Run("a read-only root", func(t *testing.T) {
+		h := newHandler(t, `{"type":"string","readOnly":true}`)
+		f, err := h.SubmitForm(context.Background(), url.Values{"$": {"x"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.Valid {
+			t.Errorf("submission without an original value is valid: %s", f.Value)
+		}
+		h.Value = jsontext.Value(`"orig"`)
+		assertJSONEqual(t, submit(t, h, url.Values{"$": {"x"}}), `"orig"`)
+	})
 
 	t.Run("rendered read-only", func(t *testing.T) {
 		h := newHandler(t, schema)

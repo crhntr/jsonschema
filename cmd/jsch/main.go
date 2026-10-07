@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 
@@ -24,12 +25,14 @@ import (
 func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	wd, err := os.Getwd()
 	if err != nil {
 		log.Fatalln(err)
 	}
-	if code := run(ctx, wd, os.Args[1:], os.Stdout, os.Stderr, os.Stdin, http.DefaultClient); code != 0 {
+	code := run(ctx, wd, os.Args[1:], os.Stdout, os.Stderr, os.Stdin, http.DefaultClient)
+	stop()
+	if code != 0 {
 		os.Exit(code)
 	}
 }
@@ -53,6 +56,12 @@ func run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 		return exitOK
 	case "generate":
 		if err := generateCommand(ctx, wd, flagSet.Args()[1:], stdout, stderr, client); err != nil {
+			_, _ = io.WriteString(stderr, err.Error()+"\n")
+			return exitError
+		}
+		return exitOK
+	case "form":
+		if err := formCommand(ctx, wd, flagSet.Args()[1:], stdout, stderr, client); err != nil {
 			_, _ = io.WriteString(stderr, err.Error()+"\n")
 			return exitError
 		}

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · jsch</title>
+<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"413","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+<link rel="stylesheet" href="https://unpkg.com/open-props@1.7.23/open-props.min.css" integrity="sha384-fsyUJwnN3qLArJUL5oaEYS3/WnhCmI4K5x+oB8wFigOMTJaIvys56ozH3+nE/qcf" crossorigin="anonymous">
+<link rel="stylesheet" href="https://unpkg.com/open-props@1.7.23/normalize.min.css" integrity="sha384-sddBOogFG2pe9DuB3k3ekS4as3O4oEzrarCR1HkYLY5Z/7pFYJt54z8VD1yGM7JF" crossorigin="anonymous">
+<link rel="stylesheet" href="/jsonform.css">
+<script src="https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js" integrity="sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg" crossorigin="anonymous" defer></script>
+<style>
+  body {
+    display: grid;
+    gap: var(--size-6);
+    padding: var(--size-6) var(--size-4);
+    justify-items: center;
+  }
+  .page {
+    display: grid;
+    gap: var(--size-5);
+    inline-size: min(100%, var(--size-content-3));
+  }
+  .page > header {
+    display: grid;
+    gap: var(--size-1);
+    padding-block-end: var(--size-4);
+    border-block-end: var(--border-size-1) solid var(--surface-3);
+  }
+  .page h1 {
+    font-size: var(--font-size-5);
+    max-inline-size: none;
+  }
+  .page header p {
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-1);
+  }
+  .page .jsonform {
+    max-inline-size: none;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+<header>
+<h1>{{.Title}}</h1>
+<p>{{.Subtitle}}</p>
+</header>
+<main>
+{{template "jsonhandler-form" .Form}}
+</main>
+</div>
+</body>
+</html>

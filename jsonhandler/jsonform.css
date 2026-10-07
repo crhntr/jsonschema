@@ -1,0 +1,363 @@
+/*
+  jsonform.css: a starting stylesheet for jsonhandler forms, built on Open
+  Props (https://open-props.style). Load Open Props first:
+
+    <link rel="stylesheet" href="https://unpkg.com/open-props">
+    <link rel="stylesheet" href="jsonform.css">
+
+  The form works without this file; it only styles the classes and data
+  attributes documented in README.md. Copy it and change what you like, or
+  set the custom properties below on .jsonform (or any ancestor) to theme it.
+*/
+
+.jsonform,
+.jsonform-result {
+  --jsonform-font: var(--font-sans, system-ui, sans-serif);
+  --jsonform-mono: var(--font-mono, ui-monospace, monospace);
+  --jsonform-text: var(--gray-9, #212529);
+  --jsonform-muted: var(--gray-7, #495057);
+  --jsonform-surface: var(--gray-0, #f8f9fa);
+  --jsonform-control: #fff;
+  --jsonform-border: var(--gray-4, #ced4da);
+  --jsonform-accent: var(--indigo-7, #4263eb);
+  --jsonform-accent-text: #fff;
+  --jsonform-error: var(--red-8, #e03131);
+  --jsonform-radius: var(--radius-2, 5px);
+  --jsonform-gap: var(--size-3, 1rem);
+  --jsonform-indent: var(--size-3, 1rem);
+
+  font-family: var(--jsonform-font);
+  color: var(--jsonform-text);
+}
+
+@media (prefers-color-scheme: dark) {
+  .jsonform,
+  .jsonform-result {
+    --jsonform-text: var(--gray-1, #f1f3f5);
+    --jsonform-muted: var(--gray-5, #adb5bd);
+    --jsonform-surface: var(--gray-9, #212529);
+    --jsonform-control: var(--gray-10, #16191d);
+    --jsonform-border: var(--gray-7, #495057);
+    --jsonform-accent: var(--indigo-4, #748ffc);
+    --jsonform-accent-text: var(--gray-12, #030507);
+    --jsonform-error: var(--red-4, #ff8787);
+  }
+}
+
+.jsonform {
+  display: grid;
+  gap: var(--jsonform-gap);
+  max-inline-size: var(--size-content-3, 60ch);
+}
+
+/* Every location in the value: a div for one control, a fieldset for a
+   group (object, map, array, choice, radio and checkbox groups). */
+.jsonform-field {
+  display: grid;
+  gap: var(--size-1, 0.25rem);
+  margin: 0;
+  min-inline-size: 0;
+}
+
+fieldset.jsonform-field {
+  gap: var(--jsonform-gap);
+  border: var(--border-size-1, 1px) solid var(--jsonform-border);
+  border-radius: var(--jsonform-radius);
+  padding: var(--size-2, 0.5rem) var(--jsonform-indent) var(--jsonform-indent);
+  background: color-mix(in srgb, var(--jsonform-surface) 60%, transparent);
+}
+
+/* The root group needs no frame of its own. */
+.jsonform > fieldset.jsonform-field {
+  border: none;
+  padding: 0;
+  background: none;
+}
+
+.jsonform-label {
+  font-weight: var(--font-weight-6, 600);
+  font-size: var(--font-size-1, 0.875rem);
+}
+
+legend.jsonform-label {
+  padding-inline: var(--size-1, 0.25rem);
+  font-size: var(--font-size-2, 1rem);
+}
+
+.jsonform-required {
+  color: var(--jsonform-error);
+  text-decoration: none;
+  cursor: help;
+}
+
+.jsonform-description {
+  margin: 0;
+  color: var(--jsonform-muted);
+  font-size: var(--font-size-0, 0.75rem);
+  max-inline-size: none;
+}
+
+/* Controls */
+.jsonform-control:is(input:not([type="checkbox"], [type="radio"]), select, textarea) {
+  font: inherit;
+  color: inherit;
+  inline-size: 100%;
+  padding: var(--size-2, 0.5rem);
+  border: var(--border-size-1, 1px) solid var(--jsonform-border);
+  border-radius: var(--jsonform-radius);
+  background: var(--jsonform-control);
+}
+
+.jsonform-control:focus-visible {
+  outline: 2px solid var(--jsonform-accent);
+  outline-offset: 1px;
+}
+
+.jsonform-control[readonly],
+.jsonform-control:disabled {
+  background: var(--jsonform-surface);
+  color: var(--jsonform-muted);
+}
+
+.jsonform-control[type="color"] {
+  block-size: var(--size-8, 3rem);
+  padding: var(--size-1, 0.25rem);
+}
+
+[data-kind="json"] .jsonform-control,
+[data-kind="textarea"] .jsonform-control {
+  resize: vertical;
+}
+
+[data-kind="json"] .jsonform-control {
+  font-family: var(--jsonform-mono);
+  font-size: var(--font-size-1, 0.875rem);
+}
+
+/* A checkbox sits before its label. */
+[data-kind="checkbox"] {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: var(--size-2, 0.5rem);
+}
+
+[data-kind="checkbox"] > :is(.jsonform-description, .jsonform-errors) {
+  grid-column: 2;
+}
+
+.jsonform-control:is([type="checkbox"], [type="radio"]) {
+  accent-color: var(--jsonform-accent);
+  inline-size: 1.1em;
+  block-size: 1.1em;
+  margin: 0;
+}
+
+.jsonform-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2, 0.5rem) var(--size-4, 1.25rem);
+}
+
+.jsonform-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-1, 0.25rem);
+}
+
+/* Fixed values */
+.jsonform-const,
+.jsonform-null {
+  font-family: var(--jsonform-mono);
+  color: var(--jsonform-muted);
+}
+
+/* Optional values that are left out, shown as a label and an add button. */
+.jsonform-field[data-collapsed] {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  padding-block: var(--size-1, 0.25rem);
+  border-block-end: var(--border-size-1, 1px) dashed var(--jsonform-border);
+}
+
+.jsonform-field[data-collapsed] > .jsonform-label {
+  font-weight: var(--font-weight-4, 400);
+  color: var(--jsonform-muted);
+}
+
+.jsonform-field[data-collapsed] > .jsonform-description {
+  grid-column: 1 / -1;
+}
+
+.jsonform-field[data-deprecated] > .jsonform-label,
+.jsonform-field[data-deprecated] > legend {
+  text-decoration: line-through;
+  text-decoration-color: var(--jsonform-muted);
+}
+
+/* Arrays and maps */
+.jsonform-items {
+  display: grid;
+  gap: var(--size-2, 0.5rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: jsonform-item;
+}
+
+.jsonform-item {
+  display: grid;
+  gap: var(--size-2, 0.5rem);
+  padding: var(--size-2, 0.5rem);
+  border-inline-start: var(--border-size-3, 3px) solid var(--jsonform-border);
+  max-inline-size: none;
+}
+
+.jsonform-item:focus-within {
+  border-inline-start-color: var(--jsonform-accent);
+}
+
+.jsonform-entries {
+  display: grid;
+  gap: var(--size-2, 0.5rem);
+}
+
+.jsonform-item-actions {
+  display: flex;
+  gap: var(--size-1, 0.25rem);
+  justify-content: flex-end;
+}
+
+/* Choices: a variant picker, then the chosen variant. */
+.jsonform-variant {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-2, 0.5rem);
+}
+
+.jsonform-variant > .jsonform-control {
+  inline-size: auto;
+  flex: 1;
+}
+
+[data-kind="choice"] > fieldset.jsonform-field {
+  border-style: dashed;
+}
+
+/* Buttons */
+.jsonform-button {
+  font: inherit;
+  font-size: var(--font-size-1, 0.875rem);
+  padding: var(--size-1, 0.25rem) var(--size-3, 1rem);
+  border: var(--border-size-1, 1px) solid var(--jsonform-border);
+  border-radius: var(--jsonform-radius);
+  background: var(--jsonform-control);
+  color: var(--jsonform-text);
+  cursor: pointer;
+  justify-self: start;
+}
+
+.jsonform-button:hover:not(:disabled) {
+  border-color: var(--jsonform-accent);
+  color: var(--jsonform-accent);
+}
+
+.jsonform-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.jsonform-button:focus-visible {
+  outline: 2px solid var(--jsonform-accent);
+  outline-offset: 1px;
+}
+
+.jsonform-add::before,
+.jsonform-expand::before {
+  content: "+ ";
+}
+
+.jsonform-remove:hover:not(:disabled) {
+  border-color: var(--jsonform-error);
+  color: var(--jsonform-error);
+}
+
+.jsonform-submit,
+.jsonform-edit {
+  padding: var(--size-2, 0.5rem) var(--size-5, 1.5rem);
+  border-color: var(--jsonform-accent);
+  background: var(--jsonform-accent);
+  color: var(--jsonform-accent-text);
+  font-weight: var(--font-weight-6, 600);
+}
+
+.jsonform-submit:hover:not(:disabled),
+.jsonform-edit:hover:not(:disabled) {
+  color: var(--jsonform-accent-text);
+  filter: brightness(1.1);
+}
+
+.jsonform-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-2, 0.5rem);
+}
+
+/* In JSON mode the root is one big text area. */
+.jsonform[data-mode="json"] > [data-kind="json"] .jsonform-control {
+  min-block-size: 24rem;
+}
+
+.jsonform-actions {
+  display: flex;
+  gap: var(--size-2, 0.5rem);
+}
+
+/* Errors */
+.jsonform-errors {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--jsonform-error);
+  font-size: var(--font-size-1, 0.875rem);
+}
+
+.jsonform-errors > li {
+  max-inline-size: none;
+}
+
+.jsonform > .jsonform-errors {
+  padding: var(--size-2, 0.5rem) var(--size-3, 1rem);
+  border: var(--border-size-1, 1px) solid var(--jsonform-error);
+  border-radius: var(--jsonform-radius);
+}
+
+.jsonform-field[data-invalid] > .jsonform-control,
+.jsonform-control[aria-invalid="true"] {
+  border-color: var(--jsonform-error);
+}
+
+.jsonform-failure {
+  color: var(--jsonform-error);
+}
+
+/* The submitted value */
+.jsonform-result {
+  display: grid;
+  gap: var(--jsonform-gap);
+}
+
+.jsonform-output pre {
+  margin: 0;
+  padding: var(--size-3, 1rem);
+  overflow: auto;
+  border-radius: var(--jsonform-radius);
+  background: var(--jsonform-surface);
+  font-family: var(--jsonform-mono);
+  font-size: var(--font-size-1, 0.875rem);
+}
+
+.jsonform-message {
+  margin: 0;
+  color: var(--jsonform-muted);
+}

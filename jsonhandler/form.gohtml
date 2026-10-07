@@ -6,8 +6,10 @@
 {{- with .Errors}}
 <ul class="jsonform-errors" role="alert">{{range .}}<li>{{.}}</li>{{end}}</ul>
 {{- end}}
-{{template "jsonhandler-field" .Root}}
-<div class="jsonform-actions"><button type="submit" class="jsonform-button jsonform-submit">{{.SubmitLabel}}</button></div>
+{{- with .Root}}
+{{template "jsonhandler-field" .}}
+<div class="jsonform-actions"><button type="submit" class="jsonform-button jsonform-submit">{{$.SubmitLabel}}</button></div>
+{{- end}}
 </form>
 {{- end}}
 

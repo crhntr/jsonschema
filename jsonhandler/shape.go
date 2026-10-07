@@ -123,7 +123,17 @@ func flatten(nodes ...node) *shape {
 		}
 		sh.merge(n, seen)
 	}
+	sh.booleanOptions()
 	return sh
+}
+
+// booleanOptions lets a boolean annotated with the select or radio widget
+// render as a choice between true and false, which, unlike a checkbox,
+// can also leave the value out.
+func (sh *shape) booleanOptions() {
+	if sh.enum == nil && (sh.ui.Widget == "select" || sh.ui.Widget == "radio") && slices.Equal(sh.nonNullTypes(), []jsonschema.SimpleType{"boolean"}) {
+		sh.enum = []jsontext.Value{jsontext.Value("true"), jsontext.Value("false")}
+	}
 }
 
 func (sh *shape) merge(n node, seen map[*jsonschema.Schema]bool) {
@@ -297,6 +307,7 @@ func (sh *shape) withVariant(v node) *shape {
 		seen[m] = true
 	}
 	c.merge(v, seen)
+	c.booleanOptions()
 	return &c
 }
 

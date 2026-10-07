@@ -16,6 +16,9 @@ type encoder struct {
 }
 
 func (e *encoder) encode(sh *shape, path string, v jsontext.Value, depth int) {
+	if sh.writeOnly {
+		return // never sent to the browser; see Handler.Value
+	}
 	kind := sh.kind()
 	if depth > maxDepth {
 		kind = KindJSON

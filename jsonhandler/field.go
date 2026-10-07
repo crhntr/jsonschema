@@ -90,6 +90,7 @@ type Field struct {
 	constant    jsontext.Value
 	integer     bool
 	defaultTrue bool
+	secret      string // the submitted value of a write-only control
 	variantOf   string
 	variant     int
 	explicit    bool
@@ -104,9 +105,9 @@ type Option struct {
 
 // Key is the property-name control of a map entry.
 type Key struct {
-	Name, ID, Value              string
+	Name, ID, Value               string
 	Pattern, MinLength, MaxLength string
-	Errors                       []string
+	Errors                        []string
 }
 
 // Invalid reports that the field has errors to show.
@@ -120,6 +121,11 @@ type builder struct {
 	idPrefix  string
 	ancestors []*shape
 	form      *Form
+	// remaining is how many more fields may be built. The form state
+	// decides how many array items and map entries there are, so without
+	// a limit a request could ask for any amount of work.
+	remaining int
+	tooLarge  bool
 }
 
 type site struct {
@@ -151,6 +157,18 @@ func (b *builder) build(sh *shape, at site, depth int) *Field {
 	if depth > maxDepth {
 		f.Kind = KindJSON
 	}
+	if b.remaining--; b.remaining < 0 {
+		b.tooLarge = true
+		f.Kind = KindNull
+		return f
+	}
+	defer func() {
+		// A write-only value is never sent back to the browser, but it is
+		// still what was submitted.
+		if f.WriteOnly {
+			f.secret, f.Value = f.Value, ""
+		}
+	}()
 	switch f.Kind {
 	case KindText, KindTextarea, KindNumber:
 		b.scalar(f, sh)

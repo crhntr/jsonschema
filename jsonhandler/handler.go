@@ -24,7 +24,18 @@ type Handler struct {
 	Schema *jsonschema.Schema
 	// Value is the value the form starts with. When nil the form starts
 	// from the schema's default, or empty.
+	//
+	// Value is also what readOnly locations keep: whatever a submission
+	// says for them is replaced by what Value (or the default) has there,
+	// so a client cannot change them. writeOnly locations are never sent
+	// to the browser, so they start empty and are left out of the result
+	// unless something is entered.
 	Value jsontext.Value
+	// MaxFields limits how many fields one form may have, since the
+	// submitted form state decides how many array items and map entries
+	// to render. A larger form is refused with status 413. Defaults to
+	// 10000.
+	MaxFields int
 	// ID is the id of the form element and the prefix of every id inside
 	// it. Give each form on a page its own. Defaults to "jsonform".
 	ID string
@@ -86,7 +97,8 @@ type Form struct {
 	// opened for editing again.
 	State []Control
 
-	status int
+	status    int
+	writeOnly map[string]bool // pointers of writeOnly values, hidden by JSON
 }
 
 // Control is a hidden form control that carries form state.
@@ -115,8 +127,35 @@ func (f *Form) StatusCode() int {
 // Invalid reports that the form has errors to show.
 func (f *Form) Invalid() bool { return f.status == http.StatusUnprocessableEntity }
 
-// JSON returns the submitted value, indented.
-func (f *Form) JSON() string { return indentJSON(f.Value) }
+// JSON returns the submitted value, indented, with writeOnly values
+// replaced by "********".
+func (f *Form) JSON() string { return indentJSON(redact(f.Value, "", f.writeOnly)) }
+
+// redact replaces the values at the given pointers.
+func redact(v jsontext.Value, ptr string, hidden map[string]bool) jsontext.Value {
+	if hidden[ptr] {
+		return jsontext.Value(`"********"`)
+	}
+	switch v.Kind() {
+	case '{':
+		var members []member
+		for name, raw := range objectMembers(v) {
+			members = append(members, member{name: name, value: redact(raw, propertyPath(ptr, name), hidden)})
+		}
+		if out, err := objectJSON(members); err == nil {
+			return out
+		}
+	case '[':
+		items := arrayElements(v)
+		for i, item := range items {
+			items[i] = redact(item, itemPath(ptr, i), hidden)
+		}
+		if out, err := arrayJSON(items); err == nil {
+			return out
+		}
+	}
+	return v
+}
 
 // FormAction returns the URL of the form the field belongs to.
 func (f *Field) FormAction() string {
@@ -132,6 +171,11 @@ func (h *Handler) Form(ctx context.Context) (*Form, error) {
 		return nil, errNoSchema
 	}
 	sh := h.root()
+	return h.build(sh, h.initialState(sh)), nil
+}
+
+// initialState is the form state for h.Value, or for the schema default.
+func (h *Handler) initialState(sh *shape) state {
 	s := state{}
 	v := h.Value
 	if len(v) == 0 {
@@ -141,7 +185,7 @@ func (h *Handler) Form(ctx context.Context) (*Form, error) {
 		e := encoder{state: s}
 		e.encode(sh, "", v, 0)
 	}
-	return h.build(sh, s), nil
+	return s
 }
 
 // SubmitForm handles a post of the form. When an edit button was pressed
@@ -165,6 +209,21 @@ func (h *Handler) SubmitForm(ctx context.Context, form url.Values) (*Form, error
 		return h.build(sh, s), nil
 	}
 	f := h.build(sh, s)
+	if f.Root == nil {
+		return f, nil
+	}
+	if locked := f.paths(func(field *Field) bool { return field.ReadOnly }); len(locked) > 0 {
+		initial := h.initialState(sh)
+		for _, path := range locked {
+			s.remove(path)
+			for name, values := range initial {
+				if _, p, ok := parseName(name); ok && within(p, path) {
+					s[name] = values
+				}
+			}
+		}
+		f = h.build(sh, s)
+	}
 	r := f.Root.decode()
 	if r.missing {
 		r.errs = append(r.errs, fieldError{path: "", message: messageRequired})
@@ -190,7 +249,19 @@ func (h *Handler) SubmitForm(ctx context.Context, form url.Values) (*Form, error
 		f.Message = message
 	}
 	f.Valid, f.Value = true, r.value
+	secret := f.paths(func(field *Field) bool { return field.WriteOnly })
+	f.writeOnly = map[string]bool{}
+	for _, field := range f.fields(func(field *Field) bool { return field.WriteOnly }) {
+		f.writeOnly[field.Pointer] = true
+	}
+names:
 	for _, name := range s.sortedNames() {
+		_, p, _ := parseName(name)
+		for _, path := range secret {
+			if within(p, path) {
+				continue names
+			}
+		}
 		for _, v := range s[name] {
 			f.State = append(f.State, Control{Name: name, Value: v})
 		}
@@ -198,34 +269,13 @@ func (h *Handler) SubmitForm(ctx context.Context, form url.Values) (*Form, error
 	return f, nil
 }
 
-func (h *Handler) root() *shape {
-	return flatten(node{schema: h.Schema})
-}
-
-func (h *Handler) build(sh *shape, s state) *Form {
-	f := &Form{
-		ID:          firstNonEmpty(h.ID, "jsonform"),
-		SubmitLabel: firstNonEmpty(h.SubmitLabel, "Submit"),
-	}
-	b := builder{state: s, idPrefix: f.ID, form: f}
-	f.Root = b.build(sh, site{required: true, htmlRequired: true}, 0)
-	return f
-}
-
-// attach puts decoding errors and validation errors on the fields they
-// are about. A validation error at a location with no field of its own
-// goes to the nearest enclosing field.
-func (f *Form) attach(errs []fieldError, out *jsonschema.Output) {
-	f.status = http.StatusUnprocessableEntity
-	byPath := map[string]*Field{}
-	byPointer := map[string]*Field{}
-	choices := map[string]*Field{}
+// fields returns the fields that match, outermost first.
+func (f *Form) fields(match func(*Field) bool) []*Field {
+	var out []*Field
 	var walk func(*Field)
 	walk = func(field *Field) {
-		byPath[field.Path] = field
-		byPointer[field.Pointer] = field
-		if field.Kind == KindChoice {
-			choices[field.Pointer] = field
+		if match(field) {
+			out = append(out, field)
 		}
 		for _, c := range field.Fields {
 			walk(c)
@@ -237,7 +287,63 @@ func (f *Form) attach(errs []fieldError, out *jsonschema.Output) {
 			walk(field.Choice)
 		}
 	}
-	walk(f.Root)
+	if f.Root != nil {
+		walk(f.Root)
+	}
+	return out
+}
+
+// paths returns the form paths of the fields that match.
+func (f *Form) paths(match func(*Field) bool) []string {
+	var out []string
+	for _, field := range f.fields(match) {
+		out = append(out, field.Path)
+	}
+	return out
+}
+
+func (h *Handler) root() *shape {
+	return flatten(node{schema: h.Schema})
+}
+
+func (h *Handler) build(sh *shape, s state) *Form {
+	f := &Form{
+		ID:          firstNonEmpty(h.ID, "jsonform"),
+		SubmitLabel: firstNonEmpty(h.SubmitLabel, "Submit"),
+	}
+	limit := h.MaxFields
+	if limit <= 0 {
+		limit = defaultMaxFields
+	}
+	b := builder{state: s, idPrefix: f.ID, form: f, remaining: limit}
+	f.Root = b.build(sh, site{required: true, htmlRequired: true}, 0)
+	if b.tooLarge {
+		f.Root = nil
+		f.Errors = []string{fmt.Sprintf("the form would have more than %d fields", limit)}
+		f.status = http.StatusRequestEntityTooLarge
+	}
+	return f
+}
+
+const defaultMaxFields = 10000
+
+// attach puts decoding errors and validation errors on the fields they
+// are about. A validation error at a location with no field of its own
+// goes to the nearest enclosing field.
+func (f *Form) attach(errs []fieldError, out *jsonschema.Output) {
+	f.status = http.StatusUnprocessableEntity
+	byPath := map[string]*Field{}
+	byPointer := map[string]*Field{}
+	choices := map[string]*Field{}
+	// A choice and its chosen variant share a location; the variant comes
+	// later, so its control gets the errors.
+	for _, field := range f.fields(func(*Field) bool { return true }) {
+		byPath[field.Path] = field
+		byPointer[field.Pointer] = field
+		if field.Kind == KindChoice {
+			choices[field.Pointer] = field
+		}
+	}
 	for _, e := range errs {
 		field, ok := byPath[e.path]
 		switch {

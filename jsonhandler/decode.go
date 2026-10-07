@@ -45,10 +45,10 @@ func (f *Field) decode() result {
 	}
 	switch f.Kind {
 	case KindText, KindTextarea:
-		if f.Value == "" {
+		if f.submitted() == "" {
 			return f.empty(true)
 		}
-		return result{value: jsonString(fromControl(f.format, f.Value)), provided: true}
+		return result{value: jsonString(fromControl(f.format, f.submitted())), provided: true}
 	case KindNumber:
 		return f.decodeNumber()
 	case KindCheckbox:
@@ -59,10 +59,10 @@ func (f *Field) decode() result {
 		}
 		return result{value: jsontext.Value(strconv.FormatBool(f.Checked)), provided: f.Checked}
 	case KindSelect, KindRadio:
-		if f.Value == "" {
+		if f.submitted() == "" {
 			return f.empty(false)
 		}
-		return f.decodeOption(f.Value)
+		return f.decodeOption(f.submitted())
 	case KindCheckboxes:
 		return f.decodeCheckboxes()
 	case KindConst:
@@ -76,7 +76,7 @@ func (f *Field) decode() result {
 		}
 		return result{value: jsontext.Value("null")}
 	case KindJSON:
-		raw := strings.TrimSpace(f.Value)
+		raw := strings.TrimSpace(f.submitted())
 		if raw == "" {
 			return f.empty(false)
 		}
@@ -118,7 +118,7 @@ func (f *Field) fail(message string) result {
 }
 
 func (f *Field) decodeNumber() result {
-	raw := strings.TrimSpace(f.Value)
+	raw := strings.TrimSpace(f.submitted())
 	if raw == "" {
 		return f.empty(false)
 	}
@@ -289,6 +289,14 @@ func arrayJSON(items []jsontext.Value) (jsontext.Value, error) {
 		return nil, err
 	}
 	return bytes.TrimSpace(buf.Bytes()), nil
+}
+
+// submitted is the control's submitted value.
+func (f *Field) submitted() string {
+	if f.WriteOnly {
+		return f.secret
+	}
+	return f.Value
 }
 
 // lastToken returns the unescaped last reference token of a JSON Pointer.

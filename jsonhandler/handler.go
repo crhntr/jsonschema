@@ -41,6 +41,9 @@ type Handler struct {
 	ID string
 	// SubmitLabel is the text of the submit button. Defaults to "Submit".
 	SubmitLabel string
+	// Outline adds a navigation list of links to every object, array, map
+	// and choice in the form, for large or deeply nested values.
+	Outline bool
 	// OnSubmit, when set, is called with each submitted value that passes
 	// validation. A returned message is shown with the value; a returned
 	// error is shown on the form, which is rendered again for correction.
@@ -100,6 +103,8 @@ type Form struct {
 	Mode string
 	// Root is the field for the whole value.
 	Root *Field
+	// ShowOutline reports that the form renders its outline.
+	ShowOutline bool
 	// Errors are problems that belong to no single field.
 	Errors []string
 
@@ -150,6 +155,59 @@ func (f *Form) ErrorsID() string { return f.ID + "_errors" }
 // AllFields returns every rendered field, outermost first.
 func (f *Form) AllFields() []*Field {
 	return f.fields(func(field *Field) bool { return !field.Collapsed })
+}
+
+// OutlineItem is a link in the form's outline to an object, array, map or
+// choice, with links to the groups inside it.
+type OutlineItem struct {
+	Label, Href string
+	// Invalid reports errors in the group or anywhere inside it.
+	Invalid bool
+	Items   []OutlineItem
+}
+
+// Outline returns links to the groups in the form, nested as they are.
+func (f *Form) Outline() []OutlineItem {
+	if f.Root == nil {
+		return nil
+	}
+	return outline(f.Root)
+}
+
+func outline(field *Field) []OutlineItem {
+	if field.Choice != nil {
+		return outline(field.Choice)
+	}
+	var items []OutlineItem
+	for _, c := range append(slices.Clip(field.Fields), field.Entries...) {
+		switch {
+		case c.Collapsed:
+		case c.Kind == KindObject, c.Kind == KindMap, c.Kind == KindArray, c.Kind == KindChoice:
+			items = append(items, OutlineItem{
+				Label:   firstNonEmpty(c.Label, c.Pointer),
+				Href:    "#" + c.GroupID(),
+				Invalid: c.invalidWithin(),
+				Items:   outline(c),
+			})
+		}
+	}
+	return items
+}
+
+// invalidWithin reports errors on the field or any field inside it.
+func (f *Field) invalidWithin() bool {
+	if f.Invalid() || (f.Key != nil && len(f.Key.Errors) > 0) {
+		return true
+	}
+	if f.Choice != nil && f.Choice.invalidWithin() {
+		return true
+	}
+	for _, c := range append(slices.Clip(f.Fields), f.Entries...) {
+		if c.invalidWithin() {
+			return true
+		}
+	}
+	return false
 }
 
 // JSON returns the submitted value, indented, with writeOnly values
@@ -397,6 +455,7 @@ func (h *Handler) build(sh *shape, s state) *Form {
 	f := &Form{
 		ID:          firstNonEmpty(h.ID, "jsonform"),
 		SubmitLabel: firstNonEmpty(h.SubmitLabel, "Submit"),
+		ShowOutline: h.Outline,
 	}
 	limit := h.MaxFields
 	if limit <= 0 {

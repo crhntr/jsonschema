@@ -291,7 +291,7 @@ func schemaSource(ctx context.Context, wd, arg string, client *http.Client) (uri
 		}
 		return arg, buf, nil
 	default:
-		path := filepath.Clean(filepath.Join(wd, arg))
+		path := inDir(wd, arg)
 		buf, err := os.ReadFile(path)
 		if err != nil {
 			return "", nil, fmt.Errorf("read schema %s: %w", arg, err)
@@ -342,7 +342,7 @@ func readInstance(wd, arg string, stdin io.Reader) ([]byte, string, error) {
 		}
 		return buf, "<stdin>", nil
 	}
-	buf, err := os.ReadFile(filepath.Clean(filepath.Join(wd, arg)))
+	buf, err := os.ReadFile(inDir(wd, arg))
 	if err != nil {
 		return nil, "", fmt.Errorf("read instance %s: %w", arg, err)
 	}
@@ -375,7 +375,7 @@ func generateCommand(ctx context.Context, wd string, args []string, stdout, stde
 	}
 	var overrides generate.Overrides
 	if overridesPath != "" {
-		buf, err := os.ReadFile(filepath.Join(wd, overridesPath))
+		buf, err := os.ReadFile(inDir(wd, overridesPath))
 		if err != nil {
 			return fmt.Errorf("read overrides: %w", err)
 		}
@@ -385,13 +385,13 @@ func generateCommand(ctx context.Context, wd string, args []string, stdout, stde
 		}
 	}
 	if packageName == "" {
-		packageName = filepath.Base(filepath.Clean(filepath.Join(wd, outDir)))
+		packageName = filepath.Base(inDir(wd, outDir))
 	}
 	src, err := generate.GenerateFromSchema(root, typeName, packageName, overrides)
 	if err != nil {
 		return err
 	}
-	outAbs := filepath.Join(wd, outDir)
+	outAbs := inDir(wd, outDir)
 	if err := os.MkdirAll(outAbs, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", outAbs, err)
 	}
@@ -400,4 +400,13 @@ func generateCommand(ctx context.Context, wd string, args []string, stdout, stde
 		return fmt.Errorf("write %s: %w", outFile, err)
 	}
 	return nil
+}
+
+// inDir resolves a path argument against the working directory; an
+// absolute path is used as given.
+func inDir(wd, path string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Join(wd, path)
 }

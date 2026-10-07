@@ -44,10 +44,77 @@
   }
 }
 
-.jsonform {
+/* The form fills its container; put it in a narrower one if you want. */
+.jsonform,
+.jsonform-body {
   display: grid;
   gap: var(--jsonform-gap);
-  max-inline-size: var(--size-content-3, 60ch);
+  min-inline-size: 0;
+}
+
+/* With an outline, wide screens show it as a sticky sidebar. */
+@media (min-width: 64rem) {
+  .jsonform:has(> .jsonform-outline) {
+    grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
+    grid-template-areas: "toolbar toolbar" "outline body";
+    align-items: start;
+    column-gap: var(--size-6, 2rem);
+  }
+  .jsonform:has(> .jsonform-outline) > .jsonform-toolbar { grid-area: toolbar; }
+  .jsonform:has(> .jsonform-outline) > .jsonform-body { grid-area: body; }
+  .jsonform > .jsonform-outline {
+    grid-area: outline;
+    position: sticky;
+    inset-block-start: var(--size-3, 1rem);
+    max-block-size: calc(100dvh - 2 * var(--size-3, 1rem));
+    overflow: auto;
+  }
+}
+
+.jsonform-outline {
+  font-size: var(--font-size-1, 0.875rem);
+  padding-block: var(--size-2, 0.5rem);
+  border-block: var(--border-size-1, 1px) solid var(--jsonform-border);
+}
+
+.jsonform-outline ol {
+  margin: 0;
+  padding-inline-start: var(--size-3, 1rem);
+  list-style: none;
+}
+
+.jsonform-outline > ol {
+  padding-inline-start: 0;
+}
+
+.jsonform-outline li {
+  padding-block: 0.1em;
+  max-inline-size: none;
+}
+
+.jsonform-outline a {
+  color: var(--jsonform-text);
+  text-decoration: none;
+}
+
+.jsonform-outline a:hover,
+.jsonform-outline a:focus-visible {
+  color: var(--jsonform-accent);
+  text-decoration: underline;
+}
+
+.jsonform-outline li[data-invalid] > a {
+  color: var(--jsonform-error);
+}
+
+.jsonform-outline li[data-invalid] > a::after {
+  content: " !";
+  font-weight: var(--font-weight-7, 700);
+}
+
+/* Land a little below the top when following an outline link. */
+.jsonform fieldset[id] {
+  scroll-margin-block-start: var(--size-3, 1rem);
 }
 
 /* Every location in the value: a div for one control, a fieldset for a
@@ -59,19 +126,23 @@
   min-inline-size: 0;
 }
 
+/* A group is marked by a rule down its start edge rather than a box, so
+   deep nesting costs little width. */
 fieldset.jsonform-field {
   gap: var(--jsonform-gap);
-  border: var(--border-size-1, 1px) solid var(--jsonform-border);
-  border-radius: var(--jsonform-radius);
-  padding: var(--size-2, 0.5rem) var(--jsonform-indent) var(--jsonform-indent);
-  background: color-mix(in srgb, var(--jsonform-surface) 60%, transparent);
+  border: none;
+  border-inline-start: var(--border-size-2, 2px) solid var(--jsonform-border);
+  padding: 0 0 0 var(--jsonform-indent);
 }
 
-/* The root group needs no frame of its own. */
-.jsonform > fieldset.jsonform-field {
+fieldset.jsonform-field:focus-within {
+  border-inline-start-color: var(--jsonform-accent);
+}
+
+/* The root group needs no rule of its own. */
+.jsonform-body > fieldset.jsonform-field {
   border: none;
   padding: 0;
-  background: none;
 }
 
 .jsonform-label {
@@ -80,7 +151,7 @@ fieldset.jsonform-field {
 }
 
 legend.jsonform-label {
-  padding-inline: var(--size-1, 0.25rem);
+  padding: 0;
   font-size: var(--font-size-2, 1rem);
 }
 
@@ -108,6 +179,11 @@ legend.jsonform-label {
   background: var(--jsonform-control);
 }
 
+/* Keep a select as tall as a text input even when its option is blank. */
+select.jsonform-control {
+  min-block-size: calc(1lh + 2 * var(--size-2, 0.5rem) + 2px);
+}
+
 .jsonform-control:focus-visible {
   outline: 2px solid var(--jsonform-accent);
   outline-offset: 1px;
@@ -129,9 +205,10 @@ legend.jsonform-label {
   resize: vertical;
 }
 
-[data-kind="json"] .jsonform-control {
+[data-kind="json"] textarea.jsonform-control {
   font-family: var(--jsonform-mono);
   font-size: var(--font-size-1, 0.875rem);
+  tab-size: 2;
 }
 
 /* A checkbox sits before its label. */
@@ -204,16 +281,13 @@ legend.jsonform-label {
   counter-reset: jsonform-item;
 }
 
+/* Items are separated rather than indented: the group already has a rule. */
 .jsonform-item {
   display: grid;
   gap: var(--size-2, 0.5rem);
-  padding: var(--size-2, 0.5rem);
-  border-inline-start: var(--border-size-3, 3px) solid var(--jsonform-border);
+  padding-block: var(--size-2, 0.5rem);
+  border-block-start: var(--border-size-1, 1px) dashed var(--jsonform-border);
   max-inline-size: none;
-}
-
-.jsonform-item:focus-within {
-  border-inline-start-color: var(--jsonform-accent);
 }
 
 .jsonform-entries {
@@ -225,6 +299,30 @@ legend.jsonform-label {
   display: flex;
   gap: var(--size-1, 0.25rem);
   justify-content: flex-end;
+}
+
+.jsonform-item-actions > .jsonform-button {
+  padding: 0 var(--size-2, 0.5rem);
+  font-size: var(--font-size-0, 0.75rem);
+}
+
+/* The property picker of a wide object: label, select and button on a row. */
+.jsonform-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-2, 0.5rem);
+}
+
+.jsonform-pick > .jsonform-label {
+  font-weight: var(--font-weight-4, 400);
+  color: var(--jsonform-muted);
+}
+
+.jsonform-pick > .jsonform-control {
+  inline-size: auto;
+  flex: 1;
+  min-inline-size: 10rem;
 }
 
 /* Choices: a variant picker, then the chosen variant. */
@@ -240,8 +338,10 @@ legend.jsonform-label {
   flex: 1;
 }
 
+/* The chosen variant needs no rule of its own: the choice has one. */
 [data-kind="choice"] > fieldset.jsonform-field {
-  border-style: dashed;
+  border-inline-start: none;
+  padding-inline-start: 0;
 }
 
 /* Buttons */
@@ -277,6 +377,30 @@ legend.jsonform-label {
   content: "+ ";
 }
 
+/* An optional value's remove button sits on its label's row. */
+div.jsonform-field:has(> .jsonform-remove) {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+div.jsonform-field:has(> .jsonform-remove) > :not(.jsonform-label, .jsonform-remove) {
+  grid-column: 1 / -1;
+}
+
+div.jsonform-field > .jsonform-remove {
+  grid-row: 1;
+  grid-column: 2;
+}
+
+.jsonform-field > .jsonform-remove {
+  justify-self: end;
+  padding: 0 var(--size-2, 0.5rem);
+  border-color: transparent;
+  background: none;
+  color: var(--jsonform-muted);
+  font-size: var(--font-size-0, 0.75rem);
+}
+
 .jsonform-remove:hover:not(:disabled) {
   border-color: var(--jsonform-error);
   color: var(--jsonform-error);
@@ -304,8 +428,13 @@ legend.jsonform-label {
 }
 
 /* In JSON mode the root is one big text area. */
-.jsonform[data-mode="json"] > [data-kind="json"] .jsonform-control {
+.jsonform[data-mode="json"] .jsonform-body > [data-kind="json"] .jsonform-control {
   min-block-size: 24rem;
+}
+
+/* …so show its errors above it, where they stay in view. */
+.jsonform[data-mode="json"] .jsonform-body > [data-kind="json"] > .jsonform-errors {
+  order: -1;
 }
 
 .jsonform-actions {
@@ -326,7 +455,7 @@ legend.jsonform-label {
   max-inline-size: none;
 }
 
-.jsonform > .jsonform-errors {
+.jsonform-body > .jsonform-errors {
   padding: var(--size-2, 0.5rem) var(--size-3, 1rem);
   border: var(--border-size-1, 1px) solid var(--jsonform-error);
   border-radius: var(--jsonform-radius);

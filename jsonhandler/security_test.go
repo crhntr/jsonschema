@@ -179,7 +179,7 @@ func TestMaxFields(t *testing.T) {
 			if doc.QuerySelector(".jsonform-field") != nil {
 				t.Errorf("form has fields")
 			}
-			if el := doc.QuerySelector("form > .jsonform-errors li"); el == nil || el.TextContent() != "the form would have more than 10 fields" {
+			if el := doc.QuerySelector("#jsonform_errors li"); el == nil || el.TextContent() != "the form would have more than 10 fields" {
 				t.Errorf("no size error")
 			}
 		})

@@ -34,6 +34,10 @@ type Field struct {
 	// attribute: the value is required and so is every enclosing value,
 	// so the browser cannot block a submission the schema allows.
 	Required, HTMLRequired bool
+	// Implied reports a location that exists because its container does:
+	// an array item, a map entry, or the chosen variant of a choice. Its
+	// label gets no required mark.
+	Implied bool
 	ReadOnly, WriteOnly    bool
 	Deprecated             bool
 
@@ -55,6 +59,11 @@ type Field struct {
 	// declared under properties.
 	Fields  []*Field
 	Entries []*Field
+
+	// Absent lists the optional properties of a wide object that have no
+	// value, offered in a picker named PickName; see [applyAction].
+	Absent   []Option
+	PickName string
 
 	// Key is set on map entries: the control for the property name.
 	Key *Key
@@ -120,6 +129,13 @@ func (f *Field) ErrorsID() string { return f.ID + "_errors" }
 // HelpID is the id of the field's description.
 func (f *Field) HelpID() string { return f.ID + "_help" }
 
+// GroupID is the id of the fieldset of an object, map, array or choice,
+// which the outline links to.
+func (f *Field) GroupID() string { return f.ID + "_group" }
+
+// PickID is the id of the property picker of a wide object.
+func (f *Field) PickID() string { return f.ID + "_pick" }
+
 // LabelID is the id of a label that is not a <label> element.
 func (f *Field) LabelID() string { return f.ID + "_label" }
 
@@ -157,7 +173,7 @@ func (b *builder) build(sh *shape, at site, depth int) *Field {
 		Pointer:      at.pointer,
 		ID:           b.id(at.path),
 		Label:        label(sh, at.label),
-		Description:  sh.description,
+		Description:  b.description(sh),
 		Class:        sh.ui.Class,
 		Required:     at.required,
 		HTMLRequired: at.required && at.htmlRequired,
@@ -342,7 +358,10 @@ func (b *builder) object(f *Field, sh *shape, at site, depth int) {
 	b.presence(f)
 	b.ancestors = append(b.ancestors, sh)
 	defer func() { b.ancestors = b.ancestors[:len(b.ancestors)-1] }()
-	for _, p := range sh.orderedProperties() {
+	properties := sh.orderedProperties()
+	fold := len(properties) > foldThreshold
+	var deprecated []*Field
+	for _, p := range properties {
 		child := flatten(p.nodes...)
 		if child.never {
 			continue
@@ -355,13 +374,28 @@ func (b *builder) object(f *Field, sh *shape, at site, depth int) {
 			required:     required,
 			htmlRequired: f.HTMLRequired,
 		}
-		if !required && b.collapses(child, childAt.path) {
-			f.Fields = append(f.Fields, b.collapsed(child, childAt))
+		alwaysShown := child.ui.Collapsed != nil && !*child.ui.Collapsed
+		touched := b.state.touched(childAt.path)
+		var cf *Field
+		switch {
+		case !required && !touched && fold && !alwaysShown:
+			f.Absent = append(f.Absent, Option{Value: p.name, Label: label(child, p.name)})
+			continue
+		case !required && !touched && b.collapsible(child):
+			cf = b.collapsed(child, childAt)
+		default:
+			cf = b.build(child, childAt, depth+1)
+			cf.Removable = !required && touched && (fold || b.collapsible(child))
+		}
+		if child.deprecated {
+			deprecated = append(deprecated, cf)
 			continue
 		}
-		cf := b.build(child, childAt, depth+1)
-		cf.Removable = !required && cf.explicit && b.collapsible(child)
 		f.Fields = append(f.Fields, cf)
+	}
+	f.Fields = append(f.Fields, deprecated...)
+	if len(f.Absent) > 0 {
+		f.PickName = metaName(metaPick, at.path)
 	}
 	if n, ok := b.state.count(at.path); (ok && n > 0) || (len(sh.additional) > 0 && !sh.closed) {
 		b.entries(f, sh, at, depth)
@@ -386,9 +420,9 @@ func (b *builder) collapsible(sh *shape) bool {
 	return false
 }
 
-func (b *builder) collapses(sh *shape, path string) bool {
-	return b.collapsible(sh) && !b.state.touched(path)
-}
+// foldThreshold is how many properties an object may have before the
+// optional ones without a value are offered in a picker instead of shown.
+const foldThreshold = 12
 
 func (b *builder) collapsed(sh *shape, at site) *Field {
 	return &Field{
@@ -441,6 +475,7 @@ func (b *builder) entries(f *Field, sh *shape, at site, depth int) {
 		}, depth+1)
 		entry.Key = k
 		entry.Label = firstNonEmpty(key, "Value")
+		entry.Implied = true
 		entry.First, entry.Last = i == 0, i == n-1
 		f.Entries = append(f.Entries, entry)
 	}
@@ -473,6 +508,7 @@ func (b *builder) array(f *Field, sh *shape, at site, depth int) {
 			htmlRequired: true,
 		}, depth+1)
 		cf.Label = ordinal(firstNonEmpty(item.ui.Label, item.ownTitle, f.Label), i)
+		cf.Implied = true
 		cf.First, cf.Last = i == 0, i == n-1
 		f.Fields = append(f.Fields, cf)
 	}
@@ -504,7 +540,11 @@ func (b *builder) choice(f *Field, sh *shape, at site, depth int) {
 		htmlRequired: at.htmlRequired,
 	}, depth+1)
 	chosen.ID = f.ID + "_value"
+	chosen.Implied = true
 	chosen.Label = firstNonEmpty(choices[idx].shape.ui.Label, choices[idx].label)
+	if chosen.Description == f.Description {
+		chosen.Description = "" // the choice already shows it
+	}
 	f.Choice = chosen
 }
 
@@ -535,6 +575,17 @@ func (b *builder) id(path string) string {
 		}
 	}
 	return sb.String()
+}
+
+// description is the schema's description, unless an enclosing location
+// already shows the same text, as happens when a schema refers to itself.
+func (b *builder) description(sh *shape) string {
+	for _, a := range b.ancestors {
+		if a.description == sh.description {
+			return ""
+		}
+	}
+	return sh.description
 }
 
 // label names a location: the x-form label, else the schema's own title,

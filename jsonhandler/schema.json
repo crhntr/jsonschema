@@ -6,52 +6,54 @@
     "title": "JSON Schema",
     "description": "A JSON Schema 2020-12 document. The x-form keyword adjusts how jsonhandler renders a form for it.",
     "allOf": [
-        {"$ref": "https://json-schema.org/draft/2020-12/schema"}
-    ],
-    "properties": {
-        "x-form": {
-            "title": "x-form",
-            "description": "Form annotations. They change how the form looks, never what JSON it produces.",
-            "type": "object",
+        {"$ref": "https://json-schema.org/draft/2020-12/schema"},
+        {
             "properties": {
-                "widget": {
-                    "description": "The control to use instead of the default for the schema's type.",
-                    "enum": [
-                        "textarea", "password", "email", "url", "tel", "search", "color",
-                        "date", "time", "datetime-local", "month", "week", "range", "hidden",
-                        "select", "radio", "list", "json"
-                    ]
-                },
-                "label": {
-                    "description": "The field's label. Defaults to the schema's title, then the property name.",
-                    "type": "string"
-                },
-                "placeholder": {
-                    "description": "Placeholder text. Defaults to the default value of an optional field, or the first example.",
-                    "type": "string"
-                },
-                "order": {
-                    "description": "Property names to show first, in this order. The rest follow in the order the schema lists them.",
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "uniqueItems": true
-                },
-                "class": {
-                    "description": "Extra class names for the field's wrapper element.",
-                    "type": "string"
-                },
-                "collapsed": {
-                    "description": "Whether an optional value starts out left out, behind an add button. By default only deprecated values and values whose schema repeats an enclosing one do.",
-                    "type": "boolean",
-                    "x-form": {"widget": "select"}
-                },
-                "rows": {
-                    "description": "The number of text rows of a textarea or json widget.",
-                    "type": "integer",
-                    "minimum": 1
+                "x-form": {
+                    "title": "x-form",
+                    "description": "Form annotations. They change how the form looks, never what JSON it produces.",
+                    "type": "object",
+                    "properties": {
+                        "widget": {
+                            "description": "The control to use instead of the default for the schema's type.",
+                            "enum": [
+                                "textarea", "password", "email", "url", "tel", "search", "color",
+                                "date", "time", "datetime-local", "month", "week", "range", "hidden",
+                                "select", "radio", "list", "json"
+                            ]
+                        },
+                        "label": {
+                            "description": "The field's label. Defaults to the schema's title, then the property name.",
+                            "type": "string"
+                        },
+                        "placeholder": {
+                            "description": "Placeholder text. Defaults to the default value of an optional field, or the first example.",
+                            "type": "string"
+                        },
+                        "order": {
+                            "description": "Property names to show first, in this order. The rest follow in the order the schema lists them.",
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "uniqueItems": true
+                        },
+                        "class": {
+                            "description": "Extra class names for the field's wrapper element.",
+                            "type": "string"
+                        },
+                        "collapsed": {
+                            "description": "Whether an optional value starts out left out, behind an add button. By default only deprecated values and values whose schema repeats an enclosing one do.",
+                            "type": "boolean",
+                            "x-form": {"widget": "select"}
+                        },
+                        "rows": {
+                            "description": "The number of text rows of a textarea or json widget.",
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    },
+                    "additionalProperties": false
                 }
-            },
-            "additionalProperties": false
+            }
         }
-    }
+    ]
 }

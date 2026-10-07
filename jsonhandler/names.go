@@ -21,6 +21,7 @@ import (
 //	@variant<path>  the chosen oneOf/anyOf/type variant, by index
 //	@present<path>  the optional object, array or map at path is included
 //	@key<path>      the property name of the map entry at path
+//	@pick<path>     the optional property of the object at path to add
 //	@action         the edit an edit button asks for; see [applyAction]
 const (
 	valuePrefix  = "$"
@@ -29,6 +30,7 @@ const (
 	metaVariant  = "variant"
 	metaPresent  = "present"
 	metaKey      = "key"
+	metaPick     = "pick"
 	ActionName   = "@action"
 	entryToken   = "~k"
 	maxItems     = 1000 // upper bound on @len so a request cannot ask for unbounded work
@@ -204,16 +206,17 @@ func positionPath(parent string, i int, entry bool) string {
 //	up<path>      swap an array item or map entry with the one before it
 //	down<path>    swap an array item or map entry with the one after it
 //	expand<path>  include a collapsed optional value
+//	pick<path>    include the optional property @pick<path> names
 //
 // Any other action, including the empty one, changes nothing; the form
 // is re-rendered with the submitted values, which is how a newly chosen
 // variant takes effect.
 func applyAction(s state, action string) {
-	i := strings.IndexByte(action, '/')
-	if i < 0 {
-		return
+	// The root's path is empty, so an action may be just the operation.
+	op, path := action, ""
+	if i := strings.IndexByte(action, '/'); i >= 0 {
+		op, path = action[:i], action[i:]
 	}
-	op, path := action[:i], action[i:]
 	switch op {
 	case "add":
 		n, _ := s.count(path)
@@ -223,6 +226,11 @@ func applyAction(s state, action string) {
 		url.Values(s).Set(metaName(metaPresent, path), presentValue)
 	case "expand":
 		url.Values(s).Set(metaName(metaPresent, path), presentValue)
+	case "pick":
+		if name, ok := s.meta(metaPick, path); ok && name != "" {
+			url.Values(s).Set(metaName(metaPresent, propertyPath(path, name)), presentValue)
+		}
+		delete(s, metaName(metaPick, path))
 	case "remove":
 		parent, token := splitLast(path)
 		idx, entry, ok := position(token)

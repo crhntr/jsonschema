@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -365,6 +366,44 @@ func TestSubmitForm_actions(t *testing.T) {
 	}
 }
 
+func TestSubmitForm_rootActions(t *testing.T) {
+	t.Run("add an item to a root array", func(t *testing.T) {
+		h := newHandler(t, `{"type":"array","items":{"type":"string"}}`)
+		state := formState(t, postForm(t, h, url.Values{"@len": {"0"}, ActionName: {"add"}}))
+		if state.Get("@len") != "1" {
+			t.Errorf("@len = %q, want 1", state.Get("@len"))
+		}
+	})
+
+	t.Run("pick a property of a wide root object", func(t *testing.T) {
+		var props []string
+		for i := range foldThreshold + 1 {
+			props = append(props, fmt.Sprintf(`"p%d":{"type":"string"}`, i))
+		}
+		h := newHandler(t, `{"type":"object","properties":{`+strings.Join(props, ",")+`}}`)
+		doc := fragment(t, getForm(t, h))
+		if doc.QuerySelector(`[data-pointer="/p3"]`) != nil {
+			t.Fatalf("absent optional property shown in a wide object")
+		}
+		picker := doc.QuerySelector("#jsonform_root_pick")
+		if picker == nil || picker.GetAttribute("name") != "@pick" {
+			t.Fatalf("no picker for the root object")
+		}
+		res := postForm(t, h, url.Values{"@pick": {"p3"}, ActionName: {"pick"}})
+		doc = fragment(t, res)
+		field := doc.QuerySelector(`[data-pointer="/p3"]`)
+		if field == nil {
+			t.Fatalf("picked property not shown")
+		}
+		if field.QuerySelector(".jsonform-remove") == nil {
+			t.Errorf("picked property cannot be removed")
+		}
+		if opt := doc.QuerySelector(`#jsonform_root_pick option[value="p3"]`); opt != nil {
+			t.Errorf("picked property still offered")
+		}
+	})
+}
+
 func TestRoutes(t *testing.T) {
 	const schema = `{"type":"object","required":["name"],"properties":{"name":{"type":"string","minLength":1}}}`
 
@@ -444,7 +483,7 @@ func TestRoutes(t *testing.T) {
 		if res.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("status = %d, want 422", res.StatusCode)
 		}
-		if el := fragment(t, res).QuerySelector("form > .jsonform-errors li"); el == nil || el.TextContent() != "name taken" {
+		if el := fragment(t, res).QuerySelector("#jsonform_errors li"); el == nil || el.TextContent() != "name taken" {
 			t.Errorf("form error not shown")
 		}
 	})

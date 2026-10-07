@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/crhntr/jsonschema/jsonhandler"
@@ -127,7 +127,7 @@ func newFormServer(ctx context.Context, wd, schemaArg, instance string, write bo
 		srv.handler.Schema = s
 		page.Title, page.Subtitle = "Edit a value", "A new value for "+schemaArg
 	}
-	path := filepath.Join(wd, instance)
+	path := inDir(wd, instance)
 	if instance != "" {
 		page.Subtitle = instance
 		if schemaArg != "" {
@@ -147,6 +147,7 @@ func newFormServer(ctx context.Context, wd, schemaArg, instance string, write bo
 		}
 	}
 	srv.handler.SubmitLabel = "Save"
+	srv.handler.Outline = true
 	srv.handler.OnSubmit = func(_ context.Context, v jsontext.Value) (string, error) {
 		out := v.Clone()
 		if err := out.Indent(jsontext.WithIndent("  ")); err != nil {
@@ -192,7 +193,28 @@ func newFormServer(ctx context.Context, wd, schemaArg, instance string, write bo
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 		_, _ = w.Write(jsonhandler.Stylesheet())
 	})
-	return mux, nil
+	// The server can write files, so other sites must not be able to
+	// drive it: cross-origin posts are refused, and so are requests for
+	// any host name but localhost, which stops DNS rebinding.
+	return http.NewCrossOriginProtection().Handler(localHostOnly(mux)), nil
+}
+
+// localHostOnly refuses requests whose Host is a name other than
+// localhost. IP addresses are allowed so the server can listen on other
+// interfaces; a rebinding attack needs a name it controls.
+func localHostOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		host = strings.Trim(host, "[]")
+		if host != "localhost" && net.ParseIP(host) == nil {
+			http.Error(w, "this server only answers to localhost or an IP address", http.StatusMisdirectedRequest)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // renderPage writes the page. The status is already sent, so a template

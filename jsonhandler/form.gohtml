@@ -16,12 +16,28 @@
 {{- end}}
 </div>
 {{- end}}
+{{- if .ShowOutline}}{{with .Outline}}
+<nav class="jsonform-outline" aria-label="Outline">
+{{template "jsonhandler-outline-items" .}}
+</nav>
+{{- end}}{{end}}
+<div class="jsonform-body">
 {{template "jsonhandler-form-errors" .}}
 {{- with .Root}}
 {{template "jsonhandler-field" .}}
 <div class="jsonform-actions"><button type="submit" class="jsonform-button jsonform-submit">{{$.SubmitLabel}}</button></div>
 {{- end}}
+</div>
 </form>
+{{- end}}
+
+{{define "jsonhandler-outline-items" -}}
+<ol>
+{{- range .}}
+<li{{if .Invalid}} data-invalid{{end}}><a href="{{.Href}}">{{.Label}}</a>
+{{- with .Items}}{{template "jsonhandler-outline-items" .}}{{end}}</li>
+{{- end}}
+</ol>
 {{- end}}
 
 {{define "jsonhandler-form-errors" -}}
@@ -79,7 +95,7 @@
 {{- end}}
 
 {{define "jsonhandler-label" -}}
-{{.Label}}{{if .Required}} <abbr class="jsonform-required" title="required">*</abbr>{{end}}
+{{.Label}}{{if and .Required (not .Implied)}} <abbr class="jsonform-required" title="required">*</abbr>{{end}}
 {{- end}}
 
 {{define "jsonhandler-help" -}}
@@ -203,7 +219,7 @@
 {{- end}}
 
 {{define "jsonhandler-object" -}}
-<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}} aria-describedby="{{describedBy .}}">
+<fieldset id="{{.GroupID}}" class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}} aria-describedby="{{describedBy .}}">
 {{- with .Label}}
 <legend class="jsonform-label">{{template "jsonhandler-label" $}}</legend>
 {{- end}}
@@ -213,6 +229,18 @@
 {{- template "jsonhandler-help" .}}
 {{- range .Fields}}
 {{template "jsonhandler-field" .}}
+{{- end}}
+{{- if .Absent}}
+<div class="jsonform-pick">
+<label class="jsonform-label" for="{{.PickID}}">Add a property</label>
+<select class="jsonform-control" id="{{.PickID}}" name="{{.PickName}}">
+<option value=""></option>
+{{- range .Absent}}
+<option value="{{.Value}}">{{.Label}}</option>
+{{- end}}
+</select>
+<button type="submit" class="jsonform-button jsonform-add" name="@action" value="{{.Action "pick"}}" formnovalidate hx-post="{{.FormAction}}" hx-trigger="click, change from:#{{.PickID}}" hx-target="closest form" hx-swap="outerHTML">Add</button>
+</div>
 {{- end}}
 {{- if or .LenName (eq .Kind "map")}}
 {{template "jsonhandler-entries" .}}
@@ -250,7 +278,7 @@
 {{- end}}
 
 {{define "jsonhandler-array" -}}
-<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}} aria-describedby="{{describedBy .}}">
+<fieldset id="{{.GroupID}}" class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}} aria-describedby="{{describedBy .}}">
 {{- with .Label}}
 <legend class="jsonform-label">{{template "jsonhandler-label" $}}</legend>
 {{- end}}
@@ -285,7 +313,7 @@
 {{- end}}
 
 {{define "jsonhandler-choice" -}}
-<fieldset class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}} aria-describedby="{{describedBy .}}">
+<fieldset id="{{.GroupID}}" class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}"{{if .Required}} data-required{{end}}{{if .Invalid}} data-invalid{{end}}{{if .Deprecated}} data-deprecated{{end}}{{if .ReadOnly}} data-readonly{{end}} aria-describedby="{{describedBy .}}">
 {{- with .Label}}
 <legend class="jsonform-label">{{template "jsonhandler-label" $}}</legend>
 {{- end}}

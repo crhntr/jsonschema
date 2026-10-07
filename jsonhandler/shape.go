@@ -306,7 +306,10 @@ func (sh *shape) withVariant(v node) *shape {
 	for _, m := range sh.members {
 		seen[m] = true
 	}
+	// The variant describes itself better than the parent does.
+	c.description = ""
 	c.merge(v, seen)
+	setString(&c.description, sh.description)
 	c.booleanOptions()
 	return &c
 }

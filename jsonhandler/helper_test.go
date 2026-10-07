@@ -159,6 +159,19 @@ func fieldErrors(f *Field) map[string][]string {
 	return out
 }
 
+// formRequest is a POST of form to /form, or a GET of /form when form is
+// nil.
+func formRequest(form url.Values) *http.Request {
+	if form == nil {
+		return httptest.NewRequest(http.MethodGet, "/form", nil)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/form", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return req
+}
+
+func newRecorder() *httptest.ResponseRecorder { return httptest.NewRecorder() }
+
 func assertJSONEqual(t *testing.T, got jsontext.Value, want string) {
 	t.Helper()
 	eq, err := jsonschema.Equal(got, []byte(want))

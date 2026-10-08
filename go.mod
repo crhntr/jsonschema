@@ -3,7 +3,7 @@ module github.com/crhntr/jsonschema
 go 1.27
 
 require (
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 	golang.org/x/tools v0.50.0
 	rsc.io/script v0.0.2
 )

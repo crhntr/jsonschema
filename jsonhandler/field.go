@@ -90,7 +90,8 @@ type Field struct {
 	StubInvalid bool
 
 	// AddReason says why an array or map cannot get another item or
-	// entry when CanAdd is false.
+	// entry when CanAdd is false. A read-only one has no reason of its
+	// own; see ReadOnlyReason.
 	AddReason string
 	// Inactive names a choice's variants other than the chosen one.
 	Inactive []string
@@ -121,6 +122,17 @@ type Field struct {
 	variant     int
 	explicit    bool
 	form        *Form
+	// insideReadOnly reports that ReadOnly comes from an enclosing value.
+	insideReadOnly bool
+}
+
+// ReadOnlyReason says why the field cannot be changed. It is empty for a
+// field inside a read-only value, which says so itself.
+func (f *Field) ReadOnlyReason() string {
+	if !f.ReadOnly || f.insideReadOnly {
+		return ""
+	}
+	return "Read-only"
 }
 
 // Option is a choice in a select, radio group or checkbox group.
@@ -184,25 +196,27 @@ type site struct {
 	label         string
 	required      bool
 	htmlRequired  bool
+	readOnly      bool // inside a readOnly value
 }
 
 func (b *builder) build(sh *shape, at site, depth int) *Field {
 	f := &Field{
-		Path:         at.path,
-		Name:         valueName(at.path),
-		Pointer:      at.pointer,
-		ID:           b.id(at.path),
-		Label:        label(sh, at.label),
-		Description:  b.description(sh),
-		Class:        sh.ui.Class,
-		Required:     at.required,
-		HTMLRequired: at.required && at.htmlRequired,
-		ReadOnly:     sh.readOnly,
-		WriteOnly:    sh.writeOnly,
-		Deprecated:   sh.deprecated,
-		nullable:     sh.nullable(),
-		format:       sh.format,
-		form:         b.form,
+		Path:           at.path,
+		Name:           valueName(at.path),
+		Pointer:        at.pointer,
+		ID:             b.id(at.path),
+		Label:          label(sh, at.label),
+		Description:    b.description(sh),
+		Class:          sh.ui.Class,
+		Required:       at.required,
+		HTMLRequired:   at.required && at.htmlRequired,
+		ReadOnly:       sh.readOnly || at.readOnly,
+		WriteOnly:      sh.writeOnly,
+		Deprecated:     sh.deprecated,
+		nullable:       sh.nullable(),
+		format:         sh.format,
+		form:           b.form,
+		insideReadOnly: at.readOnly,
 	}
 	f.Kind = sh.kind()
 	if depth > maxDepth || (depth == 0 && b.jsonRoot) {
@@ -393,19 +407,22 @@ func (b *builder) object(f *Field, sh *shape, at site, depth int) {
 			label:        p.name,
 			required:     required,
 			htmlRequired: f.HTMLRequired,
+			readOnly:     f.ReadOnly,
 		}
 		alwaysShown := child.ui.Collapsed != nil && !*child.ui.Collapsed
 		touched := b.state.touched(childAt.path)
 		var cf *Field
 		switch {
 		case !required && !touched && fold && !alwaysShown:
-			f.Absent = append(f.Absent, Option{Value: p.name, Label: label(child, p.name)})
+			if !f.ReadOnly {
+				f.Absent = append(f.Absent, Option{Value: p.name, Label: label(child, p.name)})
+			}
 			continue
 		case !required && !touched && b.collapsible(child):
 			cf = b.collapsed(child, childAt)
 		default:
 			cf = b.build(child, childAt, depth+1)
-			cf.Removable = !required && touched && (fold || b.collapsible(child))
+			cf.Removable = !required && touched && (fold || b.collapsible(child)) && !cf.ReadOnly
 		}
 		if child.deprecated {
 			deprecated = append(deprecated, cf)
@@ -455,8 +472,11 @@ func (b *builder) collapsed(sh *shape, at site) *Field {
 		Description: b.description(sh),
 		Class:       sh.ui.Class,
 		Deprecated:  sh.deprecated,
+		ReadOnly:    sh.readOnly || at.readOnly,
 		Collapsed:   true,
 		form:        b.form,
+
+		insideReadOnly: at.readOnly,
 	}
 }
 
@@ -465,9 +485,9 @@ func (b *builder) entries(f *Field, sh *shape, at site, depth int) {
 	n, _ := b.state.count(at.path)
 	f.LenName, f.Len = metaName(metaLen, at.path), n
 	maxProps, hasMax := integerKeyword(sh.maxProps)
-	f.CanAdd = !sh.closed && (!hasMax || n < maxProps) && n < maxItems
+	f.CanAdd = !f.ReadOnly && !sh.closed && (!hasMax || n < maxProps) && n < maxItems
 	switch {
-	case f.CanAdd:
+	case f.CanAdd, f.ReadOnly:
 	case sh.closed:
 		f.AddReason = "No other properties are allowed."
 	case hasMax && n >= maxProps:
@@ -501,6 +521,7 @@ func (b *builder) entries(f *Field, sh *shape, at site, depth int) {
 			label:        firstNonEmpty(key, "Value"),
 			required:     true,
 			htmlRequired: true,
+			readOnly:     f.ReadOnly,
 		}, depth+1)
 		entry.Key = k
 		entry.Label = firstNonEmpty(key, "Value")
@@ -523,9 +544,9 @@ func (b *builder) array(f *Field, sh *shape, at site, depth int) {
 	f.LenName, f.Len = metaName(metaLen, at.path), n
 	maximum, hasMax := integerKeyword(sh.maxItems)
 	itemsClosed := len(sh.items) > 0 && flatten(sh.items...).never
-	f.CanAdd = (!hasMax || n < maximum) && n < maxItems && (!itemsClosed || n < len(sh.prefixItems))
+	f.CanAdd = !f.ReadOnly && (!hasMax || n < maximum) && n < maxItems && (!itemsClosed || n < len(sh.prefixItems))
 	switch {
-	case f.CanAdd:
+	case f.CanAdd, f.ReadOnly:
 	case hasMax && n >= maximum:
 		f.AddReason = fmt.Sprintf("At most %d %s.", maximum, plural(maximum, "item", "items"))
 	case itemsClosed:
@@ -544,6 +565,7 @@ func (b *builder) array(f *Field, sh *shape, at site, depth int) {
 			label:        ordinal(f.Label, i),
 			required:     true,
 			htmlRequired: true,
+			readOnly:     f.ReadOnly,
 		}, depth+1)
 		// An item is named by its own schema, even through $ref ("Step 1"),
 		// before the array ("Steps 1").
@@ -581,6 +603,7 @@ func (b *builder) choice(f *Field, sh *shape, at site, depth int) {
 		label:        f.Label,
 		required:     at.required,
 		htmlRequired: at.htmlRequired,
+		readOnly:     f.ReadOnly,
 	}, depth+1)
 	chosen.ID = f.ID + "_value"
 	chosen.Implied = true

@@ -214,12 +214,14 @@ func renderedNames(f *Field) map[string]bool {
 }
 
 // problems lists what keeps a step from being done: the errors on its
-// fields and, when strict, the required fields left empty.
+// fields and, when strict, the required fields left empty. When strict,
+// a read-only field holds nothing back: nobody can change it, and
+// everything inside it is read-only too.
 func problems(f *Field, strict bool) []fieldError {
 	var out []fieldError
 	var walk func(*Field)
 	walk = func(f *Field) {
-		if f.Collapsed {
+		if f.Collapsed || (strict && f.ReadOnly) {
 			return
 		}
 		if strict && f.HTMLRequired && blank(f) {

@@ -111,8 +111,8 @@
 {{- end}}
 
 {{define "jsonhandler-reason" -}}
-{{- if .ReadOnly}}
-<span class="jsonform-reason">Read-only</span>
+{{- with .ReadOnlyReason}}
+<span class="jsonform-reason">{{.}}</span>
 {{- end}}
 {{- end}}
 
@@ -192,7 +192,10 @@
 {{define "jsonhandler-collapsed" -}}
 <div class="jsonform-field{{with .Class}} {{.}}{{end}}" data-kind="{{.Kind}}" data-pointer="{{.Pointer}}" data-collapsed{{if .Deprecated}} data-deprecated{{end}}>
 <span class="jsonform-label" id="{{.LabelID}}">{{.Label}}</span>
+{{- if not .ReadOnly}}
 <button type="submit" class="jsonform-button jsonform-expand" name="@action" value="{{.Action "expand"}}" formnovalidate aria-describedby="{{.LabelID}}">Add</button>
+{{- end}}
+{{- template "jsonhandler-reason" .}}
 {{- with .Description}}
 <p class="jsonform-description">{{.}}</p>
 {{- end}}
@@ -337,6 +340,7 @@
 <div class="jsonform-key">
 <label class="jsonform-label" for="{{.Key.ID}}">Property name</label>
 <input class="jsonform-control" id="{{.Key.ID}}" name="{{.Key.Name}}" type="text" value="{{.Key.Value}}" required
+{{- if .ReadOnly}} readonly{{end}}
 {{- with .Key.Pattern}} pattern="{{.}}"{{end}}
 {{- with .Key.MinLength}} minlength="{{.}}"{{end}}
 {{- with .Key.MaxLength}} maxlength="{{.}}"{{end}}
@@ -351,7 +355,7 @@
 {{- end}}
 {{- if .CanAdd}}
 <button type="submit" class="jsonform-button jsonform-add" name="@action" value="{{.Action "add"}}" formnovalidate>Add property</button>
-{{- else}}
+{{- else if .AddReason}}
 <button type="button" class="jsonform-button jsonform-add" disabled aria-describedby="{{.ID}}_reason">Add property</button>
 <span class="jsonform-reason" id="{{.ID}}_reason">{{.AddReason}}</span>
 {{- end}}
@@ -380,7 +384,7 @@
 {{- end}}
 {{- if .CanAdd}}
 <button type="submit" class="jsonform-button jsonform-add" name="@action" value="{{.Action "add"}}" formnovalidate>Add item</button>
-{{- else}}
+{{- else if .AddReason}}
 <button type="button" class="jsonform-button jsonform-add" disabled aria-describedby="{{.ID}}_reason">Add item</button>
 <span class="jsonform-reason" id="{{.ID}}_reason">{{.AddReason}}</span>
 {{- end}}
@@ -389,11 +393,13 @@
 {{- end}}
 
 {{define "jsonhandler-item-actions" -}}
+{{- if not .ReadOnly}}
 <div class="jsonform-item-actions">
 <button type="submit" class="jsonform-button jsonform-up" name="@action" value="{{.Action "up"}}" formnovalidate{{if .First}} disabled{{end}} aria-label="Move {{.Label}} up">Move up</button>
 <button type="submit" class="jsonform-button jsonform-down" name="@action" value="{{.Action "down"}}" formnovalidate{{if .Last}} disabled{{end}} aria-label="Move {{.Label}} down">Move down</button>
 <button type="submit" class="jsonform-button jsonform-remove" name="@action" value="{{.Action "remove"}}" formnovalidate aria-label="Remove {{.Label}}">Remove</button>
 </div>
+{{- end}}
 {{- end}}
 
 {{define "jsonhandler-choice" -}}
@@ -404,6 +410,17 @@
 {{- template "jsonhandler-help" .}}
 <div class="jsonform-variant">
 <label class="jsonform-label" for="{{.ID}}">Variant</label>
+{{- if .ReadOnly}}
+<select class="jsonform-control" id="{{.ID}}" disabled>
+{{- range .Options}}
+<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+{{- end}}
+</select>
+{{- range .Options}}{{if .Selected}}
+<input type="hidden" name="{{$.VariantName}}" value="{{.Value}}">
+{{- end}}{{end}}
+</div>
+{{- else}}
 <select class="jsonform-control" id="{{.ID}}" name="{{.VariantName}}" hx-post="{{.FormAction}}" hx-trigger="change" hx-target="closest form" hx-swap="outerHTML" hx-vals='{"@action": "refresh"}'>
 {{- range .Options}}
 <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
@@ -413,6 +430,7 @@
 </div>
 {{- with .Inactive}}
 <p class="jsonform-reason jsonform-inactive">Only one variant applies. Not in use: {{range $i, $label := .}}{{if $i}}, {{end}}{{$label}}{{end}}. Choose one under Variant to fill in its fields instead.</p>
+{{- end}}
 {{- end}}
 {{- with .Choice}}
 {{template "jsonhandler-field" .}}

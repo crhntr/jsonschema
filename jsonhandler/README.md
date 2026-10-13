@@ -161,7 +161,7 @@ Keywords become attributes so the browser can help before the server checks:
 | `required` | `required` when every enclosing value is required too, plus a `*` mark |
 | `default` | the initial value when required, the placeholder when optional |
 | `examples[0]` | the placeholder when there is no default |
-| `readOnly` | `readonly` (or `disabled` with a hidden input for checkboxes and selects) |
+| `readOnly` | `readonly` (or `disabled` with a hidden input for checkboxes and selects), on the field and everything inside it; no Add, Remove, Move or variant switch |
 | `writeOnly` | `type="password"`, and the value is never sent to the browser |
 | `deprecated` | `data-deprecated`; optional deprecated values start collapsed and sort last |
 | `minLength` / `maxLength` | `minlength` / `maxlength` |
@@ -276,7 +276,12 @@ a word:
   `maxProperties`, a closed tuple (`items: false`) or
   `additionalProperties: false` is rendered disabled, with the reason next to
   it.
-- A `readOnly` field says "Read-only".
+- A `readOnly` field says "Read-only". On an object, array, map or choice
+  that covers everything inside it: the fields are read-only, there are no
+  Add, Remove or Move buttons, keys cannot be renamed, the variant cannot be
+  switched, and a value that is left out cannot be added. The reason is
+  given once, on the `readOnly` value itself. In the wizard, Next is never
+  held back by a read-only field.
 - Only the chosen `oneOf`/`anyOf` variant's fields are rendered, and the
   choice says which variants are not in use and that switching the variant
   is how to fill them in instead. The outline shows the chosen variant next
@@ -327,7 +332,7 @@ array, choice, radio group, checkbox group).
 | `data-required` | the schema requires the value |
 | `data-invalid` | the field has errors |
 | `data-deprecated` | the schema marks it `deprecated` |
-| `data-readonly` | the schema marks it `readOnly` |
+| `data-readonly` | the schema marks it, or a value it is inside, `readOnly` |
 | `data-collapsed` | an optional value that is left out, shown as an Add button |
 | `class` | `jsonform-field`, plus any `x-form` `class` |
 

@@ -21,6 +21,19 @@ func TestHTMLPattern(t *testing.T) {
 		{"Go's named groups have no JavaScript form", "(?P<n>a)", ""},
 		{"POSIX classes have no JavaScript form", "[[:alpha:]]", ""},
 		{"Go's text anchors have no JavaScript form", `\Aabc\z`, ""},
+		// Patterns that end mid-construct are invalid in any dialect; the
+		// conversion must still give a result, not panic or loop.
+		{"a trailing backslash", `a\`, `.*(?:a\).*`},
+		{"an unterminated class", `[`, `.*(?:[).*`},
+		{"an unterminated negated class", `[^`, `.*(?:[^).*`},
+		{"a class holding only a bracket", `[]`, `.*(?:[\]).*`},
+		{"a hyphen ending the pattern inside a class", `[a-`, `.*(?:[a\-).*`},
+		{"punctuation ending the pattern inside a class", `[a&`, `.*(?:[a&).*`},
+		{"a group opener ending the pattern", `a(`, `.*(?:a().*`},
+		{"a lone group modifier", `(?`, ""},
+		{"escaped text spans", `\Qa.b\E`, ""},
+		{"a Go end-of-text anchor", `abc\Z`, ""},
+		{"an escape that is not an anchor", `\d\w\.`, `.*(?:\d\w\.).*`},
 		{"JavaScript groups are fine", "(?:a)(?=b)(?!c)(?<=d)(?<!e)(?<n>f)", ".*(?:(?:a)(?=b)(?!c)(?<=d)(?<!e)(?<n>f)).*"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

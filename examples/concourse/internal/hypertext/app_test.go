@@ -150,7 +150,7 @@ func TestSection(t *testing.T) {
 	a := newApp(t)
 	doc := a.page("/jobs/deploy-staging", http.StatusOK)
 	form := doc.QuerySelector("form.jsonform")
-	if form == nil || form.GetAttribute("action") != "/jobs/deploy-staging/form" {
+	if form == nil || form.GetAttribute("action") != "/jobs/deploy-staging" {
 		t.Fatalf("form = %v", form)
 	}
 	if yaml := texts(doc, "pre.yaml"); len(yaml) != 1 || !strings.HasPrefix(yaml[0], "name: deploy-staging") {
@@ -162,7 +162,7 @@ func TestSection(t *testing.T) {
 	t.Run("save changes only the edited line", func(t *testing.T) {
 		values := controls(form)
 		values.Set("$/plan/2/timeout", "15m")
-		res := a.post("/jobs/deploy-staging/form", values)
+		res := a.post("/jobs/deploy-staging", values)
 		if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/jobs/deploy-staging" {
 			t.Fatalf("save: status %d, location %q", res.StatusCode, res.Header.Get("Location"))
 		}
@@ -175,7 +175,7 @@ func TestSection(t *testing.T) {
 		before := a.saved()
 		values := controls(a.page("/jobs/deploy-staging", http.StatusOK).QuerySelector("form.jsonform"))
 		values.Set("$/plan/2/timeout", "soon")
-		res := a.post("/jobs/deploy-staging/form", values)
+		res := a.post("/jobs/deploy-staging", values)
 		if res.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", res.StatusCode)
 		}
@@ -191,7 +191,7 @@ func TestSection(t *testing.T) {
 	t.Run("a rename onto another job is refused", func(t *testing.T) {
 		values := controls(a.page("/jobs/build", http.StatusOK).QuerySelector("form.jsonform"))
 		values.Set("$/name", "unit")
-		res := a.post("/jobs/build/form", values)
+		res := a.post("/jobs/build", values)
 		if res.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", res.StatusCode)
 		}
@@ -209,7 +209,7 @@ func TestNewAndDelete(t *testing.T) {
 	values.Set("$/name", "docs")
 	values.Set("$/type", "git")
 	values.Set("$/source", `{"uri": "https://example.com/docs.git"}`)
-	res := a.post("/new/resources/form", values)
+	res := a.post("/new/resources", values)
 	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/resources/docs" {
 		t.Fatalf("add: status %d, location %q", res.StatusCode, res.Header.Get("Location"))
 	}

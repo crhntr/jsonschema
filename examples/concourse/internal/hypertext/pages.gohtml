@@ -194,21 +194,19 @@
 {{- end}}
 {{- end}}
 
-{{define "GET /new/{kind} NewSection(ctx, kind)" -}}
-{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "section-page" .Result}}{{end}}
-{{- end}}
+{{- /* A page with a form is one method for its GET and its POST. */ -}}
 
-{{define "POST /new/{kind}/form SubmitNewSection(ctx, kind, form)" -}}{{template "section-response" .}}{{- end}}
+{{define "GET /new/{kind} NewSection(request, kind)" -}}{{template "section-response" .}}{{- end}}
 
-{{define "POST /new/{kind}/form/validate ValidateNewSection(ctx, kind, form)" -}}{{.Result}}{{- end}}
+{{define "POST /new/{kind} NewSection(request, kind)" -}}{{template "section-response" .}}{{- end}}
 
-{{define "GET /{kind}/{name} Section(ctx, kind, name)" -}}
-{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "section-page" .Result}}{{end}}
-{{- end}}
+{{define "POST /new/{kind}/validate ValidateSection(request, kind)" -}}{{.Result}}{{- end}}
 
-{{define "POST /{kind}/{name}/form SubmitSection(ctx, kind, name, form)" -}}{{template "section-response" .}}{{- end}}
+{{define "GET /{kind}/{name} Section(request, kind, name)" -}}{{template "section-response" .}}{{- end}}
 
-{{define "POST /{kind}/{name}/form/validate ValidateSection(ctx, kind, name, form)" -}}{{.Result}}{{- end}}
+{{define "POST /{kind}/{name} Section(request, kind, name)" -}}{{template "section-response" .}}{{- end}}
+
+{{define "POST /{kind}/{name}/validate ValidateSection(request, kind)" -}}{{.Result}}{{- end}}
 
 {{define "POST /{kind}/{name}/delete DeleteSection(kind, name)" -}}
 {{- /* A method returning only an error hands it over as .Result. */ -}}

@@ -143,7 +143,7 @@ func TestTake(t *testing.T) {
 	a := newApp(t)
 	doc := a.page("/s/docs-feedback", http.StatusOK)
 	form := doc.QuerySelector("form.jsonform")
-	if form == nil || form.GetAttribute("action") != "/s/docs-feedback/form" {
+	if form == nil || form.GetAttribute("action") != "/s/docs-feedback" {
 		t.Fatalf("form = %v", form)
 	}
 	if got := texts(doc, ".jsonform-toolbar button"); !slices.Equal(got, []string{"Edit with wizard"}) {
@@ -173,7 +173,7 @@ func TestAnswers(t *testing.T) {
 	form := a.page("/s/docs-feedback", http.StatusOK).QuerySelector("form.jsonform")
 
 	t.Run("required questions cannot be left blank", func(t *testing.T) {
-		res := a.post("/s/docs-feedback/form", controls(form))
+		res := a.post("/s/docs-feedback", controls(form))
 		if res.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", res.StatusCode)
 		}
@@ -194,7 +194,7 @@ func TestAnswers(t *testing.T) {
 		v.Add("$/"+a.ids[1], "Tutorial")
 		v.Add("$/"+a.ids[1], "Agent skills")
 		v.Set("$/"+a.ids[3], "Yes")
-		res := a.post("/s/docs-feedback/form", v)
+		res := a.post("/s/docs-feedback", v)
 		if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/s/docs-feedback/thanks" {
 			t.Fatalf("status %d, location %q", res.StatusCode, res.Header.Get("Location"))
 		}
@@ -214,7 +214,7 @@ func TestAnswers(t *testing.T) {
 			{"@action": {"json"}},
 			{"@mode": {"json"}, "$": {`{"x":1}`}, "@action": {"refresh"}},
 		} {
-			res := a.post("/s/docs-feedback/form", v)
+			res := a.post("/s/docs-feedback", v)
 			body, _ := io.ReadAll(res.Body)
 			if res.StatusCode != http.StatusOK || strings.Contains(string(body), `name="$"`) || strings.Contains(string(body), `value="json"`) {
 				t.Errorf("POST %v: status %d, and the page offers JSON", v, res.StatusCode)
@@ -226,7 +226,7 @@ func TestAnswers(t *testing.T) {
 		v := controls(form)
 		v.Set("$/"+a.ids[0], "4")
 		v.Add("$/"+a.ids[1], "Podcast")
-		if res := a.post("/s/docs-feedback/form", v); res.StatusCode != http.StatusUnprocessableEntity {
+		if res := a.post("/s/docs-feedback", v); res.StatusCode != http.StatusUnprocessableEntity {
 			t.Errorf("an option the survey does not have: status %d", res.StatusCode)
 		}
 	})
@@ -234,7 +234,7 @@ func TestAnswers(t *testing.T) {
 
 func TestWizard(t *testing.T) {
 	a := newApp(t)
-	res := a.post("/s/docs-feedback/form", url.Values{"@action": {"step"}})
+	res := a.post("/s/docs-feedback", url.Values{"@action": {"step"}})
 	doc := domtest.ParseResponseDocument(t, res)
 	if got := texts(doc, ".jsonform-progress"); len(got) != 1 || !strings.HasPrefix(got[0], "Step 1 of 5: How useful are the docs?") {
 		t.Fatalf("progress = %q", got)
@@ -250,12 +250,12 @@ func TestWizard(t *testing.T) {
 	// Next past a required question left blank is refused by the server too.
 	v := controls(form)
 	v.Set("@action", next.GetAttribute("value"))
-	res = a.post("/s/docs-feedback/form", v)
+	res = a.post("/s/docs-feedback", v)
 	if res.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("Next past an unanswered required question: status %d", res.StatusCode)
 	}
 	v.Set("$/"+a.ids[0], "5")
-	res = a.post("/s/docs-feedback/form", v)
+	res = a.post("/s/docs-feedback", v)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("Next after answering: status %d", res.StatusCode)
 	}
@@ -272,7 +272,7 @@ func TestWizard(t *testing.T) {
 	form = doc.QuerySelector("form.jsonform")
 	v = controls(form)
 	v.Set("@action", form.QuerySelector("button.jsonform-next").GetAttribute("value"))
-	res = a.post("/s/docs-feedback/form", v)
+	res = a.post("/s/docs-feedback", v)
 	if res.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("Next past an empty required group: status %d", res.StatusCode)
 	}
@@ -281,7 +281,7 @@ func TestWizard(t *testing.T) {
 		t.Errorf("errors on the group = %q", got)
 	}
 	v.Add("$/"+a.ids[1], "Examples")
-	if res = a.post("/s/docs-feedback/form", v); res.StatusCode != http.StatusOK {
+	if res = a.post("/s/docs-feedback", v); res.StatusCode != http.StatusOK {
 		t.Errorf("Next with a box checked: status %d", res.StatusCode)
 	}
 }
@@ -341,7 +341,7 @@ func TestAuthoring(t *testing.T) {
 			t.Fatal(err)
 		}
 		v := controls(a.page("/surveys/docs-feedback/edit", http.StatusOK).QuerySelector("form.jsonform"))
-		res := a.post("/surveys/docs-feedback/edit/form", v)
+		res := a.post("/surveys/docs-feedback/edit", v)
 		if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/surveys/docs-feedback/results" {
 			t.Fatalf("status %d, location %q", res.StatusCode, res.Header.Get("Location"))
 		}
@@ -363,7 +363,7 @@ func TestAuthoring(t *testing.T) {
 			"$/questions/0/options/1":  {"Pizza"},
 			"$/questions/0/required":   {"true"},
 		}
-		res := a.post("/surveys/new/form", v)
+		res := a.post("/surveys/new", v)
 		if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/surveys/lunch/results" {
 			body, _ := io.ReadAll(res.Body)
 			t.Fatalf("status %d, location %q\n%s", res.StatusCode, res.Header.Get("Location"), body)
@@ -390,7 +390,7 @@ func TestAuthoring(t *testing.T) {
 			"@variant/questions/0": {"3"},
 			"$/questions/0/prompt": {"Hungry?"},
 		}
-		res := a.post("/surveys/new/form", v)
+		res := a.post("/surveys/new", v)
 		if res.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", res.StatusCode)
 		}
@@ -409,7 +409,7 @@ func TestAuthoring(t *testing.T) {
 			"@len/questions/0/options": {"1"},
 			"$/questions/0/options/0":  {"Only"},
 		}
-		res := a.post("/surveys/new/form", v)
+		res := a.post("/surveys/new", v)
 		if res.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", res.StatusCode)
 		}

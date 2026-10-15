@@ -123,21 +123,19 @@
 
 {{- /* Writing a survey */ -}}
 
-{{define "GET /surveys/new NewSurvey(ctx)" -}}
-{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "form-page" .Result}}{{end}}
-{{- end}}
+{{- /* A page with a form is one method for its GET and its POST. */ -}}
 
-{{define "POST /surveys/new/form SubmitNewSurvey(ctx, form)" -}}{{template "form-response" .}}{{- end}}
+{{define "GET /surveys/new NewSurvey(request)" -}}{{template "form-response" .}}{{- end}}
 
-{{define "POST /surveys/new/form/validate ValidateNewSurvey(ctx, form)" -}}{{.Result}}{{- end}}
+{{define "POST /surveys/new NewSurvey(request)" -}}{{template "form-response" .}}{{- end}}
 
-{{define "GET /surveys/{name}/edit EditSurvey(ctx, name)" -}}
-{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "form-page" .Result}}{{end}}
-{{- end}}
+{{define "POST /surveys/new/validate ValidateSurvey(request)" -}}{{.Result}}{{- end}}
 
-{{define "POST /surveys/{name}/edit/form SubmitEditSurvey(ctx, name, form)" -}}{{template "form-response" .}}{{- end}}
+{{define "GET /surveys/{name}/edit EditSurvey(request, name)" -}}{{template "form-response" .}}{{- end}}
 
-{{define "POST /surveys/{name}/edit/form/validate ValidateEditSurvey(ctx, name, form)" -}}{{.Result}}{{- end}}
+{{define "POST /surveys/{name}/edit EditSurvey(request, name)" -}}{{template "form-response" .}}{{- end}}
+
+{{define "POST /surveys/{name}/edit/validate ValidateSurvey(request)" -}}{{.Result}}{{- end}}
 
 {{define "POST /surveys/{name}/delete DeleteSurvey(name)" -}}
 {{- /* A method returning only an error hands it over as .Result. */ -}}
@@ -146,13 +144,11 @@
 
 {{- /* Taking a survey */ -}}
 
-{{define "GET /s/{name} Take(ctx, name)" -}}
-{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "form-page" .Result}}{{end}}
-{{- end}}
+{{define "GET /s/{name} Answer(request, name)" -}}{{template "form-response" .}}{{- end}}
 
-{{define "POST /s/{name}/form SubmitAnswers(ctx, name, form)" -}}{{template "form-response" .}}{{- end}}
+{{define "POST /s/{name} Answer(request, name)" -}}{{template "form-response" .}}{{- end}}
 
-{{define "POST /s/{name}/form/validate ValidateAnswers(ctx, name, form)" -}}{{.Result}}{{- end}}
+{{define "POST /s/{name}/validate ValidateAnswers(request, name)" -}}{{.Result}}{{- end}}
 
 {{define "GET /s/{name}/thanks Thanks(ctx, name)" -}}
 {{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}

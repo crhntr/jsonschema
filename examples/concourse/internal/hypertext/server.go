@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/crhntr/jsonschema"
 	"github.com/crhntr/jsonschema/jsonhandler"
 
 	"github.com/crhntr/jsonschema/examples/concourse/internal/pipeline"
@@ -37,7 +38,7 @@ type Server struct {
 	doc *pipeline.Document
 
 	checker *pipeline.Checker
-	forms   map[pipeline.Kind]*jsonhandler.Handler
+	forms   map[pipeline.Kind]*jsonschema.Schema // the schema of each kind's form
 }
 
 // New returns a Server editing the pipeline in src, which was read from
@@ -47,21 +48,18 @@ func New(ctx context.Context, src []byte, file string, write bool, log *slog.Log
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", file, err)
 	}
-	s := &Server{file: file, write: write, log: log, doc: doc, forms: map[pipeline.Kind]*jsonhandler.Handler{}}
+	s := &Server{file: file, write: write, log: log, doc: doc, forms: map[pipeline.Kind]*jsonschema.Schema{}}
 	resolved, err := schema.Load(ctx)
 	if err != nil {
 		return nil, err
 	}
 	s.checker = pipeline.NewChecker(resolved, schema.Pipeline())
 	for _, k := range kinds {
-		h, err := jsonhandler.NewAt(ctx, schema.Pipeline(), "/$defs/"+k.Definition())
+		form, err := jsonhandler.ParseSchemaAt(ctx, schema.Pipeline(), "/$defs/"+k.Definition())
 		if err != nil {
 			return nil, fmt.Errorf("%s form: %w", k, err)
 		}
-		h.ID = k.Definition()
-		h.SubmitLabel = "Save"
-		h.Outline = k == pipeline.Jobs
-		s.forms[k] = h
+		s.forms[k] = form
 	}
 	return s, nil
 }
@@ -227,8 +225,9 @@ type SectionPage struct {
 	Problems []Problem
 }
 
-// SectionResponse answers a post of a section form: the form again (after
-// an edit, or with errors), or where to go after a save.
+// SectionResponse answers a request for a section's form: the page with
+// the form on it (a first view, an edit, or errors), or where to go after
+// a save.
 type SectionResponse struct {
 	SectionPage
 	Location string
@@ -243,68 +242,58 @@ func (r SectionResponse) StatusCode() int {
 	return r.status
 }
 
-// Section shows the form for one job, resource or resource type.
-func (s *Server) Section(ctx context.Context, kind, name string) (SectionPage, error) {
-	spec, err := s.spec(kind, name)
-	if err != nil {
-		return SectionPage{}, err
-	}
-	h := spec.handler()
-	f, err := h.Form(ctx)
-	if err != nil {
-		return SectionPage{}, s.fail(err)
-	}
-	return s.sectionPage(spec, f)
+// Section serves the form for one job, resource or resource type, and
+// receives its post.
+func (s *Server) Section(request *http.Request, kind, name string) (SectionResponse, error) {
+	return s.section(request, kind, name)
 }
 
-// SubmitSection applies an edit to the form, or saves it.
-func (s *Server) SubmitSection(ctx context.Context, kind, name string, form url.Values) (SectionResponse, error) {
-	spec, err := s.spec(kind, name)
-	if err != nil {
-		return SectionResponse{}, err
-	}
-	return s.submit(ctx, spec, form)
+// NewSection serves an empty form for a new job, resource or resource
+// type, and receives its post.
+func (s *Server) NewSection(request *http.Request, kind string) (SectionResponse, error) {
+	return s.section(request, kind, "")
 }
 
-// ValidateSection checks the form as it is typed.
-func (s *Server) ValidateSection(ctx context.Context, kind, name string, form url.Values) (template.HTML, error) {
-	spec, err := s.spec(kind, name)
+// ValidateSection checks a section's form as it is typed.
+func (s *Server) ValidateSection(request *http.Request, kind string) (template.HTML, error) {
+	k, err := kindOf(kind)
 	if err != nil {
 		return "", err
 	}
-	return s.validate(ctx, spec, form)
+	html, err := jsonhandler.ValidateHTML(request, s.forms[k], nil, s.options(k, request))
+	return html, s.fail(err)
 }
 
-// NewSection shows an empty form for a new job, resource or resource type.
-func (s *Server) NewSection(ctx context.Context, kind string) (SectionPage, error) {
-	spec, err := s.spec(kind, "")
-	if err != nil {
-		return SectionPage{}, err
-	}
-	h := spec.handler()
-	f, err := h.Form(ctx)
-	if err != nil {
-		return SectionPage{}, s.fail(err)
-	}
-	return s.sectionPage(spec, f)
-}
-
-// SubmitNewSection applies an edit to the new item's form, or adds it.
-func (s *Server) SubmitNewSection(ctx context.Context, kind string, form url.Values) (SectionResponse, error) {
-	spec, err := s.spec(kind, "")
+// section is the page for one section: name is "" for a new one.
+func (s *Server) section(r *http.Request, kind, name string) (SectionResponse, error) {
+	sp, err := s.spec(kind, name)
 	if err != nil {
 		return SectionResponse{}, err
 	}
-	return s.submit(ctx, spec, form)
+	f, err := jsonhandler.Handle(r, s.forms[sp.kind], sp.value(), s.options(sp.kind, r))
+	if err != nil {
+		return SectionResponse{}, s.fail(err)
+	}
+	if f.Valid {
+		location, err := sp.save(f.Value)
+		if err == nil {
+			return SectionResponse{Location: location}, nil
+		}
+		f.Reject(s.fail(err))
+	}
+	page, err := s.sectionPage(sp, f)
+	return SectionResponse{SectionPage: page, status: f.StatusCode()}, err
 }
 
-// ValidateNewSection checks the new item's form as it is typed.
-func (s *Server) ValidateNewSection(ctx context.Context, kind string, form url.Values) (template.HTML, error) {
-	spec, err := s.spec(kind, "")
-	if err != nil {
-		return "", err
+// options are those of a section's form, which checks itself as it is
+// typed, at the URL of the page followed by /validate.
+func (s *Server) options(k pipeline.Kind, r *http.Request) *jsonhandler.Options {
+	return &jsonhandler.Options{
+		ID:             k.Definition(),
+		SubmitLabel:    "Save",
+		Outline:        k == pipeline.Jobs,
+		ValidateAction: r.URL.Path + "/validate",
 	}
-	return s.validate(ctx, spec, form)
 }
 
 // DeleteSection removes a job, resource or resource type.
@@ -352,24 +341,14 @@ func (s *Server) spec(kind, name string) (spec, error) {
 	return sp, nil
 }
 
-func (sp spec) action() string {
+// value is what the form starts from: the section as it is in the file,
+// or nothing for a new one.
+func (sp spec) value() jsontext.Value {
 	if sp.name == "" {
-		return "/new/" + string(sp.kind) + "/form"
+		return nil
 	}
-	return sectionHref(sp.kind, sp.name) + "/form"
-}
-
-// handler returns a form handler starting from the section's value.
-func (sp spec) handler() *jsonhandler.Handler {
-	h := sp.s.forms[sp.kind]
-	if sp.name == "" {
-		return h
-	}
-	v, err := sp.doc.Value(sp.sec.Pointer)
-	if err != nil {
-		return h
-	}
-	return h.WithValue(v)
+	v, _ := sp.doc.Value(sp.sec.Pointer)
+	return v
 }
 
 // save puts a valid value in the pipeline: in place of the section, or at
@@ -411,7 +390,7 @@ func (sp spec) save(v jsontext.Value) (string, error) {
 }
 
 func (s *Server) sectionPage(sp spec, f *jsonhandler.Form) (SectionPage, error) {
-	html, err := f.WithActions(sp.action(), sp.action()+"/validate").HTML()
+	html, err := f.HTML()
 	if err != nil {
 		return SectionPage{}, s.fail(err)
 	}
@@ -437,31 +416,6 @@ func (s *Server) sectionPage(sp spec, f *jsonhandler.Form) (SectionPage, error) 
 		}
 	}
 	return page, nil
-}
-
-func (s *Server) submit(ctx context.Context, sp spec, form url.Values) (SectionResponse, error) {
-	f, err := sp.handler().SubmitForm(ctx, form)
-	if err != nil {
-		return SectionResponse{}, s.fail(err)
-	}
-	if f.Valid {
-		location, err := sp.save(f.Value)
-		if err == nil {
-			return SectionResponse{Location: location}, nil
-		}
-		f.Reject(s.fail(err))
-	}
-	page, err := s.sectionPage(sp, f)
-	return SectionResponse{SectionPage: page, status: f.StatusCode()}, err
-}
-
-func (s *Server) validate(ctx context.Context, sp spec, form url.Values) (template.HTML, error) {
-	f, err := sp.handler().Validate(ctx, form)
-	if err != nil {
-		return "", s.fail(err)
-	}
-	html, err := f.ValidationHTML()
-	return html, s.fail(err)
 }
 
 // SourcePage shows the whole file with its problems on their lines, and a

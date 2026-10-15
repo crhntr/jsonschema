@@ -6,7 +6,6 @@ package hypertext
 import (
 	"bytes"
 	"cmp"
-	"context"
 	"errors"
 	"fmt"
 	"html/template"
@@ -19,17 +18,14 @@ import (
 )
 
 type RoutesReceiver interface {
-	NewSection(ctx context.Context, kind string) (SectionPage, error)
-	SubmitNewSection(ctx context.Context, kind string, form url.Values) (SectionResponse, error)
-	ValidateNewSection(ctx context.Context, kind string, form url.Values) (template.HTML, error)
+	NewSection(request *http.Request, kind string) (SectionResponse, error)
+	ValidateSection(request *http.Request, kind string) (template.HTML, error)
 	Source() (SourcePage, error)
 	SaveSource(form url.Values) (SourcePage, error)
 	CheckSource(form url.Values) CheckResult
 	Overview(form url.Values) (Overview, error)
-	Section(ctx context.Context, kind string, name string) (SectionPage, error)
+	Section(request *http.Request, kind string, name string) (SectionResponse, error)
 	DeleteSection(kind string, name string) error
-	SubmitSection(ctx context.Context, kind string, name string, form url.Values) (SectionResponse, error)
-	ValidateSection(ctx context.Context, kind string, name string, form url.Values) (template.HTML, error)
 }
 
 func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePaths {
@@ -38,62 +34,20 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		return bytes.NewBuffer(nil)
 	}}
 	mux.HandleFunc("GET /new/{kind}", func(response http.ResponseWriter, request *http.Request) {
-		var td = TemplateData[RoutesReceiver, SectionPage]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
-		kindPathParam := request.PathValue("kind")
-		buf := bytesBufferPool.Get().(*bytes.Buffer)
-		buf.Reset()
-		defer bytesBufferPool.Put(buf)
-		if len(td.errList) == 0 {
-			var err error
-			td.result, err = receiver.NewSection(ctx, kindPathParam)
-			if err != nil {
-				td.errList = append(td.errList, err)
-				td.errStatusCode = http.StatusInternalServerError
-			}
-		}
-		if err := templates.ExecuteTemplate(buf, "GET /new/{kind} NewSection(ctx, kind)", &td); err != nil {
-			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
-			http.Error(response, "failed to render page", http.StatusInternalServerError)
-			return
-		}
-		defaultStatusCode := http.StatusOK
-		if buf.Len() == 0 {
-			defaultStatusCode = http.StatusNoContent
-		}
-		statusCode := cmp.Or(td.statusCode, td.errStatusCode, defaultStatusCode)
-		if td.redirectURL != "" {
-			http.Redirect(response, request, td.redirectURL, statusCode)
-			return
-		}
-		if contentType := response.Header().Get("content-type"); contentType == "" {
-			response.Header().Set("content-type", "text/html; charset=utf-8")
-		}
-		response.Header().Set("content-length", strconv.Itoa(buf.Len()))
-		response.WriteHeader(statusCode)
-		_, _ = buf.WriteTo(response)
-	})
-	mux.HandleFunc("POST /new/{kind}/form", func(response http.ResponseWriter, request *http.Request) {
 		var td = TemplateData[RoutesReceiver, SectionResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
 		kindPathParam := request.PathValue("kind")
-		if err := request.ParseForm(); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		var form url.Values = request.Form
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.SubmitNewSection(ctx, kindPathParam, form)
+			td.result, err = receiver.NewSection(request, kindPathParam)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "POST /new/{kind}/form SubmitNewSection(ctx, kind, form)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "GET /new/{kind} NewSection(request, kind)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -114,27 +68,56 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		response.WriteHeader(statusCode)
 		_, _ = buf.WriteTo(response)
 	})
-	mux.HandleFunc("POST /new/{kind}/form/validate", func(response http.ResponseWriter, request *http.Request) {
-		var td = TemplateData[RoutesReceiver, template.HTML]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
+	mux.HandleFunc("POST /new/{kind}", func(response http.ResponseWriter, request *http.Request) {
+		var td = TemplateData[RoutesReceiver, SectionResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
 		kindPathParam := request.PathValue("kind")
-		if err := request.ParseForm(); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		var form url.Values = request.Form
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.ValidateNewSection(ctx, kindPathParam, form)
+			td.result, err = receiver.NewSection(request, kindPathParam)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "POST /new/{kind}/form/validate ValidateNewSection(ctx, kind, form)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "POST /new/{kind} NewSection(request, kind)", &td); err != nil {
+			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
+			http.Error(response, "failed to render page", http.StatusInternalServerError)
+			return
+		}
+		defaultStatusCode := http.StatusOK
+		if buf.Len() == 0 {
+			defaultStatusCode = http.StatusNoContent
+		}
+		statusCode := cmp.Or(td.statusCode, td.errStatusCode, td.result.StatusCode(), defaultStatusCode)
+		if td.redirectURL != "" {
+			http.Redirect(response, request, td.redirectURL, statusCode)
+			return
+		}
+		if contentType := response.Header().Get("content-type"); contentType == "" {
+			response.Header().Set("content-type", "text/html; charset=utf-8")
+		}
+		response.Header().Set("content-length", strconv.Itoa(buf.Len()))
+		response.WriteHeader(statusCode)
+		_, _ = buf.WriteTo(response)
+	})
+	mux.HandleFunc("POST /new/{kind}/validate", func(response http.ResponseWriter, request *http.Request) {
+		var td = TemplateData[RoutesReceiver, template.HTML]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
+		kindPathParam := request.PathValue("kind")
+		buf := bytesBufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer bytesBufferPool.Put(buf)
+		if len(td.errList) == 0 {
+			var err error
+			td.result, err = receiver.ValidateSection(request, kindPathParam)
+			if err != nil {
+				td.errList = append(td.errList, err)
+				td.errStatusCode = http.StatusInternalServerError
+			}
+		}
+		if err := templates.ExecuteTemplate(buf, "POST /new/{kind}/validate ValidateSection(request, kind)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -299,8 +282,7 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		_, _ = buf.WriteTo(response)
 	})
 	mux.HandleFunc("GET /{kind}/{name}", func(response http.ResponseWriter, request *http.Request) {
-		var td = TemplateData[RoutesReceiver, SectionPage]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
+		var td = TemplateData[RoutesReceiver, SectionResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
 		kindPathParam := request.PathValue("kind")
 		namePathParam := request.PathValue("name")
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
@@ -308,13 +290,13 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.Section(ctx, kindPathParam, namePathParam)
+			td.result, err = receiver.Section(request, kindPathParam, namePathParam)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "GET /{kind}/{name} Section(ctx, kind, name)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "GET /{kind}/{name} Section(request, kind, name)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -323,7 +305,43 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		if buf.Len() == 0 {
 			defaultStatusCode = http.StatusNoContent
 		}
-		statusCode := cmp.Or(td.statusCode, td.errStatusCode, defaultStatusCode)
+		statusCode := cmp.Or(td.statusCode, td.errStatusCode, td.result.StatusCode(), defaultStatusCode)
+		if td.redirectURL != "" {
+			http.Redirect(response, request, td.redirectURL, statusCode)
+			return
+		}
+		if contentType := response.Header().Get("content-type"); contentType == "" {
+			response.Header().Set("content-type", "text/html; charset=utf-8")
+		}
+		response.Header().Set("content-length", strconv.Itoa(buf.Len()))
+		response.WriteHeader(statusCode)
+		_, _ = buf.WriteTo(response)
+	})
+	mux.HandleFunc("POST /{kind}/{name}", func(response http.ResponseWriter, request *http.Request) {
+		var td = TemplateData[RoutesReceiver, SectionResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
+		kindPathParam := request.PathValue("kind")
+		namePathParam := request.PathValue("name")
+		buf := bytesBufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer bytesBufferPool.Put(buf)
+		if len(td.errList) == 0 {
+			var err error
+			td.result, err = receiver.Section(request, kindPathParam, namePathParam)
+			if err != nil {
+				td.errList = append(td.errList, err)
+				td.errStatusCode = http.StatusInternalServerError
+			}
+		}
+		if err := templates.ExecuteTemplate(buf, "POST /{kind}/{name} Section(request, kind, name)", &td); err != nil {
+			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
+			http.Error(response, "failed to render page", http.StatusInternalServerError)
+			return
+		}
+		defaultStatusCode := http.StatusOK
+		if buf.Len() == 0 {
+			defaultStatusCode = http.StatusNoContent
+		}
+		statusCode := cmp.Or(td.statusCode, td.errStatusCode, td.result.StatusCode(), defaultStatusCode)
 		if td.redirectURL != "" {
 			http.Redirect(response, request, td.redirectURL, statusCode)
 			return
@@ -367,70 +385,21 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		response.WriteHeader(statusCode)
 		_, _ = buf.WriteTo(response)
 	})
-	mux.HandleFunc("POST /{kind}/{name}/form", func(response http.ResponseWriter, request *http.Request) {
-		var td = TemplateData[RoutesReceiver, SectionResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
-		kindPathParam := request.PathValue("kind")
-		namePathParam := request.PathValue("name")
-		if err := request.ParseForm(); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		var form url.Values = request.Form
-		buf := bytesBufferPool.Get().(*bytes.Buffer)
-		buf.Reset()
-		defer bytesBufferPool.Put(buf)
-		if len(td.errList) == 0 {
-			var err error
-			td.result, err = receiver.SubmitSection(ctx, kindPathParam, namePathParam, form)
-			if err != nil {
-				td.errList = append(td.errList, err)
-				td.errStatusCode = http.StatusInternalServerError
-			}
-		}
-		if err := templates.ExecuteTemplate(buf, "POST /{kind}/{name}/form SubmitSection(ctx, kind, name, form)", &td); err != nil {
-			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
-			http.Error(response, "failed to render page", http.StatusInternalServerError)
-			return
-		}
-		defaultStatusCode := http.StatusOK
-		if buf.Len() == 0 {
-			defaultStatusCode = http.StatusNoContent
-		}
-		statusCode := cmp.Or(td.statusCode, td.errStatusCode, td.result.StatusCode(), defaultStatusCode)
-		if td.redirectURL != "" {
-			http.Redirect(response, request, td.redirectURL, statusCode)
-			return
-		}
-		if contentType := response.Header().Get("content-type"); contentType == "" {
-			response.Header().Set("content-type", "text/html; charset=utf-8")
-		}
-		response.Header().Set("content-length", strconv.Itoa(buf.Len()))
-		response.WriteHeader(statusCode)
-		_, _ = buf.WriteTo(response)
-	})
-	mux.HandleFunc("POST /{kind}/{name}/form/validate", func(response http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("POST /{kind}/{name}/validate", func(response http.ResponseWriter, request *http.Request) {
 		var td = TemplateData[RoutesReceiver, template.HTML]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
 		kindPathParam := request.PathValue("kind")
-		namePathParam := request.PathValue("name")
-		if err := request.ParseForm(); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		var form url.Values = request.Form
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.ValidateSection(ctx, kindPathParam, namePathParam, form)
+			td.result, err = receiver.ValidateSection(request, kindPathParam)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "POST /{kind}/{name}/form/validate ValidateSection(ctx, kind, name, form)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "POST /{kind}/{name}/validate ValidateSection(request, kind)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -637,28 +606,28 @@ func (route TemplateRoute) HasMethod() bool {
 	return route.method != ""
 }
 
-func (routes TemplateRouteBuilder) NewSection(kindPathParam string) TemplateRoute {
+func (routes TemplateRouteBuilder) ReadNewByKindCallingNewSection(kindPathParam string) TemplateRoute {
 	return TemplateRoute{method: http.MethodGet, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "new", routes.escapePathSegment(kindPathParam))}
 }
 
-func (routePaths TemplateRoutePaths) NewSection(kindPathParam string) string {
-	return routePaths.routes.NewSection(kindPathParam).Path()
+func (routePaths TemplateRoutePaths) ReadNewByKindCallingNewSection(kindPathParam string) string {
+	return routePaths.routes.ReadNewByKindCallingNewSection(kindPathParam).Path()
 }
 
-func (routes TemplateRouteBuilder) SubmitNewSection(kindPathParam string) TemplateRoute {
-	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "new", routes.escapePathSegment(kindPathParam), "form")}
+func (routes TemplateRouteBuilder) CreateNewByKindCallingNewSection(kindPathParam string) TemplateRoute {
+	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "new", routes.escapePathSegment(kindPathParam))}
 }
 
-func (routePaths TemplateRoutePaths) SubmitNewSection(kindPathParam string) string {
-	return routePaths.routes.SubmitNewSection(kindPathParam).Path()
+func (routePaths TemplateRoutePaths) CreateNewByKindCallingNewSection(kindPathParam string) string {
+	return routePaths.routes.CreateNewByKindCallingNewSection(kindPathParam).Path()
 }
 
-func (routes TemplateRouteBuilder) ValidateNewSection(kindPathParam string) TemplateRoute {
-	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "new", routes.escapePathSegment(kindPathParam), "form/validate")}
+func (routes TemplateRouteBuilder) CreateNewValidateByKindCallingValidateSection(kindPathParam string) TemplateRoute {
+	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "new", routes.escapePathSegment(kindPathParam), "validate")}
 }
 
-func (routePaths TemplateRoutePaths) ValidateNewSection(kindPathParam string) string {
-	return routePaths.routes.ValidateNewSection(kindPathParam).Path()
+func (routePaths TemplateRoutePaths) CreateNewValidateByKindCallingValidateSection(kindPathParam string) string {
+	return routePaths.routes.CreateNewValidateByKindCallingValidateSection(kindPathParam).Path()
 }
 
 func (routes TemplateRouteBuilder) Source() TemplateRoute {
@@ -693,12 +662,20 @@ func (routePaths TemplateRoutePaths) Overview() string {
 	return routePaths.routes.Overview().Path()
 }
 
-func (routes TemplateRouteBuilder) Section(kindPathParam, namePathParam string) TemplateRoute {
+func (routes TemplateRouteBuilder) ReadByKindAndNameCallingSection(kindPathParam, namePathParam string) TemplateRoute {
 	return TemplateRoute{method: http.MethodGet, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), routes.escapePathSegment(kindPathParam), routes.escapePathSegment(namePathParam))}
 }
 
-func (routePaths TemplateRoutePaths) Section(kindPathParam, namePathParam string) string {
-	return routePaths.routes.Section(kindPathParam, namePathParam).Path()
+func (routePaths TemplateRoutePaths) ReadByKindAndNameCallingSection(kindPathParam, namePathParam string) string {
+	return routePaths.routes.ReadByKindAndNameCallingSection(kindPathParam, namePathParam).Path()
+}
+
+func (routes TemplateRouteBuilder) CreateByKindAndNameCallingSection(kindPathParam, namePathParam string) TemplateRoute {
+	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), routes.escapePathSegment(kindPathParam), routes.escapePathSegment(namePathParam))}
+}
+
+func (routePaths TemplateRoutePaths) CreateByKindAndNameCallingSection(kindPathParam, namePathParam string) string {
+	return routePaths.routes.CreateByKindAndNameCallingSection(kindPathParam, namePathParam).Path()
 }
 
 func (routes TemplateRouteBuilder) DeleteSection(kindPathParam, namePathParam string) TemplateRoute {
@@ -709,20 +686,12 @@ func (routePaths TemplateRoutePaths) DeleteSection(kindPathParam, namePathParam 
 	return routePaths.routes.DeleteSection(kindPathParam, namePathParam).Path()
 }
 
-func (routes TemplateRouteBuilder) SubmitSection(kindPathParam, namePathParam string) TemplateRoute {
-	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), routes.escapePathSegment(kindPathParam), routes.escapePathSegment(namePathParam), "form")}
+func (routes TemplateRouteBuilder) CreateValidateByKindAndNameCallingValidateSection(kindPathParam, namePathParam string) TemplateRoute {
+	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), routes.escapePathSegment(kindPathParam), routes.escapePathSegment(namePathParam), "validate")}
 }
 
-func (routePaths TemplateRoutePaths) SubmitSection(kindPathParam, namePathParam string) string {
-	return routePaths.routes.SubmitSection(kindPathParam, namePathParam).Path()
-}
-
-func (routes TemplateRouteBuilder) ValidateSection(kindPathParam, namePathParam string) TemplateRoute {
-	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), routes.escapePathSegment(kindPathParam), routes.escapePathSegment(namePathParam), "form/validate")}
-}
-
-func (routePaths TemplateRoutePaths) ValidateSection(kindPathParam, namePathParam string) string {
-	return routePaths.routes.ValidateSection(kindPathParam, namePathParam).Path()
+func (routePaths TemplateRoutePaths) CreateValidateByKindAndNameCallingValidateSection(kindPathParam, namePathParam string) string {
+	return routePaths.routes.CreateValidateByKindAndNameCallingValidateSection(kindPathParam, namePathParam).Path()
 }
 
 func (routes TemplateRouteBuilder) escapePathSegment(value string) string {

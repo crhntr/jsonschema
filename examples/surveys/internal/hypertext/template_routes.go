@@ -19,17 +19,13 @@ import (
 )
 
 type RoutesReceiver interface {
-	Take(ctx context.Context, name string) (FormPage, error)
-	SubmitAnswers(ctx context.Context, name string, form url.Values) (FormResponse, error)
-	ValidateAnswers(ctx context.Context, name string, form url.Values) (template.HTML, error)
+	Answer(request *http.Request, name string) (FormResponse, error)
 	Thanks(_ context.Context, name string) (Thanks, error)
-	NewSurvey(ctx context.Context) (FormPage, error)
-	SubmitNewSurvey(ctx context.Context, form url.Values) (FormResponse, error)
-	ValidateNewSurvey(ctx context.Context, form url.Values) (template.HTML, error)
+	ValidateAnswers(request *http.Request, name string) (template.HTML, error)
+	NewSurvey(request *http.Request) (FormResponse, error)
+	ValidateSurvey(request *http.Request) (template.HTML, error)
 	DeleteSurvey(name string) error
-	EditSurvey(ctx context.Context, name string) (FormPage, error)
-	SubmitEditSurvey(ctx context.Context, name string, form url.Values) (FormResponse, error)
-	ValidateEditSurvey(ctx context.Context, name string, form url.Values) (template.HTML, error)
+	EditSurvey(request *http.Request, name string) (FormResponse, error)
 	Results(_ context.Context, name string) (ResultsPage, error)
 	Home(_ context.Context) (Home, error)
 }
@@ -40,62 +36,20 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		return bytes.NewBuffer(nil)
 	}}
 	mux.HandleFunc("GET /s/{name}", func(response http.ResponseWriter, request *http.Request) {
-		var td = TemplateData[RoutesReceiver, FormPage]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
-		namePathParam := request.PathValue("name")
-		buf := bytesBufferPool.Get().(*bytes.Buffer)
-		buf.Reset()
-		defer bytesBufferPool.Put(buf)
-		if len(td.errList) == 0 {
-			var err error
-			td.result, err = receiver.Take(ctx, namePathParam)
-			if err != nil {
-				td.errList = append(td.errList, err)
-				td.errStatusCode = http.StatusInternalServerError
-			}
-		}
-		if err := templates.ExecuteTemplate(buf, "GET /s/{name} Take(ctx, name)", &td); err != nil {
-			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
-			http.Error(response, "failed to render page", http.StatusInternalServerError)
-			return
-		}
-		defaultStatusCode := http.StatusOK
-		if buf.Len() == 0 {
-			defaultStatusCode = http.StatusNoContent
-		}
-		statusCode := cmp.Or(td.statusCode, td.errStatusCode, defaultStatusCode)
-		if td.redirectURL != "" {
-			http.Redirect(response, request, td.redirectURL, statusCode)
-			return
-		}
-		if contentType := response.Header().Get("content-type"); contentType == "" {
-			response.Header().Set("content-type", "text/html; charset=utf-8")
-		}
-		response.Header().Set("content-length", strconv.Itoa(buf.Len()))
-		response.WriteHeader(statusCode)
-		_, _ = buf.WriteTo(response)
-	})
-	mux.HandleFunc("POST /s/{name}/form", func(response http.ResponseWriter, request *http.Request) {
 		var td = TemplateData[RoutesReceiver, FormResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
 		namePathParam := request.PathValue("name")
-		if err := request.ParseForm(); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		var form url.Values = request.Form
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.SubmitAnswers(ctx, namePathParam, form)
+			td.result, err = receiver.Answer(request, namePathParam)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "POST /s/{name}/form SubmitAnswers(ctx, name, form)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "GET /s/{name} Answer(request, name)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -116,27 +70,21 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		response.WriteHeader(statusCode)
 		_, _ = buf.WriteTo(response)
 	})
-	mux.HandleFunc("POST /s/{name}/form/validate", func(response http.ResponseWriter, request *http.Request) {
-		var td = TemplateData[RoutesReceiver, template.HTML]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
+	mux.HandleFunc("POST /s/{name}", func(response http.ResponseWriter, request *http.Request) {
+		var td = TemplateData[RoutesReceiver, FormResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
 		namePathParam := request.PathValue("name")
-		if err := request.ParseForm(); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		var form url.Values = request.Form
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.ValidateAnswers(ctx, namePathParam, form)
+			td.result, err = receiver.Answer(request, namePathParam)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "POST /s/{name}/form/validate ValidateAnswers(ctx, name, form)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "POST /s/{name} Answer(request, name)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -145,7 +93,11 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		if buf.Len() == 0 {
 			defaultStatusCode = http.StatusNoContent
 		}
-		statusCode := cmp.Or(td.statusCode, td.errStatusCode, defaultStatusCode)
+		statusCode := cmp.Or(td.statusCode, td.errStatusCode, td.result.StatusCode(), defaultStatusCode)
+		if td.redirectURL != "" {
+			http.Redirect(response, request, td.redirectURL, statusCode)
+			return
+		}
 		if contentType := response.Header().Get("content-type"); contentType == "" {
 			response.Header().Set("content-type", "text/html; charset=utf-8")
 		}
@@ -189,21 +141,21 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		response.WriteHeader(statusCode)
 		_, _ = buf.WriteTo(response)
 	})
-	mux.HandleFunc("GET /surveys/new", func(response http.ResponseWriter, request *http.Request) {
-		var td = TemplateData[RoutesReceiver, FormPage]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
+	mux.HandleFunc("POST /s/{name}/validate", func(response http.ResponseWriter, request *http.Request) {
+		var td = TemplateData[RoutesReceiver, template.HTML]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
+		namePathParam := request.PathValue("name")
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.NewSurvey(ctx)
+			td.result, err = receiver.ValidateAnswers(request, namePathParam)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "GET /surveys/new NewSurvey(ctx)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "POST /s/{name}/validate ValidateAnswers(request, name)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -213,10 +165,6 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 			defaultStatusCode = http.StatusNoContent
 		}
 		statusCode := cmp.Or(td.statusCode, td.errStatusCode, defaultStatusCode)
-		if td.redirectURL != "" {
-			http.Redirect(response, request, td.redirectURL, statusCode)
-			return
-		}
 		if contentType := response.Header().Get("content-type"); contentType == "" {
 			response.Header().Set("content-type", "text/html; charset=utf-8")
 		}
@@ -224,26 +172,20 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		response.WriteHeader(statusCode)
 		_, _ = buf.WriteTo(response)
 	})
-	mux.HandleFunc("POST /surveys/new/form", func(response http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("GET /surveys/new", func(response http.ResponseWriter, request *http.Request) {
 		var td = TemplateData[RoutesReceiver, FormResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
-		if err := request.ParseForm(); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		var form url.Values = request.Form
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.SubmitNewSurvey(ctx, form)
+			td.result, err = receiver.NewSurvey(request)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "POST /surveys/new/form SubmitNewSurvey(ctx, form)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "GET /surveys/new NewSurvey(request)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -264,26 +206,54 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		response.WriteHeader(statusCode)
 		_, _ = buf.WriteTo(response)
 	})
-	mux.HandleFunc("POST /surveys/new/form/validate", func(response http.ResponseWriter, request *http.Request) {
-		var td = TemplateData[RoutesReceiver, template.HTML]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
-		if err := request.ParseForm(); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		var form url.Values = request.Form
+	mux.HandleFunc("POST /surveys/new", func(response http.ResponseWriter, request *http.Request) {
+		var td = TemplateData[RoutesReceiver, FormResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.ValidateNewSurvey(ctx, form)
+			td.result, err = receiver.NewSurvey(request)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "POST /surveys/new/form/validate ValidateNewSurvey(ctx, form)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "POST /surveys/new NewSurvey(request)", &td); err != nil {
+			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
+			http.Error(response, "failed to render page", http.StatusInternalServerError)
+			return
+		}
+		defaultStatusCode := http.StatusOK
+		if buf.Len() == 0 {
+			defaultStatusCode = http.StatusNoContent
+		}
+		statusCode := cmp.Or(td.statusCode, td.errStatusCode, td.result.StatusCode(), defaultStatusCode)
+		if td.redirectURL != "" {
+			http.Redirect(response, request, td.redirectURL, statusCode)
+			return
+		}
+		if contentType := response.Header().Get("content-type"); contentType == "" {
+			response.Header().Set("content-type", "text/html; charset=utf-8")
+		}
+		response.Header().Set("content-length", strconv.Itoa(buf.Len()))
+		response.WriteHeader(statusCode)
+		_, _ = buf.WriteTo(response)
+	})
+	mux.HandleFunc("POST /surveys/new/validate", func(response http.ResponseWriter, request *http.Request) {
+		var td = TemplateData[RoutesReceiver, template.HTML]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
+		buf := bytesBufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer bytesBufferPool.Put(buf)
+		if len(td.errList) == 0 {
+			var err error
+			td.result, err = receiver.ValidateSurvey(request)
+			if err != nil {
+				td.errList = append(td.errList, err)
+				td.errStatusCode = http.StatusInternalServerError
+			}
+		}
+		if err := templates.ExecuteTemplate(buf, "POST /surveys/new/validate ValidateSurvey(request)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -332,62 +302,20 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		_, _ = buf.WriteTo(response)
 	})
 	mux.HandleFunc("GET /surveys/{name}/edit", func(response http.ResponseWriter, request *http.Request) {
-		var td = TemplateData[RoutesReceiver, FormPage]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
-		namePathParam := request.PathValue("name")
-		buf := bytesBufferPool.Get().(*bytes.Buffer)
-		buf.Reset()
-		defer bytesBufferPool.Put(buf)
-		if len(td.errList) == 0 {
-			var err error
-			td.result, err = receiver.EditSurvey(ctx, namePathParam)
-			if err != nil {
-				td.errList = append(td.errList, err)
-				td.errStatusCode = http.StatusInternalServerError
-			}
-		}
-		if err := templates.ExecuteTemplate(buf, "GET /surveys/{name}/edit EditSurvey(ctx, name)", &td); err != nil {
-			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
-			http.Error(response, "failed to render page", http.StatusInternalServerError)
-			return
-		}
-		defaultStatusCode := http.StatusOK
-		if buf.Len() == 0 {
-			defaultStatusCode = http.StatusNoContent
-		}
-		statusCode := cmp.Or(td.statusCode, td.errStatusCode, defaultStatusCode)
-		if td.redirectURL != "" {
-			http.Redirect(response, request, td.redirectURL, statusCode)
-			return
-		}
-		if contentType := response.Header().Get("content-type"); contentType == "" {
-			response.Header().Set("content-type", "text/html; charset=utf-8")
-		}
-		response.Header().Set("content-length", strconv.Itoa(buf.Len()))
-		response.WriteHeader(statusCode)
-		_, _ = buf.WriteTo(response)
-	})
-	mux.HandleFunc("POST /surveys/{name}/edit/form", func(response http.ResponseWriter, request *http.Request) {
 		var td = TemplateData[RoutesReceiver, FormResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
 		namePathParam := request.PathValue("name")
-		if err := request.ParseForm(); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		var form url.Values = request.Form
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.SubmitEditSurvey(ctx, namePathParam, form)
+			td.result, err = receiver.EditSurvey(request, namePathParam)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "POST /surveys/{name}/edit/form SubmitEditSurvey(ctx, name, form)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "GET /surveys/{name}/edit EditSurvey(request, name)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -408,27 +336,55 @@ func TemplateRoutes(mux *http.ServeMux, receiver RoutesReceiver) TemplateRoutePa
 		response.WriteHeader(statusCode)
 		_, _ = buf.WriteTo(response)
 	})
-	mux.HandleFunc("POST /surveys/{name}/edit/form/validate", func(response http.ResponseWriter, request *http.Request) {
-		var td = TemplateData[RoutesReceiver, template.HTML]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
-		ctx := request.Context()
+	mux.HandleFunc("POST /surveys/{name}/edit", func(response http.ResponseWriter, request *http.Request) {
+		var td = TemplateData[RoutesReceiver, FormResponse]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
 		namePathParam := request.PathValue("name")
-		if err := request.ParseForm(); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		var form url.Values = request.Form
 		buf := bytesBufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bytesBufferPool.Put(buf)
 		if len(td.errList) == 0 {
 			var err error
-			td.result, err = receiver.ValidateEditSurvey(ctx, namePathParam, form)
+			td.result, err = receiver.EditSurvey(request, namePathParam)
 			if err != nil {
 				td.errList = append(td.errList, err)
 				td.errStatusCode = http.StatusInternalServerError
 			}
 		}
-		if err := templates.ExecuteTemplate(buf, "POST /surveys/{name}/edit/form/validate ValidateEditSurvey(ctx, name, form)", &td); err != nil {
+		if err := templates.ExecuteTemplate(buf, "POST /surveys/{name}/edit EditSurvey(request, name)", &td); err != nil {
+			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
+			http.Error(response, "failed to render page", http.StatusInternalServerError)
+			return
+		}
+		defaultStatusCode := http.StatusOK
+		if buf.Len() == 0 {
+			defaultStatusCode = http.StatusNoContent
+		}
+		statusCode := cmp.Or(td.statusCode, td.errStatusCode, td.result.StatusCode(), defaultStatusCode)
+		if td.redirectURL != "" {
+			http.Redirect(response, request, td.redirectURL, statusCode)
+			return
+		}
+		if contentType := response.Header().Get("content-type"); contentType == "" {
+			response.Header().Set("content-type", "text/html; charset=utf-8")
+		}
+		response.Header().Set("content-length", strconv.Itoa(buf.Len()))
+		response.WriteHeader(statusCode)
+		_, _ = buf.WriteTo(response)
+	})
+	mux.HandleFunc("POST /surveys/{name}/edit/validate", func(response http.ResponseWriter, request *http.Request) {
+		var td = TemplateData[RoutesReceiver, template.HTML]{receiver: receiver, response: response, request: request, pathsPrefix: pathsPrefix}
+		buf := bytesBufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer bytesBufferPool.Put(buf)
+		if len(td.errList) == 0 {
+			var err error
+			td.result, err = receiver.ValidateSurvey(request)
+			if err != nil {
+				td.errList = append(td.errList, err)
+				td.errStatusCode = http.StatusInternalServerError
+			}
+		}
+		if err := templates.ExecuteTemplate(buf, "POST /surveys/{name}/edit/validate ValidateSurvey(request)", &td); err != nil {
 			slog.ErrorContext(request.Context(), "failed to render page", slog.String("path", request.URL.Path), slog.String("pattern", request.Pattern), slog.String("error", err.Error()))
 			http.Error(response, "failed to render page", http.StatusInternalServerError)
 			return
@@ -706,28 +662,20 @@ func (route TemplateRoute) HasMethod() bool {
 	return route.method != ""
 }
 
-func (routes TemplateRouteBuilder) Take(namePathParam string) TemplateRoute {
+func (routes TemplateRouteBuilder) ReadSByNameCallingAnswer(namePathParam string) TemplateRoute {
 	return TemplateRoute{method: http.MethodGet, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "s", routes.escapePathSegment(namePathParam))}
 }
 
-func (routePaths TemplateRoutePaths) Take(namePathParam string) string {
-	return routePaths.routes.Take(namePathParam).Path()
+func (routePaths TemplateRoutePaths) ReadSByNameCallingAnswer(namePathParam string) string {
+	return routePaths.routes.ReadSByNameCallingAnswer(namePathParam).Path()
 }
 
-func (routes TemplateRouteBuilder) SubmitAnswers(namePathParam string) TemplateRoute {
-	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "s", routes.escapePathSegment(namePathParam), "form")}
+func (routes TemplateRouteBuilder) CreateSByNameCallingAnswer(namePathParam string) TemplateRoute {
+	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "s", routes.escapePathSegment(namePathParam))}
 }
 
-func (routePaths TemplateRoutePaths) SubmitAnswers(namePathParam string) string {
-	return routePaths.routes.SubmitAnswers(namePathParam).Path()
-}
-
-func (routes TemplateRouteBuilder) ValidateAnswers(namePathParam string) TemplateRoute {
-	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "s", routes.escapePathSegment(namePathParam), "form/validate")}
-}
-
-func (routePaths TemplateRoutePaths) ValidateAnswers(namePathParam string) string {
-	return routePaths.routes.ValidateAnswers(namePathParam).Path()
+func (routePaths TemplateRoutePaths) CreateSByNameCallingAnswer(namePathParam string) string {
+	return routePaths.routes.CreateSByNameCallingAnswer(namePathParam).Path()
 }
 
 func (routes TemplateRouteBuilder) Thanks(namePathParam string) TemplateRoute {
@@ -738,28 +686,36 @@ func (routePaths TemplateRoutePaths) Thanks(namePathParam string) string {
 	return routePaths.routes.Thanks(namePathParam).Path()
 }
 
-func (routes TemplateRouteBuilder) NewSurvey() TemplateRoute {
+func (routes TemplateRouteBuilder) ValidateAnswers(namePathParam string) TemplateRoute {
+	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "s", routes.escapePathSegment(namePathParam), "validate")}
+}
+
+func (routePaths TemplateRoutePaths) ValidateAnswers(namePathParam string) string {
+	return routePaths.routes.ValidateAnswers(namePathParam).Path()
+}
+
+func (routes TemplateRouteBuilder) ReadSurveysNewCallingNewSurvey() TemplateRoute {
 	return TemplateRoute{method: http.MethodGet, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "surveys/new")}
 }
 
-func (routePaths TemplateRoutePaths) NewSurvey() string {
-	return routePaths.routes.NewSurvey().Path()
+func (routePaths TemplateRoutePaths) ReadSurveysNewCallingNewSurvey() string {
+	return routePaths.routes.ReadSurveysNewCallingNewSurvey().Path()
 }
 
-func (routes TemplateRouteBuilder) SubmitNewSurvey() TemplateRoute {
-	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "surveys/new/form")}
+func (routes TemplateRouteBuilder) CreateSurveysNewCallingNewSurvey() TemplateRoute {
+	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "surveys/new")}
 }
 
-func (routePaths TemplateRoutePaths) SubmitNewSurvey() string {
-	return routePaths.routes.SubmitNewSurvey().Path()
+func (routePaths TemplateRoutePaths) CreateSurveysNewCallingNewSurvey() string {
+	return routePaths.routes.CreateSurveysNewCallingNewSurvey().Path()
 }
 
-func (routes TemplateRouteBuilder) ValidateNewSurvey() TemplateRoute {
-	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "surveys/new/form/validate")}
+func (routes TemplateRouteBuilder) CreateSurveysNewValidateCallingValidateSurvey() TemplateRoute {
+	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "surveys/new/validate")}
 }
 
-func (routePaths TemplateRoutePaths) ValidateNewSurvey() string {
-	return routePaths.routes.ValidateNewSurvey().Path()
+func (routePaths TemplateRoutePaths) CreateSurveysNewValidateCallingValidateSurvey() string {
+	return routePaths.routes.CreateSurveysNewValidateCallingValidateSurvey().Path()
 }
 
 func (routes TemplateRouteBuilder) DeleteSurvey(namePathParam string) TemplateRoute {
@@ -770,28 +726,28 @@ func (routePaths TemplateRoutePaths) DeleteSurvey(namePathParam string) string {
 	return routePaths.routes.DeleteSurvey(namePathParam).Path()
 }
 
-func (routes TemplateRouteBuilder) EditSurvey(namePathParam string) TemplateRoute {
+func (routes TemplateRouteBuilder) ReadSurveysEditByNameCallingEditSurvey(namePathParam string) TemplateRoute {
 	return TemplateRoute{method: http.MethodGet, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "surveys", routes.escapePathSegment(namePathParam), "edit")}
 }
 
-func (routePaths TemplateRoutePaths) EditSurvey(namePathParam string) string {
-	return routePaths.routes.EditSurvey(namePathParam).Path()
+func (routePaths TemplateRoutePaths) ReadSurveysEditByNameCallingEditSurvey(namePathParam string) string {
+	return routePaths.routes.ReadSurveysEditByNameCallingEditSurvey(namePathParam).Path()
 }
 
-func (routes TemplateRouteBuilder) SubmitEditSurvey(namePathParam string) TemplateRoute {
-	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "surveys", routes.escapePathSegment(namePathParam), "edit/form")}
+func (routes TemplateRouteBuilder) CreateSurveysEditByNameCallingEditSurvey(namePathParam string) TemplateRoute {
+	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "surveys", routes.escapePathSegment(namePathParam), "edit")}
 }
 
-func (routePaths TemplateRoutePaths) SubmitEditSurvey(namePathParam string) string {
-	return routePaths.routes.SubmitEditSurvey(namePathParam).Path()
+func (routePaths TemplateRoutePaths) CreateSurveysEditByNameCallingEditSurvey(namePathParam string) string {
+	return routePaths.routes.CreateSurveysEditByNameCallingEditSurvey(namePathParam).Path()
 }
 
-func (routes TemplateRouteBuilder) ValidateEditSurvey(namePathParam string) TemplateRoute {
-	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "surveys", routes.escapePathSegment(namePathParam), "edit/form/validate")}
+func (routes TemplateRouteBuilder) CreateSurveysEditValidateByNameCallingValidateSurvey(namePathParam string) TemplateRoute {
+	return TemplateRoute{method: http.MethodPost, path: path.Join(cmp.Or(routes.pathsPrefix, "/"), "surveys", routes.escapePathSegment(namePathParam), "edit/validate")}
 }
 
-func (routePaths TemplateRoutePaths) ValidateEditSurvey(namePathParam string) string {
-	return routePaths.routes.ValidateEditSurvey(namePathParam).Path()
+func (routePaths TemplateRoutePaths) CreateSurveysEditValidateByNameCallingValidateSurvey(namePathParam string) string {
+	return routePaths.routes.CreateSurveysEditValidateByNameCallingValidateSurvey(namePathParam).Path()
 }
 
 func (routes TemplateRouteBuilder) Results(namePathParam string) TemplateRoute {

@@ -4,7 +4,6 @@
 package hypertext
 
 import (
-	"bytes"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -37,9 +36,8 @@ type Server struct {
 	mu  sync.Mutex
 	doc *pipeline.Document
 
-	checker       *pipeline.Checker
-	forms         map[pipeline.Kind]*jsonhandler.Handler
-	formTemplates *template.Template
+	checker *pipeline.Checker
+	forms   map[pipeline.Kind]*jsonhandler.Handler
 }
 
 // New returns a Server editing the pipeline in src, which was read from
@@ -56,11 +54,7 @@ func New(ctx context.Context, src []byte, file string, write bool, log *slog.Log
 	}
 	s.checker = pipeline.NewChecker(resolved, schema.Pipeline())
 	for _, k := range kinds {
-		def, err := schema.Definition(k.Definition())
-		if err != nil {
-			return nil, err
-		}
-		h, err := jsonhandler.New(ctx, def)
+		h, err := jsonhandler.NewAt(ctx, schema.Pipeline(), "/$defs/"+k.Definition())
 		if err != nil {
 			return nil, fmt.Errorf("%s form: %w", k, err)
 		}
@@ -68,9 +62,6 @@ func New(ctx context.Context, src []byte, file string, write bool, log *slog.Log
 		h.SubmitLabel = "Save"
 		h.Outline = k == pipeline.Jobs
 		s.forms[k] = h
-	}
-	if s.formTemplates, err = jsonhandler.Templates(); err != nil {
-		return nil, err
 	}
 	return s, nil
 }
@@ -370,14 +361,15 @@ func (sp spec) action() string {
 
 // handler returns a form handler starting from the section's value.
 func (sp spec) handler() *jsonhandler.Handler {
-	h := *sp.s.forms[sp.kind]
-	if sp.name != "" {
-		v, err := sp.doc.Value(sp.sec.Pointer)
-		if err == nil {
-			h.Value = v
-		}
+	h := sp.s.forms[sp.kind]
+	if sp.name == "" {
+		return h
 	}
-	return &h
+	v, err := sp.doc.Value(sp.sec.Pointer)
+	if err != nil {
+		return h
+	}
+	return h.WithValue(v)
 }
 
 // save puts a valid value in the pipeline: in place of the section, or at
@@ -419,9 +411,9 @@ func (sp spec) save(v jsontext.Value) (string, error) {
 }
 
 func (s *Server) sectionPage(sp spec, f *jsonhandler.Form) (SectionPage, error) {
-	html, err := s.render("jsonhandler-form", f.WithActions(sp.action(), sp.action()+"/validate"))
+	html, err := f.WithActions(sp.action(), sp.action()+"/validate").HTML()
 	if err != nil {
-		return SectionPage{}, err
+		return SectionPage{}, s.fail(err)
 	}
 	page := SectionPage{
 		Layout: s.layout(sp.doc, string(sp.kind)),
@@ -448,31 +440,28 @@ func (s *Server) sectionPage(sp spec, f *jsonhandler.Form) (SectionPage, error) 
 }
 
 func (s *Server) submit(ctx context.Context, sp spec, form url.Values) (SectionResponse, error) {
-	h := sp.handler()
-	var location string
-	h.OnSubmit = func(ctx context.Context, v jsontext.Value) (string, error) {
-		var err error
-		location, err = sp.save(v)
-		return "", s.fail(err) // shown above the form
-	}
-	f, err := h.SubmitForm(ctx, form)
+	f, err := sp.handler().SubmitForm(ctx, form)
 	if err != nil {
 		return SectionResponse{}, s.fail(err)
 	}
 	if f.Valid {
-		return SectionResponse{Location: location}, nil
+		location, err := sp.save(f.Value)
+		if err == nil {
+			return SectionResponse{Location: location}, nil
+		}
+		f.Reject(s.fail(err))
 	}
 	page, err := s.sectionPage(sp, f)
 	return SectionResponse{SectionPage: page, status: f.StatusCode()}, err
 }
 
 func (s *Server) validate(ctx context.Context, sp spec, form url.Values) (template.HTML, error) {
-	h := sp.handler()
-	f, err := h.Validate(ctx, form)
+	f, err := sp.handler().Validate(ctx, form)
 	if err != nil {
 		return "", s.fail(err)
 	}
-	return s.render("jsonhandler-validation", f)
+	html, err := f.ValidationHTML()
+	return html, s.fail(err)
 }
 
 // SourcePage shows the whole file with its problems on their lines, and a
@@ -556,14 +545,6 @@ func (s *Server) CheckSource(form url.Values) CheckResult {
 		return CheckResult{ParseError: err.Error()}
 	}
 	return CheckResult{Problems: s.problems(d)}
-}
-
-func (s *Server) render(name string, data any) (template.HTML, error) {
-	var buf bytes.Buffer
-	if err := s.formTemplates.ExecuteTemplate(&buf, name, data); err != nil {
-		return "", s.fail(fmt.Errorf("render %s: %w", name, err))
-	}
-	return template.HTML(buf.String()), nil
 }
 
 // snippet writes a value as YAML.

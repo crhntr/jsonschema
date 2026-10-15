@@ -180,7 +180,7 @@ func TestSection(t *testing.T) {
 			t.Fatalf("status %d", res.StatusCode)
 		}
 		errs := texts(domtest.ParseResponseDocument(t, res), ".jsonform-errors li")
-		if len(errs) != 1 || !strings.Contains(errs[0], "does not match pattern") {
+		if !slices.Equal(errs, []string{"Use a duration such as 30s, 5m or 1h30m, or a ((var))."}) {
 			t.Errorf("errors = %q", errs)
 		}
 		if a.saved() != before {

@@ -17,13 +17,14 @@
     "identifier": {
       "type": "string",
       "description": "A lowercase name: a letter, then letters, digits, '-', '_' or '.'.",
-      "pattern": "^[a-z][a-z0-9_.-]*$"
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "x-form": {"messages": {"pattern": "Use a lowercase name: a letter, then letters, digits, '-', '_' or '.'."}}
     },
     "duration": {
       "type": "string",
       "description": "A Go duration such as 30s, 5m or 1h30m, or a ((var)).",
       "pattern": "^(\\(\\([^\\(\\)]+\\)\\)|([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+)$",
-      "x-form": {"placeholder": "1m"}
+      "x-form": {"placeholder": "1m", "messages": {"pattern": "Use a duration such as 30s, 5m or 1h30m, or a ((var))."}}
     },
     "config": {
       "type": "object",

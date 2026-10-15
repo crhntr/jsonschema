@@ -319,6 +319,51 @@ func TestSubmitForm_allErrorsAtOnce(t *testing.T) {
 	}
 }
 
+// Nothing is wrong with a group nobody has reached yet: live validation and
+// the wizard leave an untouched list or checkbox group alone, as they do a
+// blank required field, until a submission asks for it.
+func TestLive_untouchedGroupsStaySilent(t *testing.T) {
+	ctx := context.Background()
+	h := newHandler(t, `{"type":"object","required":["size","tags","steps"],"properties":{
+		"size":  {"type":"number","minimum":1},
+		"tags":  {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["a","b"]}},
+		"steps": {"type":"array","minItems":1,"items":{"type":"string"}}}}`)
+
+	v, err := h.Validate(ctx, url.Values{"@present": {"1"}, "$/size": {"3"}, "@len/steps": {"0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fieldErrors(v.Root); len(got) != 0 {
+		t.Errorf("live validation of an untouched form shows %q", got)
+	}
+	// What was typed is still checked.
+	v, err = h.Validate(ctx, url.Values{"@present": {"1"}, "$/size": {"0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fieldErrors(v.Root); !maps.EqualFunc(got, map[string][]string{"/size": {"less than minimum 1"}}, slices.Equal) {
+		t.Errorf("live validation of a typed value shows %q", got)
+	}
+
+	w, err := h.SubmitForm(ctx, url.Values{ActionName: {ActionWizard}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := w.Wizard().Elsewhere; len(got) != 0 {
+		t.Errorf("entering the wizard flags steps nobody reached: %+v", got)
+	}
+
+	// A submission still asks for them.
+	f, err := h.SubmitForm(context.Background(), url.Values{"@present": {"1"}, "$/size": {"3"}, "@len/steps": {"0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{"/tags": {"array has 0 items, minItems 1"}, "/steps": {"array has 0 items, minItems 1"}}
+	if got := fieldErrors(f.Root); !maps.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("a submission shows %q, want %q", got, want)
+	}
+}
+
 func TestNewAt(t *testing.T) {
 	ctx := context.Background()
 	h, err := NewAt(ctx, []byte(definitions), "/$defs/item")

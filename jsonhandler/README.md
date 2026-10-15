@@ -247,7 +247,10 @@ from the chosen variant are shown.
 
 `POST /form/validate` runs the same checks without submitting, but holds back
 errors that only say a value is missing, which would otherwise appear for
-every field the moment someone starts typing.
+every field the moment someone starts typing. It holds back errors about
+fields nobody has filled in for the same reason: a blank control, a list with
+no items, and a checkbox group with nothing chosen. The same goes for
+arriving at a wizard step. A submission reports all of them.
 
 ### JSON mode
 

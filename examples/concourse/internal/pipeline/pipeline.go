@@ -110,4 +110,3 @@ func (d *Document) Section(k Kind, name string) (Section, bool) {
 	}
 	return sections[i], true
 }
-

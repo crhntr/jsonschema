@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/surveys/definition.json",
+  "title": "Survey",
+  "description": "A survey: a title and the questions people answer.",
+  "type": "object",
+  "required": ["title", "questions"],
+  "x-form": {"order": ["title", "description", "questions"]},
+  "properties": {
+    "title": {"type": "string", "minLength": 1, "maxLength": 120, "x-form": {"placeholder": "What do you think of the new docs?"}},
+    "description": {"type": "string", "maxLength": 1000, "x-form": {"widget": "textarea", "rows": 3}},
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {"$ref": "#/$defs/question"}
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "prompt": {"type": "string", "minLength": 1, "maxLength": 300, "x-form": {"placeholder": "The question people read"}},
+    "help": {"type": "string", "maxLength": 300, "description": "A line of guidance under the question.", "x-form": {"collapsed": true}},
+    "required": {"type": "boolean", "description": "People must answer before they can send."},
+    "question": {
+      "title": "Question",
+      "oneOf": [
+        {"$ref": "#/$defs/text"},
+        {"$ref": "#/$defs/choice"},
+        {"$ref": "#/$defs/scale"},
+        {"$ref": "#/$defs/yesno"}
+      ]
+    },
+    "text": {
+      "title": "Text answer",
+      "type": "object",
+      "required": ["kind", "prompt"],
+      "properties": {
+        "kind": {"const": "text"},
+        "prompt": {"$ref": "#/$defs/prompt"},
+        "help": {"$ref": "#/$defs/help"},
+        "required": {"$ref": "#/$defs/required"},
+        "long": {"type": "boolean", "description": "A larger box, for a paragraph."}
+      },
+      "additionalProperties": false
+    },
+    "choice": {
+      "title": "Multiple choice",
+      "type": "object",
+      "required": ["kind", "prompt", "options"],
+      "properties": {
+        "kind": {"const": "choice"},
+        "prompt": {"$ref": "#/$defs/prompt"},
+        "help": {"$ref": "#/$defs/help"},
+        "required": {"$ref": "#/$defs/required"},
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 100}
+        },
+        "multiple": {"type": "boolean", "description": "People may pick more than one."}
+      },
+      "additionalProperties": false
+    },
+    "scale": {
+      "title": "Scale",
+      "type": "object",
+      "required": ["kind", "prompt"],
+      "properties": {
+        "kind": {"const": "scale"},
+        "prompt": {"$ref": "#/$defs/prompt"},
+        "help": {"$ref": "#/$defs/help"},
+        "required": {"$ref": "#/$defs/required"},
+        "min": {"type": "integer", "default": 1, "minimum": 0, "maximum": 1},
+        "max": {"type": "integer", "default": 5, "minimum": 2, "maximum": 10},
+        "low": {"type": "string", "maxLength": 60, "x-form": {"placeholder": "Strongly disagree"}},
+        "high": {"type": "string", "maxLength": 60, "x-form": {"placeholder": "Strongly agree"}}
+      },
+      "additionalProperties": false
+    },
+    "yesno": {
+      "title": "Yes or no",
+      "type": "object",
+      "required": ["kind", "prompt"],
+      "properties": {
+        "kind": {"const": "yesno"},
+        "prompt": {"$ref": "#/$defs/prompt"},
+        "help": {"$ref": "#/$defs/help"},
+        "required": {"$ref": "#/$defs/required"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "title": "Docs feedback",
+  "description": "Two minutes, we promise. Tell us how the docs are working for you.",
+  "questions": [
+    {"kind": "scale", "prompt": "How useful are the docs?", "required": true, "low": "Useless", "high": "Essential"},
+    {"kind": "choice", "prompt": "Which parts do you use?", "options": ["Tutorial", "Reference", "Examples", "Agent skills"], "multiple": true, "required": true},
+    {"kind": "choice", "prompt": "Where do you usually read them?", "options": ["At my desk", "On my phone", "In the terminal"]},
+    {"kind": "yesno", "prompt": "Would you recommend them to a colleague?"},
+    {"kind": "text", "prompt": "What is missing?", "long": true, "help": "Anything at all, from a typo to a whole guide."}
+  ]
+}

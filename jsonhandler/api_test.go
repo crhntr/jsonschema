@@ -116,6 +116,74 @@ func TestFormHTML(t *testing.T) {
 	}
 }
 
+func TestHandler_modes(t *testing.T) {
+	ctx := context.Background()
+	const schema = `{"type":"object","properties":{"a":{"type":"string"}}}`
+	page := func(h *Handler, form url.Values) (*Form, string) {
+		t.Helper()
+		f, err := h.SubmitForm(ctx, form)
+		if err != nil {
+			t.Fatal(err)
+		}
+		html, err := f.WithActions("/f", "").HTML()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f, string(html)
+	}
+	const jsonButton, wizardButton = `value="json"`, `value="step"`
+	post := func(kv ...string) url.Values {
+		v := url.Values{}
+		for i := 0; i < len(kv); i += 2 {
+			v.Add(kv[i], kv[i+1])
+		}
+		return v
+	}
+
+	t.Run("both are offered by default", func(t *testing.T) {
+		_, html := page(newHandler(t, schema), post("@action", "refresh"))
+		if !strings.Contains(html, jsonButton) || !strings.Contains(html, wizardButton) {
+			t.Errorf("the default toolbar lacks a mode button")
+		}
+	})
+
+	t.Run("NoJSON", func(t *testing.T) {
+		h := newHandler(t, schema)
+		h.NoJSON = true
+		for name, form := range map[string]url.Values{
+			"asked for":       post("@action", ActionJSON),
+			"already in it":   post("@mode", ModeJSON, "$", `{"a":"x"}`, "@action", "refresh"),
+			"from the wizard": post("@mode", ModeWizard, "@step", "/a", "@action", "refresh"),
+		} {
+			f, html := page(h, form)
+			if f.Mode == ModeJSON || strings.Contains(html, jsonButton) || strings.Contains(html, `name="$"`) {
+				t.Errorf("%s: mode %q, and the page offers JSON:\n%s", name, f.Mode, html)
+			}
+		}
+		if f, _ := page(h, post("@action", ActionWizard)); f.Mode != ModeWizard {
+			t.Errorf("turning off JSON also turned off the wizard: mode %q", f.Mode)
+		}
+	})
+
+	t.Run("NoWizard", func(t *testing.T) {
+		h := newHandler(t, schema)
+		h.NoWizard = true
+		for name, form := range map[string]url.Values{
+			"asked for":     post("@action", ActionWizard),
+			"next":          post("@action", "next/a"),
+			"already in it": post("@mode", ModeWizard, "@step", "/a", "@action", "refresh"),
+		} {
+			f, html := page(h, form)
+			if f.Mode == ModeWizard || strings.Contains(html, wizardButton) {
+				t.Errorf("%s: mode %q, and the page offers the wizard", name, f.Mode)
+			}
+		}
+		if f, _ := page(h, post("@action", ActionJSON)); f.Mode != ModeJSON {
+			t.Errorf("turning off the wizard also turned off JSON: mode %q", f.Mode)
+		}
+	})
+}
+
 func TestNewAt(t *testing.T) {
 	ctx := context.Background()
 	h, err := NewAt(ctx, []byte(definitions), "/$defs/item")

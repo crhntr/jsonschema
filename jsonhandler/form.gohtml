@@ -6,17 +6,23 @@
 {{- with .ValidateAction}}
 <div class="jsonform-live" hidden hx-post="{{.}}" hx-trigger="keyup delay:400ms from:closest form, change from:closest form" hx-include="closest form" hx-swap="none"></div>
 {{- end}}
-{{- if .Root}}
+{{- if and .Root (or .Mode (not .NoWizard) (not .NoJSON))}}
 <div class="jsonform-toolbar">
 {{- if eq .Mode "json"}}
 <input type="hidden" name="@mode" value="json">
 <button type="submit" class="jsonform-button jsonform-mode" name="@action" value="fields" formnovalidate>Edit as form</button>
 {{- else if eq .Mode "wizard"}}
 <button type="submit" class="jsonform-button jsonform-mode" name="@action" value="fields" formnovalidate>Edit as form</button>
+{{- if not .NoJSON}}
 <button type="submit" class="jsonform-button jsonform-mode" name="@action" value="json" formnovalidate>Edit as JSON</button>
+{{- end}}
 {{- else}}
+{{- if not .NoWizard}}
 <button type="submit" class="jsonform-button jsonform-mode" name="@action" value="step" formnovalidate>Edit with wizard</button>
+{{- end}}
+{{- if not .NoJSON}}
 <button type="submit" class="jsonform-button jsonform-mode" name="@action" value="json" formnovalidate>Edit as JSON</button>
+{{- end}}
 {{- end}}
 </div>
 {{- end}}

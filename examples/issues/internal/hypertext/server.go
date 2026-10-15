@@ -4,7 +4,6 @@
 package hypertext
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
@@ -33,7 +32,6 @@ type Server struct {
 	log *slog.Logger
 
 	issueForm, contactForm, settingsForm *jsonhandler.Handler
-	formTemplates                        *template.Template
 }
 
 // New returns a Server storing its data in db, which must already have
@@ -57,11 +55,6 @@ func New(ctx context.Context, db *sql.DB, log *slog.Logger) (*Server, error) {
 		h.ID, h.SubmitLabel = f.id, f.submit
 		*f.handler = h
 	}
-	t, err := jsonhandler.Templates()
-	if err != nil {
-		return nil, err
-	}
-	s.formTemplates = t
 	return s, nil
 }
 
@@ -143,14 +136,15 @@ func (s *Server) formPage(ctx context.Context, spec formSpec) (FormPage, error) 
 	if err != nil {
 		return FormPage{}, err
 	}
-	h := *spec.handler
-	h.Value = spec.value
-	f, err := h.Form(ctx)
+	f, err := spec.handler.WithValue(spec.value).Form(ctx)
 	if err != nil {
 		return FormPage{}, s.publish(err)
 	}
-	html, err := s.render("jsonhandler-form", f.WithActions(spec.action, spec.validate))
-	return FormPage{Layout: layout, Title: spec.title, Form: html}, err
+	html, err := f.WithActions(spec.action, spec.validate).HTML()
+	if err != nil {
+		return FormPage{}, s.publish(err)
+	}
+	return FormPage{Layout: layout, Title: spec.title, Form: html}, nil
 }
 
 func (s *Server) submit(ctx context.Context, spec formSpec, form url.Values) (FormResponse, error) {
@@ -158,41 +152,34 @@ func (s *Server) submit(ctx context.Context, spec formSpec, form url.Values) (Fo
 	if err != nil {
 		return FormResponse{}, err
 	}
-	h := *spec.handler
-	h.Value = spec.value
-	var location string
-	h.OnSubmit = func(ctx context.Context, v jsontext.Value) (string, error) {
-		var err error
-		location, err = spec.save(ctx, v)
-		return "", s.saveError(err)
-	}
-	f, err := h.SubmitForm(ctx, form)
+	f, err := spec.handler.WithValue(spec.value).SubmitForm(ctx, form)
 	if err != nil {
 		return FormResponse{}, s.publish(err)
 	}
 	if f.Valid {
-		return FormResponse{Location: location}, nil
+		location, err := spec.save(ctx, f.Value)
+		if err == nil {
+			return FormResponse{Location: location}, nil
+		}
+		f.Reject(s.saveError(err))
 	}
-	html, err := s.render("jsonhandler-form", f.WithActions(spec.action, spec.validate))
-	return FormResponse{FormPage: FormPage{Layout: layout, Title: spec.title, Form: html}, status: f.StatusCode()}, err
+	html, err := f.WithActions(spec.action, spec.validate).HTML()
+	if err != nil {
+		return FormResponse{}, s.publish(err)
+	}
+	return FormResponse{FormPage: FormPage{Layout: layout, Title: spec.title, Form: html}, status: f.StatusCode()}, nil
 }
 
 func (s *Server) validate(ctx context.Context, spec formSpec, form url.Values) (template.HTML, error) {
-	h := *spec.handler
-	h.Value = spec.value
-	f, err := h.Validate(ctx, form)
+	f, err := spec.handler.WithValue(spec.value).Validate(ctx, form)
 	if err != nil {
 		return "", s.publish(err)
 	}
-	return s.render("jsonhandler-validation", f)
-}
-
-func (s *Server) render(name string, data any) (template.HTML, error) {
-	var buf bytes.Buffer
-	if err := s.formTemplates.ExecuteTemplate(&buf, name, data); err != nil {
-		return "", s.publish(fmt.Errorf("render %s: %w", name, err))
+	html, err := f.ValidationHTML()
+	if err != nil {
+		return "", s.publish(err)
 	}
-	return template.HTML(buf.String()), nil
+	return html, nil
 }
 
 // sqliteConstraintUnique is SQLITE_CONSTRAINT_UNIQUE.

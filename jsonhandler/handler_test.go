@@ -45,6 +45,15 @@ func TestSubmitForm_errors(t *testing.T) {
 			want:   map[string][]string{"": {messageChoice}},
 		},
 		{
+			// A failing allOf member does not count as having evaluated
+			// its properties, so the validator also reports t as
+			// unevaluated; the field shows only the real problem.
+			name:   "a property from allOf with unevaluatedProperties",
+			schema: `{"type":"object","allOf":[{"properties":{"t":{"type":"string","pattern":"^[0-9]+s$"}}}],"unevaluatedProperties":false}`,
+			form:   url.Values{"@present": {"1"}, "$/t": {"soon"}},
+			want:   map[string][]string{"/t": {`string does not match pattern "^[0-9]+s$"`}},
+		},
+		{
 			name:   "missing required number",
 			schema: `{"type":"object","required":["n"],"properties":{"n":{"type":"number"}}}`,
 			form:   url.Values{"$/n": {""}},

@@ -18,6 +18,18 @@
 - [`jsonhandler`](../jsonhandler/README.md): endpoints, markup and styling
   for the form library.
 
+## Examples
+
+Applications built on `jsonhandler`, each a separate module you can run:
+
+- [`examples/issues`](../examples/issues): an issue tracker with Go types
+  from `jsch generate` and queries from sqlc.
+- [`examples/concourse`](../examples/concourse): an editor for Concourse
+  pipeline YAML that checks it against a schema, draws it, and edits it
+  through forms that rewrite only the lines they change.
+- [`examples/surveys`](../examples/surveys): a survey tool whose answer forms
+  are built at run time from the survey an author writes.
+
 ## Agent skills
 
 Short [skills](https://docs.claude.com/en/docs/claude-code/skills) for coding

@@ -322,7 +322,6 @@ func (h *Handler) SubmitForm(ctx context.Context, form url.Values) (*Form, error
 			// filled in, so a step listed as having errors shows them
 			// when you get there; fields still blank are not flagged.
 			f, _, _ := h.check(sh, s, true)
-			f.quiet()
 			if f.status == http.StatusUnprocessableEntity {
 				f.status = http.StatusOK
 			}
@@ -462,10 +461,16 @@ func (h *Handler) check(sh *shape, s state, live bool) (*Form, jsontext.Value, b
 		if out := h.Schema.Validate("form", value); !out.Valid {
 			f.attachPartial(out, live)
 		}
+		if live {
+			f.quiet()
+		}
 		return f, nil, false
 	}
 	if out := h.Schema.Validate("form", value); !out.Valid {
 		f.attach(nil, &out, live)
+		if live {
+			f.quiet()
+		}
 		return f, nil, false
 	}
 	return f, value, len(r.errs) == 0

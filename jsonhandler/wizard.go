@@ -251,11 +251,27 @@ func problems(f *Field, strict bool) []fieldError {
 	return out
 }
 
-// quiet drops the errors on fields left blank.
+// quiet drops the errors on fields nobody has filled in: a blank control,
+// or a list or checkbox group with nothing in it. A check that runs before
+// the person has reached them, such as validation as you type or arriving
+// at a wizard step, is not a reason to say they are wrong; a submission is.
 func (f *Form) quiet() {
-	for _, field := range f.fields(blank) {
+	for _, field := range f.fields(func(fl *Field) bool { return blank(fl) || nothingChosen(fl) }) {
 		field.Errors = nil
 	}
+}
+
+// nothingChosen reports a group with no selection or items.
+func nothingChosen(f *Field) bool {
+	switch f.Kind {
+	case KindCheckboxes:
+		return !slices.ContainsFunc(f.Options, func(o Option) bool { return o.Selected })
+	case KindArray:
+		return len(f.Fields) == 0
+	case KindMap:
+		return len(f.Entries) == 0
+	}
+	return false
 }
 
 // blank reports a control left empty.

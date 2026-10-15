@@ -295,7 +295,7 @@ func (b *builder) scalar(f *Field, sh *shape) {
 	if sh.pattern != "" && sh.format == "" {
 		// JSON Schema patterns match anywhere in the string; the HTML
 		// pattern attribute must match all of it.
-		f.Pattern = ".*(?:" + sh.pattern + ").*"
+		f.Pattern = htmlPattern(sh.pattern)
 	}
 }
 
@@ -507,7 +507,7 @@ func (b *builder) entries(f *Field, sh *shape, at site, depth int) {
 		key, _ := b.state.meta(metaKey, path)
 		k := &Key{Name: metaName(metaKey, path), ID: b.id(path) + "_key", Value: key}
 		if names.pattern != "" {
-			k.Pattern = ".*(?:" + names.pattern + ").*"
+			k.Pattern = htmlPattern(names.pattern)
 		}
 		if v, ok := integerKeyword(names.minLength); ok && v > 0 {
 			k.MinLength = strconv.Itoa(v)

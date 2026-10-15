@@ -184,6 +184,32 @@ func TestHandler_modes(t *testing.T) {
 	})
 }
 
+// A handler is cheap to make: an app that builds one per request, from a
+// schema that comes from data, must not pay for the meta-schemas unless
+// the schema refers to them. (Declaring $schema does refer to one: the
+// resolver loads it to learn the vocabularies, a cost of well under a
+// millisecond that an app avoids by keeping the handler.)
+func TestNew_cost(t *testing.T) {
+	ctx := context.Background()
+	for name, schema := range map[string]string{
+		"plain":            `{"type":"string"}`,
+		"with definitions": definitions,
+	} {
+		allocs := testing.AllocsPerRun(5, func() {
+			if _, err := New(ctx, []byte(schema)); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if allocs > 2000 {
+			t.Errorf("New(%s) allocates %.0f times, want at most 2000", name, allocs)
+		}
+	}
+	// A schema that does refer to a meta-schema still gets it.
+	if _, err := New(ctx, []byte(`{"$ref":"https://json-schema.org/draft/2020-12/meta/validation"}`)); err != nil {
+		t.Errorf("a reference to a vocabulary meta-schema: %v", err)
+	}
+}
+
 func TestNewAt(t *testing.T) {
 	ctx := context.Background()
 	h, err := NewAt(ctx, []byte(definitions), "/$defs/item")

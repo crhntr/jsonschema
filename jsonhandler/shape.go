@@ -59,6 +59,9 @@ type annotations struct {
 	Class       string   `json:"class,omitempty"`
 	Collapsed   *bool    `json:"collapsed,omitempty"`
 	Rows        int      `json:"rows,omitempty"`
+	// Messages replace the validator's message for a failing keyword,
+	// such as "pattern" or "required".
+	Messages map[string]string `json:"messages,omitempty"`
 }
 
 type property struct {
@@ -254,6 +257,14 @@ func (sh *shape) mergeAnnotations(raw jsontext.Value) {
 	}
 	if sh.ui.Rows == 0 {
 		sh.ui.Rows = ui.Rows
+	}
+	for keyword, message := range ui.Messages {
+		if sh.ui.Messages == nil {
+			sh.ui.Messages = map[string]string{}
+		}
+		if _, ok := sh.ui.Messages[keyword]; !ok {
+			sh.ui.Messages[keyword] = message
+		}
 	}
 }
 

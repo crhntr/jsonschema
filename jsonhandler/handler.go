@@ -501,6 +501,8 @@ func (f *Form) attach(errs []fieldError, out *jsonschema.Output, live bool) {
 			f.Errors = appendNew(f.Errors, e.message)
 		case e.key && field.Key != nil:
 			field.Key.Errors = appendNew(field.Key.Errors, e.message)
+		case e.message == messageRequired:
+			field.Errors = appendNew(field.Errors, field.message("required", e.message))
 		default:
 			field.Errors = appendNew(field.Errors, e.message)
 		}
@@ -537,6 +539,9 @@ func (f *Form) attach(errs []fieldError, out *jsonschema.Output, live bool) {
 				message = pointer + ": " + strings.TrimPrefix(message, pointer+": ")
 			}
 			if field, ok := byPointer[at]; ok {
+				if at == pointer {
+					message = field.message(keyword, message)
+				}
 				field.Errors = appendNew(field.Errors, message)
 				break
 			}

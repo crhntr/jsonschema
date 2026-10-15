@@ -49,6 +49,11 @@
                             "description": "The number of text rows of a textarea or json widget.",
                             "type": "integer",
                             "minimum": 1
+                        },
+                        "messages": {
+                            "description": "Messages to show instead of the validator's, by the keyword that failed, such as pattern, minimum or required.",
+                            "type": "object",
+                            "additionalProperties": {"type": "string", "minLength": 1}
                         }
                     },
                     "additionalProperties": false

@@ -372,12 +372,13 @@ func TestSubmitForm_allErrorsAtOnce(t *testing.T) {
 // blank required field, until a submission asks for it.
 func TestLive_untouchedGroupsStaySilent(t *testing.T) {
 	ctx := context.Background()
-	h := newHandler(t, `{"type":"object","required":["size","tags","steps"],"properties":{
-		"size":  {"type":"number","minimum":1},
-		"tags":  {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["a","b"]}},
-		"steps": {"type":"array","minItems":1,"items":{"type":"string"}}}}`)
+	h := newHandler(t, `{"type":"object","required":["size","tags","steps","labels"],"properties":{
+		"size":   {"type":"number","minimum":1},
+		"tags":   {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["a","b"]}},
+		"steps":  {"type":"array","minItems":1,"items":{"type":"string"}},
+		"labels": {"type":"object","minProperties":1,"additionalProperties":{"type":"string"}}}}`)
 
-	v, err := h.Validate(ctx, url.Values{"@present": {"1"}, "$/size": {"3"}, "@len/steps": {"0"}})
+	v, err := h.Validate(ctx, url.Values{"@present": {"1"}, "$/size": {"3"}, "@len/steps": {"0"}, "@len/labels": {"0"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,11 +403,15 @@ func TestLive_untouchedGroupsStaySilent(t *testing.T) {
 	}
 
 	// A submission still asks for them.
-	f, err := h.SubmitForm(context.Background(), url.Values{"@present": {"1"}, "$/size": {"3"}, "@len/steps": {"0"}})
+	f, err := h.SubmitForm(context.Background(), url.Values{"@present": {"1"}, "$/size": {"3"}, "@len/steps": {"0"}, "@len/labels": {"0"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string][]string{"/tags": {"array has 0 items, minItems 1"}, "/steps": {"array has 0 items, minItems 1"}}
+	want := map[string][]string{
+		"/tags":   {"array has 0 items, minItems 1"},
+		"/steps":  {"array has 0 items, minItems 1"},
+		"/labels": {"object has 0 properties, minProperties 1"},
+	}
 	if got := fieldErrors(f.Root); !maps.EqualFunc(got, want, slices.Equal) {
 		t.Errorf("a submission shows %q, want %q", got, want)
 	}

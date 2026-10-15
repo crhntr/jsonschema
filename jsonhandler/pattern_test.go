@@ -33,6 +33,8 @@ func TestHTMLPattern(t *testing.T) {
 		{"a lone group modifier", `(?`, ""},
 		{"escaped text spans", `\Qa.b\E`, ""},
 		{"a Go end-of-text anchor", `abc\Z`, ""},
+		{"a Go start-of-text anchor", `\Aabc`, ""},
+		{"a Go end-of-text anchor on its own", `abc\z`, ""},
 		{"an escape that is not an anchor", `\d\w\.`, `.*(?:\d\w\.).*`},
 		{"JavaScript groups are fine", "(?:a)(?=b)(?!c)(?<=d)(?<!e)(?<n>f)", ".*(?:(?:a)(?=b)(?!c)(?<=d)(?<!e)(?<n>f)).*"},
 	} {

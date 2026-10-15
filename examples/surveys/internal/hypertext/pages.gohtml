@@ -1,0 +1,204 @@
+{{- /* Frame */ -}}
+
+{{define "head" -}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"413","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+<link rel="stylesheet" href="https://unpkg.com/open-props@1.7.23/open-props.min.css" integrity="sha384-fsyUJwnN3qLArJUL5oaEYS3/WnhCmI4K5x+oB8wFigOMTJaIvys56ozH3+nE/qcf" crossorigin="anonymous">
+<link rel="stylesheet" href="https://unpkg.com/open-props@1.7.23/normalize.min.css" integrity="sha384-sddBOogFG2pe9DuB3k3ekS4as3O4oEzrarCR1HkYLY5Z/7pFYJt54z8VD1yGM7JF" crossorigin="anonymous">
+<link rel="stylesheet" href="/jsonform.css">
+<script src="https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js" integrity="sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg" crossorigin="anonymous" defer></script>
+<style>
+  body { display: grid; justify-items: center; padding: var(--size-5) var(--size-4); }
+  .page { display: grid; align-content: start; gap: var(--size-5); inline-size: min(100%, 44rem); }
+  .page[data-authors] { inline-size: min(100%, 64rem); }
+  /* A question's kind is a constant that its variant picker already shows. */
+  .jsonform [data-kind="const"] { display: none; }
+  .page > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--size-3); padding-block-end: var(--size-3); border-block-end: var(--border-size-1) solid var(--surface-3); }
+  .brand { font-size: var(--font-size-4); font-weight: var(--font-weight-7); text-decoration: none; color: inherit; }
+  main { display: grid; align-content: start; gap: var(--size-4); }
+  main > * { margin: 0; }
+  h1 { font-size: var(--font-size-5); max-inline-size: none; }
+  h2 { font-size: var(--font-size-3); max-inline-size: none; }
+  .lead { color: var(--text-2); max-inline-size: none; white-space: pre-wrap; }
+  .surveys { display: grid; gap: var(--size-3); padding: 0; margin: 0; list-style: none; }
+  .surveys li { display: grid; gap: var(--size-1); padding: var(--size-3) var(--size-4); border-radius: var(--radius-2); background: var(--surface-2); max-inline-size: none; }
+  .surveys .title { font-size: var(--font-size-3); font-weight: var(--font-weight-6); }
+  .surveys .links { display: flex; flex-wrap: wrap; gap: var(--size-4); font-size: var(--font-size-1); color: var(--text-2); }
+  .result { display: grid; gap: var(--size-2); padding-block: var(--size-3); border-block-start: var(--border-size-1) solid var(--surface-3); }
+  .result h2 { margin: 0; }
+  .result .answered { color: var(--text-2); font-size: var(--font-size-1); margin: 0; }
+  .counts { display: grid; grid-template-columns: minmax(6rem, 14rem) 1fr max-content; gap: var(--size-1) var(--size-3); align-items: center; margin: 0; }
+  .counts dt { margin: 0; overflow-wrap: anywhere; }
+  .counts dd { margin: 0; }
+  .counts dd:nth-of-type(2n) { text-align: end; font-variant-numeric: tabular-nums; }
+  meter { inline-size: 100%; block-size: var(--size-3); }
+  .answers { display: grid; gap: var(--size-2); padding: 0; margin: 0; list-style: none; }
+  .answers li { padding: var(--size-2) var(--size-3); border-inline-start: var(--border-size-3) solid var(--surface-4); white-space: pre-wrap; max-inline-size: none; }
+  /* The page heading says what the form's own title and description say
+     (the form is for the whole value, whose pointer is ""), so those stay
+     for screen readers only. */
+  .jsonform [data-pointer=""] > legend,
+  .jsonform [data-pointer=""] > .jsonform-description { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .actions { display: flex; gap: var(--size-3); align-items: center; flex-wrap: wrap; }
+  button.danger { color: var(--red-4); background: none; border: var(--border-size-1) solid var(--red-8); }
+</style>
+</head>
+<body>
+<div class="page"{{if not .Public}} data-authors{{end}}>
+<header>
+<a class="brand" href="{{if .Public}}#{{else}}/{{end}}">{{if .Public}}{{.Title}}{{else}}Surveys{{end}}</a>
+{{- if not .Public}}
+<nav aria-label="Surveys"><a href="/surveys/new">New survey</a></nav>
+{{- end}}
+</header>
+<main>
+{{- end}}
+
+{{define "foot" -}}
+</main>
+</div>
+</body>
+</html>
+{{- end}}
+
+{{define "error-page" -}}
+{{template "head" .Layout}}
+<h1>{{.Message}}</h1>
+<p><a href="/">Back to the surveys</a></p>
+{{template "foot"}}
+{{- end}}
+
+{{define "form-page" -}}
+{{template "head" .Layout}}
+<h1>{{.Heading}}</h1>
+{{- with .Description}}
+<p class="lead">{{.}}</p>
+{{- end}}
+{{.Form}}
+{{template "foot"}}
+{{- end}}
+
+{{- /* A post of a form: after a save, go to the next page; otherwise
+       answer htmx with the form alone, and a browser with the page. */ -}}
+{{define "form-response" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}
+{{- else if .Result.Location}}{{if .HXRequest}}{{.HXRedirect .Result.Location}}{{else}}{{.RedirectSeeOther .Result.Location}}{{end}}
+{{- else if .HXRequest}}{{.Result.Form}}
+{{- else}}{{template "form-page" .Result.FormPage}}
+{{- end}}
+{{- end}}
+
+{{- /* Home */ -}}
+
+{{define "GET /{$} Home(ctx)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}
+{{- with .Result}}
+{{template "head" .Layout}}
+<h1>Surveys</h1>
+{{- if .Surveys}}
+<ul class="surveys">
+{{- range .Surveys}}
+<li>
+<span class="title">{{with .Title}}{{.}}{{else}}{{.Name}}{{end}}</span>
+<span class="links">
+<a href="/s/{{.Name}}">Open the survey</a>
+<a href="/surveys/{{.Name}}/results">{{.Responses}} response{{if ne .Responses 1}}s{{end}}</a>
+<a href="/surveys/{{.Name}}/edit">Edit</a>
+</span>
+</li>
+{{- end}}
+</ul>
+{{- else}}
+<p>There are no surveys yet. <a href="/surveys/new">Write the first.</a></p>
+{{- end}}
+{{template "foot"}}
+{{- end}}
+{{- end}}
+{{- end}}
+
+{{- /* Writing a survey */ -}}
+
+{{define "GET /surveys/new NewSurvey(ctx)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "form-page" .Result}}{{end}}
+{{- end}}
+
+{{define "POST /surveys/new/form SubmitNewSurvey(ctx, form)" -}}{{template "form-response" .}}{{- end}}
+
+{{define "POST /surveys/new/form/validate ValidateNewSurvey(ctx, form)" -}}{{.Result}}{{- end}}
+
+{{define "GET /surveys/{name}/edit EditSurvey(ctx, name)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "form-page" .Result}}{{end}}
+{{- end}}
+
+{{define "POST /surveys/{name}/edit/form SubmitEditSurvey(ctx, name, form)" -}}{{template "form-response" .}}{{- end}}
+
+{{define "POST /surveys/{name}/edit/form/validate ValidateEditSurvey(ctx, name, form)" -}}{{.Result}}{{- end}}
+
+{{define "POST /surveys/{name}/delete DeleteSurvey(name)" -}}
+{{- /* A method returning only an error hands it over as .Result. */ -}}
+{{- with .Result}}{{$.StatusCode (status .)}}{{template "error-page" (errorPage .)}}{{else}}{{.RedirectSeeOther "/"}}{{end}}
+{{- end}}
+
+{{- /* Taking a survey */ -}}
+
+{{define "GET /s/{name} Take(ctx, name)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "form-page" .Result}}{{end}}
+{{- end}}
+
+{{define "POST /s/{name}/form SubmitAnswers(ctx, name, form)" -}}{{template "form-response" .}}{{- end}}
+
+{{define "POST /s/{name}/form/validate ValidateAnswers(ctx, name, form)" -}}{{.Result}}{{- end}}
+
+{{define "GET /s/{name}/thanks Thanks(ctx, name)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}
+{{- with .Result}}
+{{template "head" .Layout}}
+<h1>Thank you</h1>
+<p>Your answers to “{{.Title}}” were sent.</p>
+<p><a href="/s/{{.Name}}">Answer again</a></p>
+{{template "foot"}}
+{{- end}}
+{{- end}}
+{{- end}}
+
+{{- /* Results */ -}}
+
+{{define "GET /surveys/{name}/results Results(ctx, name)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}
+{{- with .Result}}
+{{template "head" .Layout}}
+<h1>{{.Title}}</h1>
+<p class="lead">{{.Responses}} response{{if ne .Responses 1}}s{{end}}. <a href="/s/{{.Name}}">Open the survey</a> · <a href="/surveys/{{.Name}}/edit">Edit</a></p>
+{{- range .Results}}{{$answered := .Answered}}
+<section class="result" aria-labelledby="{{.ID}}">
+<h2 id="{{.ID}}">{{.Question.Prompt}}</h2>
+<p class="answered">{{.Answered}} answered{{if eq .Question.Kind "scale"}}{{if .Answered}}, average {{printf "%.1f" .Mean}}{{end}}{{end}}</p>
+{{- if .Counts}}
+<dl class="counts">
+{{- range .Counts}}
+<dt>{{.Label}}</dt>
+<dd><meter min="0" max="{{$answered}}" value="{{.N}}" aria-label="{{.Label}}: {{.N}}"></meter></dd>
+<dd>{{.N}} ({{.Percent}}%)</dd>
+{{- end}}
+</dl>
+{{- else if .Texts}}
+<ul class="answers">
+{{- range .Texts}}
+<li>{{.}}</li>
+{{- end}}
+</ul>
+{{- end}}
+</section>
+{{- end}}
+<form method="post" action="/surveys/{{.Name}}/delete" class="actions">
+<button class="danger">Delete this survey and its responses</button>
+</form>
+{{template "foot"}}
+{{- end}}
+{{- end}}
+{{- end}}

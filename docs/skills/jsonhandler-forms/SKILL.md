@@ -18,18 +18,35 @@ h.OnSubmit = func(ctx context.Context, v jsontext.Value) (string, error) {
 jsonhandler.TemplateRoutes(mux, h, "/settings")
 ```
 
-Or render it in your own page: `t, _ := jsonhandler.Templates()`, parse your
-templates into `t`, call `h.Form(ctx)` or `h.SubmitForm(ctx, r.PostForm)`,
-then `form.WithActions(postURL, validateURL)` and execute `jsonhandler-form`.
-Build a `Handler` per request when the schema or value varies.
+Or handle the requests yourself, which suits an edit page that saves and
+redirects:
 
+```go
+f, err := h.WithValue(stored).SubmitForm(ctx, r.PostForm) // WithValue copies h
+if f.Valid {
+	if err := save(f.Value); err == nil { /* redirect */ return }
+	f.Reject(errors.New("Could not save. Try again.")) // back to the form, 422
+}
+html, err := f.WithActions(postURL, validateURL).HTML() // template.HTML
+```
+
+`f.ValidationHTML()` answers the validate route. To change the markup instead,
+parse your templates into `jsonhandler.Templates()` and execute
+`jsonhandler-form`.
+
+- `NewAt(ctx, doc, "/$defs/job")` edits one definition of a larger schema.
+- A `Handler` has no per-request state; share it and use `WithValue`.
 - Works without JavaScript. With htmx, configure `responseHandling` to swap
   422 and 413 (see `jsonhandler/README.md`).
 - Serve `jsonhandler.Stylesheet()` or write your own CSS; markup is documented
   in the README.
-- `readOnly` values are restored server-side; `writeOnly` values are never
-  sent to the browser.
+- `x-form` adjusts presentation: `widget`, `label`, `placeholder`, `order`,
+  `class`, `collapsed`, `rows`, and `messages` (your wording for a failing
+  keyword, such as `{"pattern": "Use 30s, 5m or 1h."}`).
+- `readOnly` values (and everything inside them) are fixed; `writeOnly` values
+  are never sent to the browser.
 - `if`/`then`/`else`, `not`, `patternProperties` and `unevaluated*` do not
   change the form, but are still validated.
 
-Worked example: `docs/tutorials/versioned-config-editor.md`.
+Worked examples: `docs/tutorials/versioned-config-editor.md`,
+`examples/concourse` and `examples/issues`.

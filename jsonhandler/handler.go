@@ -1,18 +1,20 @@
 package jsonhandler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 
 	"github.com/crhntr/jsonschema"
-	"github.com/crhntr/jsonschema/jsonptr"
 	"github.com/crhntr/jsonschema/internal/metaschema"
+	"github.com/crhntr/jsonschema/jsonptr"
 )
 
 //go:generate go tool muxt generate --use-receiver-type=Handler --output-routes-func-with-path-prefix-param --output-htmx
@@ -23,7 +25,10 @@ import (
 //
 // A Handler is configuration and holds no state of its own, so it is safe
 // to copy, and to use from many requests at once. To edit a different
-// value per request, use [Handler.WithValue].
+// value per request, use [Handler.WithValue]. Making one parses the schema,
+// which takes microseconds, or under a millisecond when the schema declares
+// $schema (the resolver then loads that meta-schema); an app whose schemas
+// are data can make one per request, or keep them by schema to avoid it.
 type Handler struct {
 	// Schema is the resolved schema the value must match.
 	Schema *jsonschema.Schema
@@ -74,9 +79,6 @@ func New(ctx context.Context, schema []byte) (*Handler, error) {
 // document, as they do for New.
 func NewAt(ctx context.Context, schema []byte, pointer string) (*Handler, error) {
 	r := jsonschema.NewResolver(&http.Client{Transport: offline{}})
-	if err := metaschema.Seed(r); err != nil {
-		return nil, err
-	}
 	const uri = "urn:jsonhandler:schema"
 	if _, err := r.Load(uri, schema); err != nil {
 		return nil, fmt.Errorf("load schema: %w", err)
@@ -100,9 +102,26 @@ func NewAt(ctx context.Context, schema []byte, pointer string) (*Handler, error)
 	return &Handler{Schema: sub}, nil
 }
 
+// offline is the transport schemas are resolved with: it serves the JSON
+// Schema meta-schemas that are built in, only when something refers to
+// them, and refuses every other URL, so nothing is ever fetched from the
+// network.
 type offline struct{}
 
 func (offline) RoundTrip(req *http.Request) (*http.Response, error) {
+	if body, ok := metaschema.BytesForURL(req.URL.String()); ok {
+		return &http.Response{
+			Status:        "200 OK",
+			StatusCode:    http.StatusOK,
+			Proto:         "HTTP/1.1",
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+			Header:        http.Header{"Content-Type": {"application/schema+json"}},
+			Body:          io.NopCloser(bytes.NewReader(body)),
+			ContentLength: int64(len(body)),
+			Request:       req,
+		}, nil
+	}
 	return nil, fmt.Errorf("jsonhandler: %s is not built in and fetching schemas is disabled", req.URL)
 }
 

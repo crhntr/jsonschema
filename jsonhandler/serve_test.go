@@ -110,3 +110,21 @@ func TestValidateHTML(t *testing.T) {
 		t.Errorf("a valid value shows errors: %s", html)
 	}
 }
+
+func TestParseSchemaAt(t *testing.T) {
+	s, err := ParseSchemaAt(context.Background(), []byte(definitions), "/$defs/item")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := Handle(post("/f", url.Values{"$/name": {"pen"}, "$/price": {"-1"}}), s, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, err := f.HTML()
+	if err != nil || f.Valid || !strings.Contains(string(html), "less than minimum 0") {
+		t.Errorf("the reference to money inside the definition did not resolve: %v", err)
+	}
+	if _, err := ParseSchemaAt(context.Background(), []byte(definitions), "/$defs/nope"); err == nil {
+		t.Errorf("a pointer to nothing was accepted")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/crhntr/jsonschema"
+	"github.com/crhntr/jsonschema/jsonptr"
 )
 
 // Options adjust a form made by [Handle] or [Serve]. The zero value, and a
@@ -124,6 +125,26 @@ func ValidateHTML(r *http.Request, schema *jsonschema.Schema, initial jsontext.V
 		return "", err
 	}
 	return f.ValidationHTML()
+}
+
+// ParseSchemaAt is [ParseSchema] for the part of the document at a JSON
+// Pointer, such as "/$defs/job", for a form that edits one piece of a
+// larger value. References inside it resolve against the whole document.
+func ParseSchemaAt(ctx context.Context, document []byte, pointer string) (*jsonschema.Schema, error) {
+	s, err := ParseSchema(ctx, document)
+	if err != nil || pointer == "" {
+		return s, err
+	}
+	// The walk keeps identity, so the subschema found is the linked one.
+	_, v, err := jsonptr.FindValue(jsonptr.Pointer(pointer), s)
+	if err != nil {
+		return nil, fmt.Errorf("find %s in the schema: %w", pointer, err)
+	}
+	sub, ok := v.(*jsonschema.Schema)
+	if !ok {
+		return nil, fmt.Errorf("%s is not a schema", pointer)
+	}
+	return sub, nil
 }
 
 // ParseSchema loads a schema document and resolves its references, for

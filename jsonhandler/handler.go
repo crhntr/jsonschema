@@ -14,7 +14,6 @@ import (
 
 	"github.com/crhntr/jsonschema"
 	"github.com/crhntr/jsonschema/internal/metaschema"
-	"github.com/crhntr/jsonschema/jsonptr"
 )
 
 //go:generate go tool muxt generate --use-receiver-type=Handler --output-routes-func-with-path-prefix-param --output-htmx
@@ -78,23 +77,11 @@ func New(ctx context.Context, schema []byte) (*Handler, error) {
 // larger value. References inside that part resolve against the whole
 // document, as they do for New.
 func NewAt(ctx context.Context, schema []byte, pointer string) (*Handler, error) {
-	s, err := ParseSchema(ctx, schema)
+	s, err := ParseSchemaAt(ctx, schema, pointer)
 	if err != nil {
 		return nil, err
 	}
-	if pointer == "" {
-		return &Handler{Schema: s}, nil
-	}
-	// The walk keeps identity, so the subschema found is the linked one.
-	_, v, err := jsonptr.FindValue(jsonptr.Pointer(pointer), s)
-	if err != nil {
-		return nil, fmt.Errorf("find %s in the schema: %w", pointer, err)
-	}
-	sub, ok := v.(*jsonschema.Schema)
-	if !ok {
-		return nil, fmt.Errorf("%s is not a schema", pointer)
-	}
-	return &Handler{Schema: sub}, nil
+	return &Handler{Schema: s}, nil
 }
 
 // offline is the transport schemas are resolved with: it serves the JSON

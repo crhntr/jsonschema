@@ -105,6 +105,12 @@ web applications. [`examples/issues`](examples/issues) is a small issue
 tracker built on it, with Go types from `jsch generate` and queries from
 sqlc.
 
+## Documentation
+
+[`docs/`](docs/README.md) has a tutorial for an editor over JSON configuration
+kept in git, a guide to generating a schema from CUE, and a reference on
+writing schemas whose error messages people can act on.
+
 ## License
 
 See [LICENSE.txt](LICENSE.txt).

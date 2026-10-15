@@ -563,6 +563,7 @@ func (h *Handler) build(sh *shape, s state) *Form {
 		f.step, _ = s.meta(metaStep, "")
 	}
 	f.Root = b.build(sh, site{required: true, htmlRequired: true}, 0)
+	f.Root.Implied = true // the value is there whenever the form is
 	if b.tooLarge {
 		f.Root = nil
 		f.Errors = []string{fmt.Sprintf("the form would have more than %d fields", limit)}

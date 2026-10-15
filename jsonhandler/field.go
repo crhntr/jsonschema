@@ -36,8 +36,8 @@ type Field struct {
 	// so the browser cannot block a submission the schema allows.
 	Required, HTMLRequired bool
 	// Implied reports a location that exists because its container does:
-	// an array item, a map entry, or the chosen variant of a choice. Its
-	// label gets no required mark.
+	// the whole value, an array item, a map entry, or the chosen variant
+	// of a choice. Its label gets no required mark.
 	Implied             bool
 	ReadOnly, WriteOnly bool
 	Deprecated          bool
@@ -358,11 +358,18 @@ func (b *builder) numberLimits(f *Field, sh *shape) {
 
 func (b *builder) enum(f *Field, sh *shape) {
 	f.jsonOptions = hasNonString(sh.enum)
+	f.Placeholder = sh.ui.Placeholder // labels the blank option
 	b.initial(f, sh, func(v jsontext.Value) string { return optionValue(v, f.jsonOptions) })
 	raw := f.Value
 	f.Options = make([]Option, 0, len(sh.enum)+1)
 	if f.Kind == KindSelect || !f.Required {
-		f.Options = append(f.Options, Option{Value: "", Label: f.Placeholder, Selected: raw == ""})
+		blank := f.Placeholder
+		if f.Kind == KindRadio && blank == "" {
+			// A radio with no label looks like the first real option
+			// is already chosen.
+			blank = "No answer"
+		}
+		f.Options = append(f.Options, Option{Value: "", Label: blank, Selected: raw == ""})
 	}
 	for _, v := range sh.enum {
 		value := optionValue(v, f.jsonOptions)

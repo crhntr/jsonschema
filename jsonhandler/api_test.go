@@ -210,6 +210,69 @@ func TestNew_cost(t *testing.T) {
 	}
 }
 
+// An optional radio group has a way to say nothing, and it says so: an
+// unlabelled radio that starts out checked looks like the first option
+// being pre-selected.
+func TestRadio_blankIsLabeled(t *testing.T) {
+	h := newHandler(t, `{"type":"object","required":["must"],"properties":{
+		"pick":   {"enum":["a","b"],"x-form":{"widget":"radio"}},
+		"custom": {"enum":["a","b"],"x-form":{"widget":"radio","placeholder":"Skip"}},
+		"must":   {"enum":["a","b"],"x-form":{"widget":"radio"}},
+		"menu":   {"enum":["a","b"]}}}`)
+	f, err := h.Form(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := func(name string) (labels []string, blankChecked bool) {
+		for _, field := range f.Root.Fields {
+			if field.Pointer != "/"+name {
+				continue
+			}
+			for _, o := range field.Options {
+				labels = append(labels, o.Label)
+				blankChecked = blankChecked || (o.Value == "" && o.Selected)
+			}
+		}
+		return labels, blankChecked
+	}
+	for name, want := range map[string][]string{
+		"pick":   {"No answer", "a", "b"},
+		"custom": {"Skip", "a", "b"},
+		"must":   {"a", "b"},
+		"menu":   {"", "a", "b"},
+	} {
+		got, _ := labels(name)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s option labels = %q, want %q", name, got, want)
+		}
+	}
+	if _, checked := labels("pick"); !checked {
+		t.Errorf("an unanswered optional radio group does not start on its blank option")
+	}
+}
+
+// The value being edited is always there, so its label is not marked as
+// required; the properties inside it are, where they are.
+func TestRoot_notMarkedRequired(t *testing.T) {
+	h := newHandler(t, `{"title":"Survey","type":"object","required":["a"],"properties":{"a":{"type":"string"},"b":{"type":"string"}}}`)
+	f, err := h.Form(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, err := f.HTML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legend, _, _ := strings.Cut(string(html), "</legend>")
+	_, legend, _ = strings.Cut(legend, `<legend class="jsonform-label">`)
+	if !strings.Contains(legend, "Survey") || strings.Contains(legend, "jsonform-required") {
+		t.Errorf("the root's legend is %q, want the title with no required mark", legend)
+	}
+	if n := strings.Count(string(html), `class="jsonform-required"`); n != 1 {
+		t.Errorf("%d required marks in the form, want one (for a)", n)
+	}
+}
+
 func TestNewAt(t *testing.T) {
 	ctx := context.Background()
 	h, err := NewAt(ctx, []byte(definitions), "/$defs/item")

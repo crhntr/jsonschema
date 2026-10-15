@@ -148,6 +148,54 @@ func TestHandler_modes(t *testing.T) {
 		}
 	})
 
+	t.Run("the toolbar offers exactly the modes that are on", func(t *testing.T) {
+		for _, tc := range []struct {
+			noJSON, noWizard bool
+			want             []string
+		}{
+			{false, false, []string{"Edit with wizard", "Edit as JSON"}},
+			{true, false, []string{"Edit with wizard"}},
+			{false, true, []string{"Edit as JSON"}},
+			{true, true, nil},
+		} {
+			h := newHandler(t, schema)
+			h.NoJSON, h.NoWizard = tc.noJSON, tc.noWizard
+			f, err := h.Form(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			html, err := f.HTML()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, label := range []string{"Edit with wizard", "Edit as JSON"} {
+				if strings.Contains(string(html), ">"+label+"<") {
+					got = append(got, label)
+				}
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("NoJSON=%v NoWizard=%v: toolbar offers %q, want %q", tc.noJSON, tc.noWizard, got, tc.want)
+			}
+			if strings.Contains(string(html), "jsonform-toolbar") != (len(tc.want) > 0) {
+				t.Errorf("NoJSON=%v NoWizard=%v: toolbar present = %v", tc.noJSON, tc.noWizard, !(len(tc.want) > 0))
+			}
+		}
+		// In a mode, the way back to the fields is always there.
+		h := newHandler(t, schema)
+		h.NoJSON = true
+		_, html := page(h, post("@action", ActionWizard))
+		if !strings.Contains(html, ">Edit as form<") || strings.Contains(html, ">Edit as JSON<") {
+			t.Errorf("wizard toolbar with JSON off:\n%s", html)
+		}
+		h = newHandler(t, schema)
+		h.NoWizard = true
+		_, html = page(h, post("@action", ActionJSON))
+		if !strings.Contains(html, ">Edit as form<") {
+			t.Errorf("JSON toolbar with the wizard off lacks the way back")
+		}
+	})
+
 	t.Run("NoJSON", func(t *testing.T) {
 		h := newHandler(t, schema)
 		h.NoJSON = true

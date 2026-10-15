@@ -6,7 +6,9 @@
 {{- with .ValidateAction}}
 <div class="jsonform-live" hidden hx-post="{{.}}" hx-trigger="keyup delay:400ms from:closest form, change from:closest form" hx-include="closest form" hx-swap="none"></div>
 {{- end}}
-{{- if and .Root (or .Mode (not .NoWizard) (not .NoJSON))}}
+{{- /* A form is only ever in a mode its handler offers, so there is a toolbar
+       exactly when some mode is offered. */ -}}
+{{- if and .Root (or (not .NoWizard) (not .NoJSON))}}
 <div class="jsonform-toolbar">
 {{- if eq .Mode "json"}}
 <input type="hidden" name="@mode" value="json">

@@ -508,9 +508,29 @@ func (f *Form) attach(errs []fieldError, out *jsonschema.Output, live bool) {
 	if out == nil {
 		return
 	}
+	type report struct{ pointer, keyword, message string }
+	var reports []report
 	collect(*out, choices, func(pointer, keyword, message string) {
+		reports = append(reports, report{pointer, keyword, message})
+	})
+	// A property in a failing subschema does not count as evaluated, so
+	// unevaluatedProperties also rejects it; its own error says more.
+	unknown := func(r report) bool {
+		return r.keyword == "unevaluatedProperties" || r.keyword == "additionalProperties"
+	}
+	known := map[string]bool{}
+	for _, r := range reports {
+		if !unknown(r) {
+			known[r.pointer] = true
+		}
+	}
+	for _, r := range reports {
+		pointer, keyword, message := r.pointer, r.keyword, r.message
+		if unknown(r) && known[pointer] {
+			continue
+		}
 		if live && (keyword == "required" || keyword == "dependentRequired") {
-			return
+			continue
 		}
 		for at := pointer; ; at, _ = splitLast(at) {
 			if at != pointer {
@@ -518,14 +538,14 @@ func (f *Form) attach(errs []fieldError, out *jsonschema.Output, live bool) {
 			}
 			if field, ok := byPointer[at]; ok {
 				field.Errors = appendNew(field.Errors, message)
-				return
+				break
 			}
 			if at == "" {
 				f.Errors = appendNew(f.Errors, message)
-				return
+				break
 			}
 		}
-	})
+	}
 }
 
 // collect reports the most specific errors in a verbose output tree: a

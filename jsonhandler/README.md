@@ -251,6 +251,12 @@ and validated like any other JSON field. Switching to JSON fails, keeping the
 fields, if a field cannot be decoded; switching back fails, keeping the text,
 if it does not parse.
 
+A form that the public fills in has no use for raw JSON. Set
+`Handler.NoJSON` to stop offering it, or `Handler.NoWizard` to stop offering
+the wizard. A mode that is turned off is refused by the server as well as
+hidden: a post that asks for it, or that says it is already in it, gets the
+fields.
+
 ### Hiding groups
 
 With `Handler.Outline` on, each outline entry has a Hide button. A hidden

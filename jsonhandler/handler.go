@@ -49,6 +49,11 @@ type Handler struct {
 	// Outline adds a navigation list of links to every object, array, map
 	// and choice in the form, for large or deeply nested values.
 	Outline bool
+	// NoJSON and NoWizard turn off the JSON and wizard edit modes: their
+	// buttons are not offered, and a request for one (or a form already in
+	// it) is answered with the fields. Use NoJSON on a form filled in by
+	// the public, who have no use for raw JSON.
+	NoJSON, NoWizard bool
 	// OnSubmit, when set, is called with each submitted value that passes
 	// validation. A returned message is shown with the value; a returned
 	// error is shown on the form, which is rendered again for correction.
@@ -137,6 +142,9 @@ type Form struct {
 	Root *Field
 	// ShowOutline reports that the form renders its outline.
 	ShowOutline bool
+	// NoJSON and NoWizard report edit modes the form does not offer; see
+	// [Handler].
+	NoJSON, NoWizard bool
 	// Errors are problems that belong to no single field.
 	Errors []string
 
@@ -276,8 +284,8 @@ func (h *Handler) SubmitForm(ctx context.Context, form url.Values) (*Form, error
 		return nil, errNoSchema
 	}
 	sh := h.root()
-	s := submittedControls(form)
-	switch action := form.Get(ActionName); action {
+	s, action := h.submitted(form)
+	switch action {
 	case "":
 	case ActionJSON:
 		return h.showJSON(sh, s), nil
@@ -364,11 +372,36 @@ func (h *Handler) Validate(ctx context.Context, form url.Values) (*Form, error) 
 	if h.Schema == nil {
 		return nil, errNoSchema
 	}
-	f, _, _ := h.check(h.root(), submittedControls(form), true)
+	s, _ := h.submitted(form)
+	f, _, _ := h.check(h.root(), s, true)
 	if f.status == http.StatusUnprocessableEntity {
 		f.status = http.StatusOK
 	}
 	return f, nil
+}
+
+// submitted reads the form state and the action out of a post, leaving out
+// the modes the handler does not offer: a request for one, or already in
+// one, is treated as an edit that changes nothing, so the form stays as
+// the fields.
+func (h *Handler) submitted(form url.Values) (s state, action string) {
+	s, action = submittedControls(form), form.Get(ActionName)
+	op, _, _ := strings.Cut(action, "/")
+	mode, _ := s.meta(metaMode, "")
+	if h.NoJSON && (action == ActionJSON || mode == ModeJSON) {
+		delete(s, metaName(metaMode, ""))
+		if action == ActionJSON {
+			action = "refresh"
+		}
+	}
+	if h.NoWizard && (op == ActionWizard || op == "next" || mode == ModeWizard) {
+		delete(s, metaName(metaMode, ""))
+		delete(s, metaName(metaStep, ""))
+		if op == ActionWizard || op == "next" {
+			action = "refresh"
+		}
+	}
+	return s, action
 }
 
 // submittedControls keeps the form controls of a submission and drops anything
@@ -493,6 +526,8 @@ func (h *Handler) build(sh *shape, s state) *Form {
 		ID:          firstNonEmpty(h.ID, "jsonform"),
 		SubmitLabel: firstNonEmpty(h.SubmitLabel, "Submit"),
 		ShowOutline: h.Outline,
+		NoJSON:      h.NoJSON,
+		NoWizard:    h.NoWizard,
 	}
 	limit := h.MaxFields
 	if limit <= 0 {

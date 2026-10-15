@@ -1,0 +1,351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/concourse/pipeline.json",
+  "title": "Pipeline",
+  "description": "A Concourse pipeline: resources, the jobs that use them, and how jobs are grouped.",
+  "type": "object",
+  "required": ["jobs"],
+  "properties": {
+    "resources": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+    "resource_types": {"type": "array", "items": {"$ref": "#/$defs/resource_type"}},
+    "jobs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/job"}},
+    "groups": {"type": "array", "items": {"$ref": "#/$defs/group"}},
+    "var_sources": {"type": "array", "items": {"$ref": "#/$defs/var_source"}},
+    "display": {"$ref": "#/$defs/display"}
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "description": "A lowercase name: a letter, then letters, digits, '-', '_' or '.'.",
+      "pattern": "^[a-z][a-z0-9_.-]*$"
+    },
+    "duration": {
+      "type": "string",
+      "description": "A Go duration such as 30s, 5m or 1h30m, or a ((var)).",
+      "pattern": "^(\\(\\([^\\(\\)]+\\)\\)|([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+)$",
+      "x-form": {"placeholder": "1m"}
+    },
+    "config": {
+      "type": "object",
+      "description": "Free-form configuration, specific to the resource type or task.",
+      "x-form": {"widget": "json", "rows": 4}
+    },
+    "tags": {
+      "type": "array",
+      "description": "Run only on workers with these tags.",
+      "items": {"type": "string"}
+    },
+    "resource": {
+      "title": "Resource",
+      "type": "object",
+      "required": ["name", "type", "source"],
+      "properties": {
+        "name": {"$ref": "#/$defs/identifier"},
+        "type": {"type": "string", "description": "A resource type: built in (git, time, registry-image, s3, …) or from resource_types.", "x-form": {"placeholder": "git"}},
+        "source": {"$ref": "#/$defs/config"},
+        "icon": {"type": "string", "description": "A Material Design icon name.", "x-form": {"placeholder": "github"}},
+        "check_every": {"anyOf": [{"$ref": "#/$defs/duration"}, {"const": "never"}]},
+        "check_timeout": {"$ref": "#/$defs/duration"},
+        "version": {"type": "object", "description": "Pin the resource to this version.", "additionalProperties": {"type": "string"}},
+        "tags": {"$ref": "#/$defs/tags"},
+        "public": {"type": "boolean"},
+        "webhook_token": {"type": "string", "x-form": {"widget": "password"}},
+        "expose_build_created_by": {"type": "boolean"},
+        "old_name": {"$ref": "#/$defs/identifier"}
+      },
+      "additionalProperties": false
+    },
+    "resource_type": {
+      "title": "Resource type",
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/identifier"},
+        "type": {"type": "string", "x-form": {"placeholder": "registry-image"}},
+        "source": {"$ref": "#/$defs/config"},
+        "defaults": {"$ref": "#/$defs/config"},
+        "params": {"$ref": "#/$defs/config"},
+        "check_every": {"anyOf": [{"$ref": "#/$defs/duration"}, {"const": "never"}]},
+        "privileged": {"type": "boolean"},
+        "tags": {"$ref": "#/$defs/tags"}
+      },
+      "additionalProperties": false
+    },
+    "job": {
+      "title": "Job",
+      "type": "object",
+      "required": ["name", "plan"],
+      "x-form": {"order": ["name", "plan"]},
+      "properties": {
+        "name": {"$ref": "#/$defs/identifier"},
+        "plan": {"type": "array", "items": {"$ref": "#/$defs/step"}},
+        "serial": {"type": "boolean", "description": "Run builds one at a time."},
+        "serial_groups": {"type": "array", "items": {"$ref": "#/$defs/identifier"}},
+        "max_in_flight": {"type": "integer", "minimum": 1},
+        "build_log_retention": {
+          "type": "object",
+          "properties": {
+            "builds": {"type": "integer", "minimum": 0},
+            "days": {"type": "integer", "minimum": 0},
+            "minimum_succeeded_builds": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        },
+        "public": {"type": "boolean"},
+        "disable_manual_trigger": {"type": "boolean"},
+        "interruptible": {"type": "boolean"},
+        "old_name": {"$ref": "#/$defs/identifier"},
+        "on_success": {"$ref": "#/$defs/step"},
+        "on_failure": {"$ref": "#/$defs/step"},
+        "on_error": {"$ref": "#/$defs/step"},
+        "on_abort": {"$ref": "#/$defs/step"},
+        "ensure": {"$ref": "#/$defs/step"}
+      },
+      "additionalProperties": false
+    },
+    "modifiers": {
+      "properties": {
+        "timeout": {"$ref": "#/$defs/duration"},
+        "attempts": {"type": "integer", "minimum": 1},
+        "tags": {"$ref": "#/$defs/tags"},
+        "on_success": {"$ref": "#/$defs/step"},
+        "on_failure": {"$ref": "#/$defs/step"},
+        "on_error": {"$ref": "#/$defs/step"},
+        "on_abort": {"$ref": "#/$defs/step"},
+        "ensure": {"$ref": "#/$defs/step"}
+      }
+    },
+    "step": {
+      "title": "Step",
+      "oneOf": [
+        {"$ref": "#/$defs/get"},
+        {"$ref": "#/$defs/put"},
+        {"$ref": "#/$defs/task"},
+        {"$ref": "#/$defs/set_pipeline"},
+        {"$ref": "#/$defs/load_var"},
+        {"$ref": "#/$defs/in_parallel"},
+        {"$ref": "#/$defs/do"},
+        {"$ref": "#/$defs/try"}
+      ]
+    },
+    "get": {
+      "title": "get",
+      "type": "object",
+      "required": ["get"],
+      "allOf": [{"$ref": "#/$defs/modifiers"}],
+      "properties": {
+        "get": {"$ref": "#/$defs/identifier", "description": "The name the fetched version has in this plan."},
+        "resource": {"$ref": "#/$defs/identifier", "description": "The resource to fetch, when it differs from the name."},
+        "passed": {"type": "array", "description": "Only versions that went through all of these jobs.", "items": {"$ref": "#/$defs/identifier"}},
+        "trigger": {"type": "boolean", "description": "Start a build when a new version appears."},
+        "params": {"$ref": "#/$defs/config"},
+        "version": {
+          "anyOf": [
+            {"enum": ["latest", "every"]},
+            {"type": "object", "additionalProperties": {"type": "string"}}
+          ]
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "put": {
+      "title": "put",
+      "type": "object",
+      "required": ["put"],
+      "allOf": [{"$ref": "#/$defs/modifiers"}],
+      "properties": {
+        "put": {"$ref": "#/$defs/identifier"},
+        "resource": {"$ref": "#/$defs/identifier"},
+        "inputs": {
+          "anyOf": [
+            {"enum": ["all", "detect"]},
+            {"type": "array", "items": {"$ref": "#/$defs/identifier"}}
+          ]
+        },
+        "params": {"$ref": "#/$defs/config"},
+        "get_params": {"$ref": "#/$defs/config"},
+        "no_get": {"type": "boolean"}
+      },
+      "unevaluatedProperties": false
+    },
+    "task": {
+      "title": "task",
+      "type": "object",
+      "required": ["task"],
+      "allOf": [{"$ref": "#/$defs/modifiers"}],
+      "properties": {
+        "task": {"$ref": "#/$defs/identifier"},
+        "file": {"type": "string", "description": "A task config file from one of the plan's artifacts, like repo/ci/test.yml."},
+        "config": {"$ref": "#/$defs/task_config"},
+        "image": {"$ref": "#/$defs/identifier", "description": "An artifact to use as the task's image."},
+        "privileged": {"type": "boolean"},
+        "vars": {"$ref": "#/$defs/config"},
+        "params": {"$ref": "#/$defs/config"},
+        "input_mapping": {"type": "object", "additionalProperties": {"$ref": "#/$defs/identifier"}},
+        "output_mapping": {"type": "object", "additionalProperties": {"$ref": "#/$defs/identifier"}},
+        "container_limits": {"$ref": "#/$defs/container_limits"}
+      },
+      "dependentRequired": {"vars": ["file"]},
+      "unevaluatedProperties": false
+    },
+    "task_config": {
+      "title": "Task config",
+      "type": "object",
+      "required": ["platform", "run"],
+      "properties": {
+        "platform": {"type": "string", "enum": ["linux", "darwin", "windows"]},
+        "image_resource": {
+          "type": "object",
+          "required": ["type", "source"],
+          "properties": {
+            "type": {"type": "string", "x-form": {"placeholder": "registry-image"}},
+            "source": {"$ref": "#/$defs/config"},
+            "params": {"$ref": "#/$defs/config"},
+            "version": {"type": "object", "additionalProperties": {"type": "string"}}
+          },
+          "additionalProperties": false
+        },
+        "inputs": {"type": "array", "items": {"$ref": "#/$defs/artifact"}},
+        "outputs": {"type": "array", "items": {"$ref": "#/$defs/artifact"}},
+        "caches": {
+          "type": "array",
+          "items": {"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}, "additionalProperties": false}
+        },
+        "params": {"$ref": "#/$defs/config"},
+        "run": {
+          "type": "object",
+          "required": ["path"],
+          "properties": {
+            "path": {"type": "string", "x-form": {"placeholder": "sh"}},
+            "args": {"type": "array", "items": {"type": "string", "x-form": {"widget": "textarea", "rows": 3}}},
+            "dir": {"type": "string"},
+            "user": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "container_limits": {"$ref": "#/$defs/container_limits"}
+      },
+      "additionalProperties": false
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"$ref": "#/$defs/identifier"},
+        "path": {"type": "string"},
+        "optional": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "container_limits": {
+      "type": "object",
+      "properties": {
+        "cpu": {"type": "integer", "minimum": 0},
+        "memory": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "set_pipeline": {
+      "title": "set_pipeline",
+      "type": "object",
+      "required": ["set_pipeline", "file"],
+      "allOf": [{"$ref": "#/$defs/modifiers"}],
+      "properties": {
+        "set_pipeline": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "self"}]},
+        "file": {"type": "string"},
+        "vars": {"$ref": "#/$defs/config"},
+        "var_files": {"type": "array", "items": {"type": "string"}},
+        "instance_vars": {"$ref": "#/$defs/config"},
+        "team": {"$ref": "#/$defs/identifier"}
+      },
+      "unevaluatedProperties": false
+    },
+    "load_var": {
+      "title": "load_var",
+      "type": "object",
+      "required": ["load_var", "file"],
+      "allOf": [{"$ref": "#/$defs/modifiers"}],
+      "properties": {
+        "load_var": {"$ref": "#/$defs/identifier"},
+        "file": {"type": "string"},
+        "format": {"type": "string", "enum": ["json", "yaml", "yml", "trim", "raw"]},
+        "reveal": {"type": "boolean"}
+      },
+      "unevaluatedProperties": false
+    },
+    "in_parallel": {
+      "title": "in_parallel",
+      "type": "object",
+      "required": ["in_parallel"],
+      "allOf": [{"$ref": "#/$defs/modifiers"}],
+      "properties": {
+        "in_parallel": {
+          "oneOf": [
+            {"title": "Steps", "type": "array", "items": {"$ref": "#/$defs/step"}},
+            {
+              "title": "Steps with options",
+              "type": "object",
+              "required": ["steps"],
+              "properties": {
+                "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}},
+                "limit": {"type": "integer", "minimum": 1},
+                "fail_fast": {"type": "boolean"}
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "do": {
+      "title": "do",
+      "type": "object",
+      "required": ["do"],
+      "allOf": [{"$ref": "#/$defs/modifiers"}],
+      "properties": {
+        "do": {"type": "array", "items": {"$ref": "#/$defs/step"}}
+      },
+      "unevaluatedProperties": false
+    },
+    "try": {
+      "title": "try",
+      "type": "object",
+      "required": ["try"],
+      "allOf": [{"$ref": "#/$defs/modifiers"}],
+      "properties": {
+        "try": {"$ref": "#/$defs/step"}
+      },
+      "unevaluatedProperties": false
+    },
+    "group": {
+      "title": "Group",
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "jobs": {"type": "array", "description": "Job names or globs such as deploy-*.", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "var_source": {
+      "title": "Var source",
+      "type": "object",
+      "required": ["name", "type", "config"],
+      "properties": {
+        "name": {"$ref": "#/$defs/identifier"},
+        "type": {"type": "string", "enum": ["vault", "dummy", "ssm", "secretsmanager", "idtoken"]},
+        "config": {"$ref": "#/$defs/config"}
+      },
+      "additionalProperties": false
+    },
+    "display": {
+      "type": "object",
+      "properties": {
+        "background_image": {"type": "string", "format": "uri"},
+        "background_filter": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

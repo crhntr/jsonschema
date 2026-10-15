@@ -1,0 +1,113 @@
+# A small pipeline for a Go service: test every commit, build an image,
+# and deploy it to staging and then production.
+
+slack_alert: &slack_alert
+  put: notify
+  params:
+    text: "$BUILD_PIPELINE_NAME/$BUILD_JOB_NAME failed"
+
+resource_types:
+- name: slack-notification
+  type: registry-image
+  source:
+    repository: cfcommunity/slack-notification-resource
+    tag: latest
+
+resources:
+# The application's source code.
+- name: repo
+  type: git
+  icon: github
+  source:
+    uri: https://github.com/example/app.git
+    branch: main
+
+- name: image
+  type: registry-image
+  icon: docker
+  source:
+    repository: registry.example.com/app
+    username: ((registry.username))
+    password: ((registry.password))
+
+- name: nightly
+  type: time
+  icon: clock-outline
+  source: {interval: 24h}
+
+- name: notify
+  type: slack-notification
+  source:
+    url: ((slack.webhook))
+
+jobs:
+- name: unit
+  plan:
+  - get: repo
+    trigger: true
+  - task: test
+    config:
+      platform: linux
+      image_resource:
+        type: registry-image
+        source: {repository: golang, tag: "1.27"}
+      inputs:
+      - name: repo
+      run:
+        path: sh
+        dir: repo
+        args:
+        - -ec
+        - |
+          go vet ./...
+          go test -race ./...
+  on_failure: *slack_alert
+
+- name: build
+  serial: true
+  plan:
+  - in_parallel:
+    - get: repo
+      trigger: true
+      passed: [unit]
+    - get: nightly
+      trigger: true
+  - task: build-image
+    privileged: true
+    file: repo/ci/build-image.yml
+  - put: image
+    params:
+      image: image/image.tar
+
+- name: deploy-staging
+  plan:
+  - get: image
+    trigger: true
+    passed: [build]
+  - get: repo
+    passed: [build]
+  - task: deploy
+    file: repo/ci/deploy.yml
+    params:
+      ENVIRONMENT: staging
+    timeout: 10m
+  on_failure: *slack_alert
+
+- name: deploy-production
+  plan:
+  - get: image
+    passed: [deploy-staging]
+  - get: repo
+    passed: [deploy-staging]
+  - task: deploy
+    file: repo/ci/deploy.yml
+    params:
+      ENVIRONMENT: production
+    attempts: 2
+  on_failure: *slack_alert
+
+groups:
+- name: ci
+  jobs: [unit, build]
+- name: deploy
+  jobs: [deploy-*]

@@ -234,7 +234,13 @@ JSON at all (a number field that is not a number, JSON that does not parse,
 a map entry with no name or a duplicate name, a required value left blank).
 If decoding succeeds, the JSON is validated against the schema with
 `Schema.Validate`, and each error is shown on the field at its
-`instanceLocation`. An error at a location without a field of its own goes to
+`instanceLocation`. If decoding finds problems, the value that did decode is
+validated too, and what that finds about the other fields is shown with them,
+so a form shows all its problems at once instead of the first kind. Only the
+checks a value makes about itself count then (`type`, `enum`, `const`,
+`pattern`, `format`, lengths, ranges, item and property counts, and
+`uniqueItems`): `required` and the keywords that combine subschemas would
+only repeat what the unreadable fields already say. An error at a location without a field of its own goes to
 the nearest enclosing field, prefixed with its location, for example
 `/address/zip: …` on a JSON text area. For a `oneOf` or `anyOf`, only errors
 from the chosen variant are shown.

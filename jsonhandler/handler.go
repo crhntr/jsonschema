@@ -450,15 +450,20 @@ func (h *Handler) check(sh *shape, s state, live bool) (*Form, jsontext.Value, b
 	if live {
 		errs = slices.DeleteFunc(slices.Clone(errs), func(e fieldError) bool { return e.message == messageRequired })
 	}
-	if len(errs) > 0 || (len(r.errs) > 0 && !live) {
-		f.attach(errs, nil, live)
-		return f, nil, false
-	}
 	value := r.value
 	if value == nil {
 		value = jsontext.Value("null")
 	}
 	value = keepReadOnly(sh, h.initialValue(sh), value)
+	if len(errs) > 0 || (len(r.errs) > 0 && !live) {
+		f.attach(errs, nil, live)
+		// Show what is wrong with the rest too, not only the fields that
+		// could not be read, so a form is not fixed one round at a time.
+		if out := h.Schema.Validate("form", value); !out.Valid {
+			f.attachPartial(out, live)
+		}
+		return f, nil, false
+	}
 	if out := h.Schema.Validate("form", value); !out.Valid {
 		f.attach(nil, &out, live)
 		return f, nil, false
@@ -574,16 +579,13 @@ func (h *Handler) build(sh *shape, s state) *Form {
 
 const defaultMaxFields = 10000
 
-// attach puts decoding errors and validation errors on the fields they
-// are about. A validation error at a location with no field of its own
-// goes to the nearest enclosing field, prefixed with its location. live
-// leaves out errors from the required keyword, which only say a value is
-// missing.
-func (f *Form) attach(errs []fieldError, out *jsonschema.Output, live bool) {
-	f.status = http.StatusUnprocessableEntity
-	byPath := map[string]*Field{}
-	byPointer := map[string]*Field{}
-	choices := map[string]*Field{}
+// report is one problem the validator found, at a JSON Pointer.
+type report struct{ pointer, keyword, message string }
+
+// index maps the form's fields by form path and by JSON Pointer, and picks
+// out the choices.
+func (f *Form) index() (byPath, byPointer, choices map[string]*Field) {
+	byPath, byPointer, choices = map[string]*Field{}, map[string]*Field{}, map[string]*Field{}
 	// A choice and its chosen variant share a location; the variant comes
 	// later, so its control gets the errors.
 	for _, field := range f.fields(func(*Field) bool { return true }) {
@@ -593,6 +595,17 @@ func (f *Form) attach(errs []fieldError, out *jsonschema.Output, live bool) {
 			choices[field.Pointer] = field
 		}
 	}
+	return byPath, byPointer, choices
+}
+
+// attach puts decoding errors and validation errors on the fields they
+// are about. A validation error at a location with no field of its own
+// goes to the nearest enclosing field, prefixed with its location. live
+// leaves out errors from the required keyword, which only say a value is
+// missing.
+func (f *Form) attach(errs []fieldError, out *jsonschema.Output, live bool) {
+	f.status = http.StatusUnprocessableEntity
+	byPath, byPointer, choices := f.index()
 	for _, e := range errs {
 		field, ok := byPath[e.path]
 		switch {
@@ -606,12 +619,40 @@ func (f *Form) attach(errs []fieldError, out *jsonschema.Output, live bool) {
 			field.Errors = appendNew(field.Errors, e.message)
 		}
 	}
-	if out == nil {
-		return
+	if out != nil {
+		f.attachOutput(*out, live, byPointer, choices, nil)
 	}
-	type report struct{ pointer, keyword, message string }
+}
+
+// valueKeywords are the keywords that judge a value on its own: what they
+// report stays true whatever else is wrong with the form.
+var valueKeywords = map[string]bool{
+	"type": true, "enum": true, "const": true, "format": true, "pattern": true,
+	"minLength": true, "maxLength": true,
+	"minimum": true, "maximum": true, "exclusiveMinimum": true, "exclusiveMaximum": true, "multipleOf": true,
+	"minItems": true, "maxItems": true, "uniqueItems": true,
+	"minProperties": true, "maxProperties": true,
+}
+
+// attachPartial adds what validating a partly decoded value found, for a
+// form that already has problems of the kind found while reading it. It
+// keeps only what is about a field with no problem yet, and only
+// keywords that judge a value on its own: the value is missing the parts
+// that failed to read, so "required" and the keywords that combine
+// subschemas would only repeat or distort what is already shown.
+func (f *Form) attachPartial(out jsonschema.Output, live bool) {
+	_, byPointer, choices := f.index()
+	f.attachOutput(out, live, byPointer, choices, func(r report) bool {
+		field, ok := byPointer[r.pointer]
+		return ok && valueKeywords[r.keyword] && len(field.Errors) == 0
+	})
+}
+
+// attachOutput puts the validator's errors on the fields they are about,
+// or on the nearest enclosing field. keep, if set, chooses which to show.
+func (f *Form) attachOutput(out jsonschema.Output, live bool, byPointer, choices map[string]*Field, keep func(report) bool) {
 	var reports []report
-	collect(*out, choices, func(pointer, keyword, message string) {
+	collect(out, choices, func(pointer, keyword, message string) {
 		reports = append(reports, report{pointer, keyword, message})
 	})
 	// A property in a failing subschema does not count as evaluated, so
@@ -631,6 +672,9 @@ func (f *Form) attach(errs []fieldError, out *jsonschema.Output, live bool) {
 			continue
 		}
 		if live && (keyword == "required" || keyword == "dependentRequired") {
+			continue
+		}
+		if keep != nil && !keep(r) {
 			continue
 		}
 		for at := pointer; ; at, _ = splitLast(at) {

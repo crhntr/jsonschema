@@ -1,0 +1,261 @@
+{{- /* Frame */ -}}
+
+{{define "head" -}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.File}} · pipeline editor</title>
+<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"413","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+<link rel="stylesheet" href="https://unpkg.com/open-props@1.7.23/open-props.min.css" integrity="sha384-fsyUJwnN3qLArJUL5oaEYS3/WnhCmI4K5x+oB8wFigOMTJaIvys56ozH3+nE/qcf" crossorigin="anonymous">
+<link rel="stylesheet" href="https://unpkg.com/open-props@1.7.23/normalize.min.css" integrity="sha384-sddBOogFG2pe9DuB3k3ekS4as3O4oEzrarCR1HkYLY5Z/7pFYJt54z8VD1yGM7JF" crossorigin="anonymous">
+<link rel="stylesheet" href="/jsonform.css">
+<script src="https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js" integrity="sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg" crossorigin="anonymous" defer></script>
+<style>
+  :root { --ok: var(--green-7); --bad: #ed4b35; --graph-bg: #3d3c3c; --graph-job: #5a5a5a; --graph-resource: #1e1d1d; --graph-edge: #8b8b8b; }
+  body { display: grid; justify-items: center; padding: var(--size-5) var(--size-4); }
+  .page { display: grid; align-content: start; gap: var(--size-5); inline-size: min(100%, 76rem); }
+  .page > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--size-3); padding-block-end: var(--size-3); border-block-end: var(--border-size-1) solid var(--surface-3); }
+  .page > header nav { display: flex; flex-wrap: wrap; gap: var(--size-4); align-items: baseline; }
+  .page > header nav a[aria-current="page"] { font-weight: var(--font-weight-7); text-decoration: underline; }
+  .brand { font-size: var(--font-size-4); font-weight: var(--font-weight-7); text-decoration: none; color: inherit; }
+  .brand small { font-weight: var(--font-weight-4); color: var(--text-2); font-family: var(--font-mono); font-size: var(--font-size-1); }
+  main { display: grid; align-content: start; gap: var(--size-5); }
+  main > * { margin: 0; }
+  h1 { font-size: var(--font-size-5); max-inline-size: none; }
+  h2 { font-size: var(--font-size-3); max-inline-size: none; }
+  .status { display: inline-flex; gap: var(--size-2); align-items: center; padding: var(--size-1) var(--size-3); border-radius: var(--radius-round); color: white; background: var(--ok); font-size: var(--font-size-1); text-decoration: none; }
+  .status[data-problems] { background: var(--bad); }
+  .note { color: var(--text-2); font-size: var(--font-size-1); max-inline-size: none; }
+  .tabs { display: flex; flex-wrap: wrap; gap: var(--size-2); padding: 0; margin: 0; list-style: none; }
+  .tabs a { display: block; padding: var(--size-1) var(--size-3); border-radius: var(--radius-2); background: var(--surface-2); text-decoration: none; }
+  .tabs a[aria-current="page"] { background: var(--graph-bg); color: white; }
+  .graph { overflow-x: auto; border-radius: var(--radius-3); background: var(--graph-bg); padding: var(--size-2); }
+  .graph svg { display: block; font-family: var(--font-sans); }
+  .graph .edge { fill: none; stroke: var(--graph-edge); stroke-width: 2; }
+  .graph .edge:not([data-trigger]) { stroke-dasharray: 5 4; }
+  .graph rect { rx: 4; }
+  .graph .job rect { fill: var(--graph-job); }
+  .graph .resource rect { fill: var(--graph-resource); }
+  .graph [data-invalid] rect { fill: var(--bad); }
+  .graph a:hover rect, .graph a:focus rect { stroke: white; stroke-width: 2; }
+  .graph text { fill: white; font-size: 13px; dominant-baseline: central; }
+  .problems { display: grid; gap: var(--size-2); padding: 0; margin: 0; list-style: none; }
+  .problems li { display: grid; grid-template-columns: 14rem 1fr; gap: var(--size-3); padding: var(--size-2) var(--size-3); border-inline-start: var(--border-size-3) solid var(--bad); background: var(--surface-2); max-inline-size: none; }
+  .problems a { font-family: var(--font-mono); font-size: var(--font-size-0); }
+  .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--size-4); }
+  .lists section { display: grid; align-content: start; gap: var(--size-2); }
+  .lists ul { padding: 0; margin: 0; list-style: none; display: grid; gap: var(--size-1); }
+  .lists li { display: flex; justify-content: space-between; gap: var(--size-2); max-inline-size: none; }
+  .lists .line { color: var(--text-2); font-family: var(--font-mono); font-size: var(--font-size-0); }
+  .lists [data-invalid] a { color: var(--bad); font-weight: var(--font-weight-6); }
+  .split { display: grid; grid-template-columns: minmax(0, 3fr) minmax(16rem, 2fr); gap: var(--size-5); align-items: start; }
+  @media (max-width: 60rem) { .split { grid-template-columns: 1fr; } }
+  pre.yaml { margin: 0; padding: var(--size-3); border-radius: var(--radius-2); background: var(--surface-2); overflow-x: auto; font-size: var(--font-size-0); max-inline-size: none; }
+  .source { margin: 0; padding: var(--size-2) 0; border-radius: var(--radius-2); background: var(--surface-2); font-family: var(--font-mono); font-size: var(--font-size-0); overflow-x: auto; }
+  .source div { display: grid; grid-template-columns: 4ch 1fr; gap: var(--size-3); padding-inline: var(--size-3); white-space: pre; }
+  .source div:target { background: var(--yellow-2); }
+  .source div[data-problem] { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+  .source .n { color: var(--text-2); text-align: end; user-select: none; }
+  .source .flag { grid-column: 2; color: var(--bad); white-space: normal; font-family: var(--font-sans); }
+  textarea.yaml { inline-size: 100%; min-block-size: 30rem; font-family: var(--font-mono); font-size: var(--font-size-0); }
+  .actions { display: flex; gap: var(--size-3); align-items: center; flex-wrap: wrap; }
+  .danger { color: var(--bad); }
+</style>
+</head>
+<body>
+<div class="page">
+<header>
+<a class="brand" href="/">Pipeline editor <small>{{.File}}</small></a>
+<nav aria-label="Sections">
+<a href="/"{{if eq .Page "overview"}} aria-current="page"{{end}}>Overview</a>
+<a href="/yaml"{{if eq .Page "yaml"}} aria-current="page"{{end}}>YAML</a>
+<a href="/pipeline.yml">Download</a>
+<a class="status" href="/#problems"{{if .Problems}} data-problems{{end}}>{{if .Problems}}{{.Problems}} problem{{if ne .Problems 1}}s{{end}}{{else}}valid{{end}}</a>
+</nav>
+</header>
+{{- if not .Write}}
+<p class="note">Changes stay in memory. Download the YAML, or restart with <code>-write</code> to save to {{.File}}.</p>
+{{- end}}
+<main>
+{{- end}}
+
+{{define "foot" -}}
+</main>
+</div>
+</body>
+</html>
+{{- end}}
+
+{{define "error-page" -}}
+{{template "head" .Layout}}
+<h1>{{.Message}}</h1>
+<p><a href="/">Back to the overview</a></p>
+{{template "foot"}}
+{{- end}}
+
+{{define "problem-list" -}}
+<ul class="problems">
+{{- range .}}
+<li><a href="{{.Href}}">{{.Where}}</a> <span>{{.Message}}</span></li>
+{{- end}}
+</ul>
+{{- end}}
+
+{{- /* Overview */ -}}
+
+{{define "GET /{$} Overview(form)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}
+{{- with .Result}}
+{{template "head" .Layout}}
+<section aria-labelledby="graph-heading">
+<h1 id="graph-heading">Pipeline</h1>
+{{- with .Groups}}
+<ul class="tabs" aria-label="Groups">
+<li><a href="/"{{if not $.Result.Group}} aria-current="page"{{end}}>all jobs</a></li>
+{{- range .}}
+<li><a href="/?group={{.Name}}"{{if eq .Name $.Result.Group}} aria-current="page"{{end}}>{{.Name}}</a></li>
+{{- end}}
+</ul>
+{{- end}}
+</section>
+<div class="graph">
+<svg width="{{.Graph.Width}}" height="{{.Graph.Height}}" viewBox="0 0 {{.Graph.Width}} {{.Graph.Height}}" role="img" aria-label="Jobs and the resources that flow between them">
+{{- range .Graph.Edges}}
+<path class="edge" d="{{.Path}}"{{if .Trigger}} data-trigger{{end}}><title>{{.Resource}}{{if not .Trigger}} (no trigger){{end}}</title></path>
+{{- end}}
+{{- range .Graph.Nodes}}
+<a href="/{{.Kind}}/{{.Name}}" class="{{if eq (print .Kind) "jobs"}}job{{else}}resource{{end}}"{{if index $.Result.Invalid .ID}} data-invalid{{end}}>
+<rect x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}"></rect>
+<text x="{{.X}}" y="{{.Y}}" dx="12" dy="17">{{.Name}}</text>
+</a>
+{{- end}}
+</svg>
+</div>
+{{- with .Problems}}
+<section id="problems" aria-labelledby="problems-heading">
+<h2 id="problems-heading">Problems</h2>
+{{template "problem-list" .}}
+</section>
+{{- end}}
+<div class="lists">
+{{- range .Lists}}
+<section>
+<h2>{{.Title}}</h2>
+<ul>
+{{- range .Items}}
+<li{{if .Problems}} data-invalid{{end}}><a href="{{.Href}}">{{with .Name}}{{.}}{{else}}(unnamed){{end}}</a><span class="line">line {{.Line}}</span></li>
+{{- end}}
+</ul>
+<p><a href="/new/{{.Kind}}">Add</a></p>
+</section>
+{{- end}}
+</div>
+{{template "foot"}}
+{{- end}}
+{{- end}}
+{{- end}}
+
+{{- /* One job, resource or resource type */ -}}
+
+{{define "section-page" -}}
+{{template "head" .Layout}}
+<h1>{{.Heading}}</h1>
+<div class="split">
+<div>
+{{.Form}}
+</div>
+<aside>
+{{- with .Problems}}
+<h2>Problems</h2>
+{{template "problem-list" .}}
+{{- end}}
+{{- if not .New}}
+<h2>YAML</h2>
+<p class="note">From line {{.Line}} of {{.File}}. Saving rewrites only this part of the file.</p>
+<pre class="yaml"><code>{{.YAML}}</code></pre>
+<form method="post" action="/{{.Kind}}/{{.Name}}/delete" class="actions">
+<button class="danger">Delete {{.Name}}</button>
+</form>
+{{- end}}
+</aside>
+</div>
+{{template "foot"}}
+{{- end}}
+
+{{- /* A post of a form: after a save, go to the saved item; otherwise
+       answer htmx with the form alone, and a browser with the page. */ -}}
+{{define "section-response" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}
+{{- else if .Result.Location}}{{if .HXRequest}}{{.HXRedirect .Result.Location}}{{else}}{{.RedirectSeeOther .Result.Location}}{{end}}
+{{- else if .HXRequest}}{{.Result.Form}}
+{{- else}}{{template "section-page" .Result.SectionPage}}
+{{- end}}
+{{- end}}
+
+{{define "GET /new/{kind} NewSection(ctx, kind)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "section-page" .Result}}{{end}}
+{{- end}}
+
+{{define "POST /new/{kind}/form SubmitNewSection(ctx, kind, form)" -}}{{template "section-response" .}}{{- end}}
+
+{{define "POST /new/{kind}/form/validate ValidateNewSection(ctx, kind, form)" -}}{{.Result}}{{- end}}
+
+{{define "GET /{kind}/{name} Section(ctx, kind, name)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "section-page" .Result}}{{end}}
+{{- end}}
+
+{{define "POST /{kind}/{name}/form SubmitSection(ctx, kind, name, form)" -}}{{template "section-response" .}}{{- end}}
+
+{{define "POST /{kind}/{name}/form/validate ValidateSection(ctx, kind, name, form)" -}}{{.Result}}{{- end}}
+
+{{define "POST /{kind}/{name}/delete DeleteSection(kind, name)" -}}
+{{- /* A method returning only an error hands it over as .Result. */ -}}
+{{- with .Result}}{{$.StatusCode (status .)}}{{template "error-page" (errorPage .)}}{{else}}{{.RedirectSeeOther "/"}}{{end}}
+{{- end}}
+
+{{- /* The whole file */ -}}
+
+{{define "source-check" -}}
+<div id="source-check" aria-live="polite">
+{{- if .ParseError}}
+<ul class="problems"><li><span>YAML</span> <span>{{.ParseError}}</span></li></ul>
+{{- else if .Problems}}
+{{template "problem-list" .Problems}}
+{{- else}}
+<p class="note">No problems.</p>
+{{- end}}
+</div>
+{{- end}}
+
+{{define "source-page" -}}
+{{template "head" .Layout}}
+<h1>YAML</h1>
+<div class="split">
+<div class="source" role="region" aria-label="{{.File}}">
+{{- range .Lines}}
+<div id="L{{.N}}"{{if .Problems}} data-problem{{end}}><span class="n">{{.N}}</span><span>{{.Text}}</span>
+{{- range .Problems}}<span class="flag">{{.}}</span>{{end}}</div>
+{{- end}}
+</div>
+<form method="post" action="/yaml">
+<label for="yaml"><h2>Edit</h2></label>
+<p class="note">Problems are checked as you type. Saving writes exactly this text.</p>
+<textarea class="yaml" id="yaml" name="yaml" spellcheck="false" hx-post="/yaml/check" hx-trigger="input changed delay:400ms" hx-target="#source-check" hx-swap="outerHTML">{{.Text}}</textarea>
+{{template "source-check" .Check}}
+<div class="actions"><button>Save</button></div>
+</form>
+</div>
+{{template "foot"}}
+{{- end}}
+
+{{define "GET /yaml Source()" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{template "source-page" .Result}}{{end}}
+{{- end}}
+
+{{define "POST /yaml SaveSource(form)" -}}
+{{- if .Err}}{{.StatusCode (status .Err)}}{{template "error-page" (errorPage .Err)}}{{else}}{{.StatusCode .Result.StatusCode}}{{template "source-page" .Result}}{{end}}
+{{- end}}
+
+{{define "POST /yaml/check CheckSource(form)" -}}{{template "source-check" .Result}}{{- end}}

@@ -101,9 +101,14 @@ answers to `localhost` or an IP address and refuses cross-origin posts.
 [`jsonhandler`](jsonhandler/README.md) renders a hypermedia form for any
 schema and decodes the submission to JSON that matches it. It is what
 `jsch form` uses, and it documents its endpoints and markup for use in other
-web applications. [`examples/issues`](examples/issues) is a small issue
-tracker built on it, with Go types from `jsch generate` and queries from
-sqlc.
+web applications. Two examples are built on it:
+
+- [`examples/issues`](examples/issues), a small issue tracker with Go types
+  from `jsch generate` and queries from sqlc.
+- [`examples/concourse`](examples/concourse), an editor for Concourse
+  pipeline YAML: it checks the file against a pipeline schema with problems
+  shown on their lines, draws the pipeline, and edits jobs and resources
+  through forms that rewrite only the lines they change.
 
 ## Documentation
 

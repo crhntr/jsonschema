@@ -606,6 +606,7 @@ produces. A malformed `x-form` is ignored.
 | `class` | extra classes on the field element |
 | `collapsed` | `true` starts an optional value collapsed; `false` always shows it, even in a wide object |
 | `rows` | rows of a textarea or JSON field |
+| `messages` | the message to show instead of the validator's when a keyword fails on this field, keyed by keyword: `{"pattern": "Use a duration such as 30s."}`; `required` covers a required field left blank |
 
 `schema.json` (served by `MetaSchema()`) is the 2020-12 meta-schema with
 `x-form` added, so a form for it edits schemas, annotations included.

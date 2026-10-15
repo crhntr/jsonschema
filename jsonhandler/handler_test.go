@@ -54,6 +54,18 @@ func TestSubmitForm_errors(t *testing.T) {
 			want:   map[string][]string{"/t": {`string does not match pattern "^[0-9]+s$"`}},
 		},
 		{
+			name:   "a custom message for a keyword",
+			schema: `{"type":"object","properties":{"t":{"type":"string","pattern":"^[0-9]+s$","x-form":{"messages":{"pattern":"Use seconds, like 30s."}}}}}`,
+			form:   url.Values{"@present": {"1"}, "$/t": {"soon"}},
+			want:   map[string][]string{"/t": {"Use seconds, like 30s."}},
+		},
+		{
+			name:   "a custom message for a required value left blank",
+			schema: `{"type":"object","required":["n"],"properties":{"n":{"type":"integer","x-form":{"messages":{"required":"Say how many."}}}}}`,
+			form:   url.Values{"@present": {"1"}, "$/n": {""}},
+			want:   map[string][]string{"/n": {"Say how many."}},
+		},
+		{
 			name:   "missing required number",
 			schema: `{"type":"object","required":["n"],"properties":{"n":{"type":"number"}}}`,
 			form:   url.Values{"$/n": {""}},

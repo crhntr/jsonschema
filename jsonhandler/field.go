@@ -124,6 +124,17 @@ type Field struct {
 	form        *Form
 	// insideReadOnly reports that ReadOnly comes from an enclosing value.
 	insideReadOnly bool
+	// messages are the schema's own wording for failing keywords.
+	messages map[string]string
+}
+
+// message returns the schema's message for a failing keyword (from the
+// x-form "messages" annotation), or fallback.
+func (f *Field) message(keyword, fallback string) string {
+	if m, ok := f.messages[keyword]; ok && m != "" {
+		return m
+	}
+	return fallback
 }
 
 // ReadOnlyReason says why the field cannot be changed. It is empty for a
@@ -217,6 +228,7 @@ func (b *builder) build(sh *shape, at site, depth int) *Field {
 		format:         sh.format,
 		form:           b.form,
 		insideReadOnly: at.readOnly,
+		messages:       sh.ui.Messages,
 	}
 	f.Kind = sh.kind()
 	if depth > maxDepth || (depth == 0 && b.jsonRoot) {

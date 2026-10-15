@@ -113,7 +113,38 @@ you type off.
 
 **Use the handler directly.** `Handler.SubmitForm` and `Handler.Validate` take
 `url.Values`, so your own handler can call them and render the result however
-you like. `Form.Valid` and `Form.Value` hold the outcome.
+you like. `Form.Valid` and `Form.Value` hold the outcome, `Form.HTML()`
+renders the form (or the result, for a valid submission) with the package's
+templates, and `Form.ValidationHTML()` renders the answer to validation as you
+type. This is the shape of an edit page that saves a record and redirects:
+
+```go
+func (s *Server) SubmitSettings(w http.ResponseWriter, r *http.Request) {
+	h := s.settingsForm.WithValue(s.store.Settings(r.Context())) // per request
+	f, err := h.SubmitForm(r.Context(), r.PostForm)
+	// handle err
+	if f.Valid {
+		if err := s.store.SaveSettings(r.Context(), f.Value); err == nil {
+			http.Redirect(w, r, "/settings", http.StatusSeeOther)
+			return
+		}
+		f.Reject(errors.New("The settings could not be saved. Try again."))
+	}
+	html, err := f.WithActions("/settings/form", "/settings/form/validate").HTML()
+	// handle err; write html into the page with status f.StatusCode()
+}
+```
+
+A `Handler` is configuration with no state of its own, so it is safe to share
+between requests and to copy; `WithValue` returns a copy that starts from a
+different value. `Reject` turns a valid submission back into the form with a
+message above the fields, for when saving fails after validation passed.
+`OnSubmit` does the same job for the routes `TemplateRoutes` registers.
+
+**Edit one part of a schema.** `NewAt(ctx, schema, "/$defs/job")` returns a
+handler for the definition at that JSON Pointer, with its references resolved
+against the whole document, for a page that edits one piece of a larger
+value.
 
 Without htmx the form still works: buttons submit the whole form to `POST
 /form`, the server renders the form or the result, and the browser shows it as

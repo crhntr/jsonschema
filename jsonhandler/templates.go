@@ -30,6 +30,32 @@ func Templates() (*template.Template, error) {
 	}).ParseFS(templateFiles, "*.gohtml")
 }
 
+// HTML renders the form with the package's templates: the form, or the
+// result partial for a valid submission. Call [Form.WithActions] first.
+// It is for pages that place the form themselves without changing its
+// markup; to change the markup, parse your own templates into
+// [Templates] instead.
+func (f *Form) HTML() (template.HTML, error) {
+	if f.Valid {
+		return execute("jsonhandler-result", f)
+	}
+	return execute("jsonhandler-form", f)
+}
+
+// ValidationHTML renders the response to validation as you type: each
+// error list, marked to replace the one on the page by id.
+func (f *Form) ValidationHTML() (template.HTML, error) {
+	return execute("jsonhandler-validation", f)
+}
+
+func execute(name string, f *Form) (template.HTML, error) {
+	var b strings.Builder
+	if err := templates.ExecuteTemplate(&b, name, f); err != nil {
+		return "", err
+	}
+	return template.HTML(b.String()), nil
+}
+
 // describedBy lists the ids of a field's description and errors, for
 // aria-describedby.
 func describedBy(f *Field) string {

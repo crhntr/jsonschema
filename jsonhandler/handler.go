@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/crhntr/jsonschema"
+	"github.com/crhntr/jsonschema/jsonptr"
 	"github.com/crhntr/jsonschema/internal/metaschema"
 )
 
@@ -19,6 +20,10 @@ import (
 // Handler serves a form for editing a JSON value that Schema describes.
 // Register its routes with [TemplateRoutes]; README.md describes the
 // endpoints and the markup they render.
+//
+// A Handler is configuration and holds no state of its own, so it is safe
+// to copy, and to use from many requests at once. To edit a different
+// value per request, use [Handler.WithValue].
 type Handler struct {
 	// Schema is the resolved schema the value must match.
 	Schema *jsonschema.Schema
@@ -55,6 +60,14 @@ type Handler struct {
 // in; nothing is fetched over the network. To use other references,
 // resolve the schema with a [jsonschema.Resolver] and set Handler.Schema.
 func New(ctx context.Context, schema []byte) (*Handler, error) {
+	return NewAt(ctx, schema, "")
+}
+
+// NewAt returns a Handler for the part of a schema document at a JSON
+// Pointer, such as "/$defs/job", for a form that edits one piece of a
+// larger value. References inside that part resolve against the whole
+// document, as they do for New.
+func NewAt(ctx context.Context, schema []byte, pointer string) (*Handler, error) {
 	r := jsonschema.NewResolver(&http.Client{Transport: offline{}})
 	if err := metaschema.Seed(r); err != nil {
 		return nil, err
@@ -67,7 +80,19 @@ func New(ctx context.Context, schema []byte) (*Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve schema: %w", err)
 	}
-	return &Handler{Schema: s}, nil
+	if pointer == "" {
+		return &Handler{Schema: s}, nil
+	}
+	// The walk keeps identity, so the subschema found is the linked one.
+	_, v, err := jsonptr.FindValue(jsonptr.Pointer(pointer), s)
+	if err != nil {
+		return nil, fmt.Errorf("find %s in the schema: %w", pointer, err)
+	}
+	sub, ok := v.(*jsonschema.Schema)
+	if !ok {
+		return nil, fmt.Errorf("%s is not a schema", pointer)
+	}
+	return &Handler{Schema: sub}, nil
 }
 
 type offline struct{}
@@ -141,6 +166,25 @@ type Control struct{ Name, Value string }
 // page rendering the form itself passes wherever it registered the routes.
 func (f *Form) WithActions(action, validate string) *Form {
 	f.Action, f.ValidateAction = action, validate
+	return f
+}
+
+// WithValue returns a copy of h that starts from v (and keeps readOnly
+// locations as v has them); h is unchanged.
+func (h *Handler) WithValue(v jsontext.Value) *Handler {
+	c := *h
+	c.Value = v
+	return &c
+}
+
+// Reject turns a valid submission back into the form, with err shown above
+// the fields and status 422, for an app that saves the value itself after
+// SubmitForm and finds it cannot. The fields keep what was submitted. err's
+// text is shown to the person filling in the form. It returns f.
+func (f *Form) Reject(err error) *Form {
+	f.Valid, f.Value, f.Message, f.State, f.writeOnly = false, nil, "", nil, nil
+	f.Errors = append(f.Errors, err.Error())
+	f.status = http.StatusUnprocessableEntity
 	return f
 }
 

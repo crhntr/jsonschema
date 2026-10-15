@@ -163,7 +163,7 @@ member. `properties` and `required` are combined.
 | Schema | Kind | Control |
 |---|---|---|
 | `const` | `const` | the value, read-only |
-| `enum` | `select` (or `radio`) | one option per value, plus a blank one |
+| `enum` | `select` (or `radio`) | one option per value, plus a blank one when the value is optional: empty in a select, labelled "No answer" in a radio group (or with the placeholder) |
 | `oneOf` / `anyOf` | `choice` | a variant picker and the chosen variant |
 | `type` with several types | `choice` | one variant per type |
 | `type: "string"` | `text` | `<input>`, typed by `format` (see below) |
@@ -638,7 +638,7 @@ produces. A malformed `x-form` is ignored.
 |---|---|
 | `widget` | `textarea`, `json`, `radio`, `select` (booleans: true/false/unset), `list` (an array of enum values as a list instead of checkboxes), or an input type: `password`, `email`, `url`, `tel`, `search`, `color`, `date`, `time`, `datetime-local`, `month`, `week`, `range`, `hidden` |
 | `label` | the label, instead of `title` or the property name |
-| `placeholder` | the placeholder |
+| `placeholder` | the placeholder, or the label of the blank option of an optional select or radio group |
 | `order` | property names to show first; the rest follow in schema order |
 | `class` | extra classes on the field element |
 | `collapsed` | `true` starts an optional value collapsed; `false` always shows it, even in a wide object |

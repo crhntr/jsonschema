@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"errors"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -270,6 +271,51 @@ func TestRoot_notMarkedRequired(t *testing.T) {
 	}
 	if n := strings.Count(string(html), `class="jsonform-required"`); n != 1 {
 		t.Errorf("%d required marks in the form, want one (for a)", n)
+	}
+}
+
+// A submission with several problems shows them all at once, whichever
+// kind they are: a field left blank or not a number is found while
+// reading the form, the rest by validating the schema. Showing only the
+// first kind makes people fix a form one round at a time.
+func TestSubmitForm_allErrorsAtOnce(t *testing.T) {
+	h := newHandler(t, `{"type":"object","required":["name","tags","size"],"properties":{
+		"name": {"type":"string"},
+		"size": {"type":"number","minimum":1},
+		"tags": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["a","b"]}},
+		"code": {"type":"string","pattern":"^[0-9]+$"},
+		"age":  {"type":"integer","minimum":0}}}`)
+	for name, tc := range map[string]struct {
+		form url.Values
+		want map[string][]string
+	}{
+		"blank and a short list": {
+			url.Values{"@present": {"1"}, "$/name": {"n"}, "$/size": {""}, "$/code": {"x1"}},
+			map[string][]string{"/size": {"required"}, "/tags": {"array has 0 items, minItems 1"}, "/code": {`string does not match pattern "^[0-9]+$"`}},
+		},
+		"not a number and a bad pattern": {
+			url.Values{"@present": {"1"}, "$/name": {"n"}, "$/size": {"abc"}, "$/tags": {"a"}, "$/code": {"x1"}},
+			map[string][]string{"/size": {messageNumber}, "/code": {`string does not match pattern "^[0-9]+$"`}},
+		},
+		"only reading problems": {
+			url.Values{"@present": {"1"}, "$/name": {"n"}, "$/size": {""}, "$/tags": {"a"}, "$/code": {"1"}},
+			map[string][]string{"/size": {"required"}},
+		},
+	} {
+		f, err := h.SubmitForm(context.Background(), tc.form)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := fieldErrors(f.Root)
+		if !maps.EqualFunc(got, tc.want, slices.Equal) {
+			t.Errorf("%s: field errors = %q, want %q", name, got, tc.want)
+		}
+		if len(f.Errors) != 0 {
+			t.Errorf("%s: form errors = %q, want none", name, f.Errors)
+		}
+		if f.Valid || f.StatusCode() != http.StatusUnprocessableEntity {
+			t.Errorf("%s: valid %v, status %d", name, f.Valid, f.StatusCode())
+		}
 	}
 }
 

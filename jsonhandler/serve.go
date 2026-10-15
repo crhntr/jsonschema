@@ -1,7 +1,10 @@
 package jsonhandler
 
 import (
+	"context"
 	"encoding/json/jsontext"
+	"fmt"
+	"html/template"
 	"net/http"
 
 	"github.com/crhntr/jsonschema"
@@ -13,12 +16,26 @@ type Options struct {
 	// Action is where the form posts. It defaults to the request's own URL,
 	// so a page that serves the form and receives its post is one handler.
 	Action string
+	// ValidateAction is where the form posts its state as it is typed, for
+	// the handler that answers with [ValidateHTML]. Empty turns validation
+	// as you type off.
+	ValidateAction string
 	// ID, SubmitLabel, Outline, NoJSON, NoWizard and MaxFields are those of
 	// [Handler].
 	ID, SubmitLabel  string
 	Outline          bool
 	NoJSON, NoWizard bool
 	MaxFields        int
+}
+
+func (o *Options) handler(schema *jsonschema.Schema, initial jsontext.Value) *Handler {
+	if o == nil {
+		o = &Options{}
+	}
+	return &Handler{
+		Schema: schema, Value: initial, ID: o.ID, SubmitLabel: o.SubmitLabel,
+		Outline: o.Outline, NoJSON: o.NoJSON, NoWizard: o.NoWizard, MaxFields: o.MaxFields,
+	}
 }
 
 // Handle is the main entry point: it answers one request for a form. All
@@ -33,13 +50,7 @@ func Handle(r *http.Request, schema *jsonschema.Schema, initial jsontext.Value, 
 	if schema == nil {
 		return nil, errNoSchema
 	}
-	if o == nil {
-		o = &Options{}
-	}
-	h := &Handler{
-		Schema: schema, Value: initial, ID: o.ID, SubmitLabel: o.SubmitLabel,
-		Outline: o.Outline, NoJSON: o.NoJSON, NoWizard: o.NoWizard, MaxFields: o.MaxFields,
-	}
+	h := o.handler(schema, initial)
 	var f *Form
 	var err error
 	if r.Method == http.MethodPost {
@@ -53,11 +64,14 @@ func Handle(r *http.Request, schema *jsonschema.Schema, initial jsontext.Value, 
 	if err != nil {
 		return nil, err
 	}
-	action := o.Action
+	var action, validate string
+	if o != nil {
+		action, validate = o.Action, o.ValidateAction
+	}
 	if action == "" {
 		action = r.URL.RequestURI()
 	}
-	return f.WithActions(action, ""), nil
+	return f.WithActions(action, validate), nil
 }
 
 // Serve is [Handle] for a handler that writes the response itself, as
@@ -91,4 +105,41 @@ func Serve(w http.ResponseWriter, r *http.Request, schema *jsonschema.Schema, in
 	w.WriteHeader(f.StatusCode())
 	_, err = w.Write([]byte(html))
 	return nil, err
+}
+
+// ValidateHTML answers a request for validation as you type: the post of
+// a form's current state, from a form made with [Handle] whose
+// [Options.ValidateAction] is this request's URL. It returns the error
+// lists, each marked to replace the one on the page by id, to be written as
+// the response.
+func ValidateHTML(r *http.Request, schema *jsonschema.Schema, initial jsontext.Value, o *Options) (template.HTML, error) {
+	if schema == nil {
+		return "", errNoSchema
+	}
+	if err := r.ParseForm(); err != nil {
+		return "", err
+	}
+	f, err := o.handler(schema, initial).Validate(r.Context(), r.PostForm)
+	if err != nil {
+		return "", err
+	}
+	return f.ValidationHTML()
+}
+
+// ParseSchema loads a schema document and resolves its references, for
+// [Handle], [Serve] and [ValidateHTML]. References may point within the
+// document or at the JSON Schema 2020-12 meta-schemas, which are built in;
+// nothing is fetched over the network. Parsing is cheap, but an app whose
+// schemas are data can keep the result by schema.
+func ParseSchema(ctx context.Context, document []byte) (*jsonschema.Schema, error) {
+	r := jsonschema.NewResolver(&http.Client{Transport: offline{}})
+	const uri = "urn:jsonhandler:schema"
+	if _, err := r.Load(uri, document); err != nil {
+		return nil, fmt.Errorf("load schema: %w", err)
+	}
+	s, err := r.Resolve(ctx, uri)
+	if err != nil {
+		return nil, fmt.Errorf("resolve schema: %w", err)
+	}
+	return s, nil
 }

@@ -78,14 +78,9 @@ func New(ctx context.Context, schema []byte) (*Handler, error) {
 // larger value. References inside that part resolve against the whole
 // document, as they do for New.
 func NewAt(ctx context.Context, schema []byte, pointer string) (*Handler, error) {
-	r := jsonschema.NewResolver(&http.Client{Transport: offline{}})
-	const uri = "urn:jsonhandler:schema"
-	if _, err := r.Load(uri, schema); err != nil {
-		return nil, fmt.Errorf("load schema: %w", err)
-	}
-	s, err := r.Resolve(ctx, uri)
+	s, err := ParseSchema(ctx, schema)
 	if err != nil {
-		return nil, fmt.Errorf("resolve schema: %w", err)
+		return nil, err
 	}
 	if pointer == "" {
 		return &Handler{Schema: s}, nil
